@@ -128,7 +128,7 @@ struct GetView: View {
                                 .scaledToFit()
                                 .frame(width: 20, height: 20)
 
-                            Text("をまとめる（x5 消費）")
+                            Text("をまとめる（x0 消費 <テスト中>）")
                                 .font(.headline)
                         }
                     }

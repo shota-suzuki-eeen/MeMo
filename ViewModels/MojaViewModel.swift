@@ -37,7 +37,7 @@ final class MojaViewModel: ObservableObject {
     // MARK: - Constants
 
     /// もじゃ合わせに必要な消費数
-    let fusionCost: Int = 5
+    let fusionCost: Int = 0
 
     /// 6時間
     private let fusionDuration: TimeInterval = 6 * 60 * 60

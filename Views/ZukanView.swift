@@ -17,15 +17,16 @@ struct ZukanView: View {
     @EnvironmentObject private var bgmManager: BGMManager
     @AppStorage("isDeveloperMode") private var isDeveloperMode: Bool = false
 
+    @StateObject private var viewModel = ZukanViewModel()
+    @State private var selectedPetID: String? = nil
+    @State private var currentPage: Int = 0
+
     private var state: AppState? { appStates.first }
 
-    // ✅ pet_011 は未実装のため図鑑表示から除外
-    private var initialPetIDs: [String] {
-        AppState.initialZukanPetIDs.filter { $0 != "pet_011" }
-    }
-    private let columns: [GridItem] = Array(repeating: GridItem(.flexible(), spacing: 10), count: 4)
-
-    @State private var selectedPetID: String? = nil
+    private let columns: [GridItem] = Array(
+        repeating: GridItem(.flexible(), spacing: 10),
+        count: 3
+    )
 
     // ✅ 追加：インタースティシャル（キャラ切替用）
     // 一旦 AdMob 周りを止めるためコメントアウト
@@ -37,12 +38,25 @@ struct ZukanView: View {
 
             VStack(spacing: 14) {
                 if let state {
+                    let slots = viewModel.slotsForPage(state: state, page: currentPage)
+                    let pageCount = viewModel.pageCount(state: state)
+
                     ZukanGrid(
-                        petIDs: initialPetIDs,
-                        ownedIDs: Set(state.ownedPetIDs()),
-                        currentPetID: state.normalizedCurrentPetID,
+                        slots: slots,
                         columns: columns,
+                        currentPage: currentPage,
+                        pageCount: pageCount,
                         selectedPetID: selectedPetID,
+                        onPreviousPage: {
+                            guard currentPage > 0 else { return }
+                            bgmManager.playSE(.push)
+                            currentPage -= 1
+                        },
+                        onNextPage: {
+                            guard currentPage < pageCount - 1 else { return }
+                            bgmManager.playSE(.push)
+                            currentPage += 1
+                        },
                         onSelect: { id in
                             selectedPetID = id
                         }
@@ -83,18 +97,28 @@ struct ZukanView: View {
         .navigationBarTitleDisplayMode(.inline)
         .onAppear {
             guard let state else { return }
+
             state.ensureInitialPetsIfNeeded()
 
             if selectedPetID == nil || selectedPetID == "pet_011" {
+                let initialPetIDs = viewModel.initialPetIDs
                 selectedPetID = initialPetIDs.contains(state.normalizedCurrentPetID)
                     ? state.normalizedCurrentPetID
                     : initialPetIDs.first
             }
 
+            currentPage = viewModel.initialPageIndex(state: state)
+
             updateWidgetSnapshot(state: state, forceReload: true)
 
             // ✅ AdMob のロードは一旦停止
             // interstitial.load()
+        }
+        .onChange(of: state?.normalizedCurrentPetID) { _, _ in
+            guard let state else { return }
+            let pageCount = viewModel.pageCount(state: state)
+            let safePage = min(max(0, viewModel.initialPageIndex(state: state)), max(0, pageCount - 1))
+            currentPage = safePage
         }
     }
 
@@ -111,6 +135,7 @@ struct ZukanView: View {
 
             state.currentPetID = id
             selectedPetID = id
+            currentPage = viewModel.initialPageIndex(state: state)
 
             print("✅ after state.currentPetID:", state.currentPetID)
             print("✅ after state.normalizedCurrentPetID:", state.normalizedCurrentPetID)
@@ -207,29 +232,60 @@ private enum ZukanWidgetBridge {
 private struct ZukanGrid: View {
     @EnvironmentObject private var bgmManager: BGMManager
 
-    let petIDs: [String]
-    let ownedIDs: Set<String>
-    let currentPetID: String
+    let slots: [ZukanPetSlot]
     let columns: [GridItem]
+    let currentPage: Int
+    let pageCount: Int
     let selectedPetID: String?
+    let onPreviousPage: () -> Void
+    let onNextPage: () -> Void
     let onSelect: (String) -> Void
 
     var body: some View {
         VStack(spacing: 10) {
-            LazyVGrid(columns: columns, spacing: 10) {
-                ForEach(petIDs, id: \.self) { id in
-                    let isOwned = ownedIDs.contains(id)
-                    let isCurrent = (currentPetID == id)
+            HStack {
+                Button(action: onPreviousPage) {
+                    Text("<")
+                        .font(.headline.weight(.bold))
+                        .frame(width: 36, height: 36)
+                        .background(.thinMaterial)
+                        .clipShape(Circle())
+                }
+                .buttonStyle(.plain)
+                .disabled(currentPage <= 0)
+                .opacity(currentPage <= 0 ? 0.35 : 1.0)
 
+                Spacer()
+
+                Text("\(currentPage + 1) / \(pageCount)")
+                    .font(.subheadline.weight(.semibold))
+                    .foregroundStyle(.primary)
+
+                Spacer()
+
+                Button(action: onNextPage) {
+                    Text(">")
+                        .font(.headline.weight(.bold))
+                        .frame(width: 36, height: 36)
+                        .background(.thinMaterial)
+                        .clipShape(Circle())
+                }
+                .buttonStyle(.plain)
+                .disabled(currentPage >= pageCount - 1)
+                .opacity(currentPage >= pageCount - 1 ? 0.35 : 1.0)
+            }
+
+            LazyVGrid(columns: columns, spacing: 10) {
+                ForEach(slots) { slot in
                     ZukanCell(
-                        petID: id,
-                        isOwned: isOwned,
-                        isCurrent: isCurrent,
-                        isSelected: (selectedPetID == id),
+                        petID: slot.id,
+                        isOwned: slot.isOwned,
+                        isCurrent: slot.isCurrentPet,
+                        isSelected: (selectedPetID == slot.id),
                         onTap: {
-                            guard isOwned else { return }
+                            guard slot.isOwned else { return }
                             bgmManager.playSE(.push)
-                            onSelect(id)
+                            onSelect(slot.id)
                         }
                     )
                 }

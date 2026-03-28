@@ -14,7 +14,7 @@ struct ZukanPetRow: Identifiable {
     let isCurrentPet: Bool
 }
 
-// ✅ 図鑑グリッド表示用（12マス固定のため）
+// ✅ 図鑑グリッド表示用
 struct ZukanPetSlot: Identifiable, Equatable {
     let id: String
     let name: String
@@ -26,9 +26,14 @@ struct ZukanPetSlot: Identifiable, Equatable {
 @MainActor
 final class ZukanViewModel: ObservableObject {
 
-    /// ✅ 初期実装予定：12体ぶん固定（図鑑の並び順を固定したいのでここで管理）
+    /// ✅ 1ページあたり 3 x 3 = 9マス
+    let pageSize: Int = 9
+
+    /// ✅ pet_011 は未実装のため図鑑表示から除外
     /// - 正本は AppState.initialZukanPetIDs
-    var initialPetIDs: [String] { AppState.initialZukanPetIDs }
+    var initialPetIDs: [String] {
+        AppState.initialZukanPetIDs.filter { $0 != "pet_011" }
+    }
 
     /// 既存：所持キャラ一覧（現状UIで使っているので残す）
     func makePetRows(state: AppState) -> [ZukanPetRow] {
@@ -41,12 +46,12 @@ final class ZukanViewModel: ObservableObject {
         }
     }
 
-    /// ✅ 追加：図鑑グリッド用（12体ぶんを常に返す）
+    /// ✅ 図鑑グリッド用スロットを返す
     /// - 未獲得：CalPet_secret を表示
-    /// - 獲得済み：PetMaster.assetName(for:) を表示（petIDと画像名がズレてもOK）
+    /// - 獲得済み：PetMaster.assetName(for:) を表示
     func makeZukanSlots(state: AppState) -> [ZukanPetSlot] {
         let owned = Set(state.ownedPetIDs())
-        let current = state.currentPetID
+        let current = state.normalizedCurrentPetID
 
         return initialPetIDs.map { id in
             let isOwned = owned.contains(id)
@@ -63,5 +68,43 @@ final class ZukanViewModel: ObservableObject {
                 isCurrentPet: (current == id)
             )
         }
+    }
+
+    /// ✅ 全スロットを 9件ずつに分割して返す
+    func makePagedZukanSlots(state: AppState) -> [[ZukanPetSlot]] {
+        let slots = makeZukanSlots(state: state)
+        guard !slots.isEmpty else { return [[]] }
+
+        return stride(from: 0, to: slots.count, by: pageSize).map { start in
+            let end = min(start + pageSize, slots.count)
+            return Array(slots[start..<end])
+        }
+    }
+
+    /// ✅ 総ページ数を返す
+    func pageCount(state: AppState) -> Int {
+        let count = makeZukanSlots(state: state).count
+        return max(1, Int(ceil(Double(count) / Double(pageSize))))
+    }
+
+    /// ✅ 現在お世話中のキャラが存在するページ番号を返す
+    /// - 見つからない場合は 0
+    func initialPageIndex(state: AppState) -> Int {
+        let currentPetID = state.normalizedCurrentPetID
+
+        guard let currentIndex = initialPetIDs.firstIndex(of: currentPetID) else {
+            return 0
+        }
+
+        return currentIndex / pageSize
+    }
+
+    /// ✅ 指定ページに表示するスロット一覧を返す
+    func slotsForPage(state: AppState, page: Int) -> [ZukanPetSlot] {
+        let pagedSlots = makePagedZukanSlots(state: state)
+        guard !pagedSlots.isEmpty else { return [] }
+
+        let safePage = min(max(0, page), pagedSlots.count - 1)
+        return pagedSlots[safePage]
     }
 }

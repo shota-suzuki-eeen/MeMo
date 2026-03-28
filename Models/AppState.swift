@@ -727,7 +727,7 @@ extension AppState {
 
 // MARK: - Pets
 extension AppState {
-    static let initialZukanPetIDs: [String] = (0..<12).map { String(format: "pet_%03d", $0) }
+    static let initialZukanPetIDs: [String] = (0..<50).map { String(format: "pet_%03d", $0) }
 
     func ownedPetIDs() -> [String] {
         guard let data = ownedPetIDsData,
@@ -786,7 +786,10 @@ extension AppState {
     @discardableResult
     func consumeMoja(_ count: Int = 1) -> Bool {
         let use = max(0, count)
-        guard use > 0 else { return false }
+        // ✅ 0個消費は成功扱い
+        if use == 0 {
+            return true
+        }
         guard mojaCount >= use else { return false }
         mojaCount -= use
         return true
