@@ -35,8 +35,14 @@ final class AppState {
     var friendshipCardCount: Int
 
     // MARK: - ✅ Satisfaction
+    // 既存の他画面互換のため当面は残す
     var satisfactionLevel: Int
     var satisfactionLastUpdatedAt: Date?
+
+    // ✅ ごはん（NEW: フラグ制）
+    var foodFlagAt: Date?
+    var foodLastRaisedAt: Date?
+    var foodNextSpawnAt: Date?
 
     // ✅ お風呂
     var bathFlagAt: Date?
@@ -104,6 +110,10 @@ final class AppState {
         satisfactionLevel: Int = 0,
         satisfactionLastUpdatedAt: Date? = nil,
 
+        foodFlagAt: Date? = nil,
+        foodLastRaisedAt: Date? = nil,
+        foodNextSpawnAt: Date? = nil,
+
         bathFlagAt: Date? = nil,
         bathLastRaisedAt: Date? = nil,
         bathNextSpawnAt: Date? = nil,
@@ -160,6 +170,10 @@ final class AppState {
 
         self.satisfactionLevel = satisfactionLevel
         self.satisfactionLastUpdatedAt = satisfactionLastUpdatedAt
+
+        self.foodFlagAt = foodFlagAt
+        self.foodLastRaisedAt = foodLastRaisedAt
+        self.foodNextSpawnAt = foodNextSpawnAt
 
         self.bathFlagAt = bathFlagAt
         self.bathLastRaisedAt = bathLastRaisedAt
@@ -226,6 +240,10 @@ extension AppState {
         let toiletNextSpawnAt: Date?
         let bathNextSpawnAt: Date?
         let lastDayKey: String
+    }
+
+    var hasFoodFlag: Bool {
+        foodFlagAt != nil
     }
 
     var hasToiletFlag: Bool {
@@ -476,6 +494,7 @@ extension AppState {
 }
 
 // MARK: - ✅ Satisfaction
+// 既存の他画面互換のため残す（Homeでは未使用）
 extension AppState {
     private static let satisfactionDecayUnitSeconds: TimeInterval = 60 * 60
     private static let satisfactionMax: Int = 3
@@ -592,7 +611,6 @@ extension AppState {
         let after = clampSatisfaction(before + 1)
         satisfactionLevel = after
 
-        // ✅ 満足度 0 → 1 へ回復した瞬間を必ず新しい起点にする
         if before == 0 {
             satisfactionLastUpdatedAt = now
         } else if satisfactionLastUpdatedAt == nil {
@@ -620,7 +638,7 @@ extension AppState {
     }
 }
 
-// MARK: - Care (Bath / Toilet)
+// MARK: - Care (Food / Bath / Toilet)
 extension AppState {
     private static let careMinIntervalSeconds: TimeInterval = 60 * 60
     private static let careMaxIntervalSeconds: TimeInterval = 2 * 60 * 60
@@ -628,6 +646,52 @@ extension AppState {
 
     private func randomCareInterval() -> TimeInterval {
         TimeInterval.random(in: AppState.careMinIntervalSeconds...AppState.careMaxIntervalSeconds)
+    }
+
+    // MARK: Food
+
+    func ensureFoodNextSpawnScheduled(now: Date = Date()) {
+        if foodNextSpawnAt == nil {
+            foodNextSpawnAt = now.addingTimeInterval(randomCareInterval())
+        }
+    }
+
+    func canRaiseFoodFlag(now: Date = Date()) -> Bool {
+        if foodFlagAt != nil { return false }
+
+        if let next = foodNextSpawnAt {
+            return now >= next
+        }
+
+        return false
+    }
+
+    @discardableResult
+    func raiseFoodFlag(now: Date = Date()) -> Bool {
+        ensureDailyResetIfNeeded(now: now)
+        ensureFoodNextSpawnScheduled(now: now)
+
+        guard canRaiseFoodFlag(now: now) else { return false }
+
+        foodFlagAt = now
+        foodLastRaisedAt = now
+        return true
+    }
+
+    @discardableResult
+    func raiseFoodFlagIfNeeded(now: Date = Date()) -> Bool {
+        raiseFoodFlag(now: now)
+    }
+
+    @discardableResult
+    func resolveFood(now: Date = Date()) -> Bool {
+        ensureDailyResetIfNeeded(now: now)
+
+        guard foodFlagAt != nil else { return false }
+
+        foodFlagAt = nil
+        foodNextSpawnAt = now.addingTimeInterval(randomCareInterval())
+        return true
     }
 
     // MARK: Bath
@@ -786,7 +850,6 @@ extension AppState {
     @discardableResult
     func consumeMoja(_ count: Int = 1) -> Bool {
         let use = max(0, count)
-        // ✅ 0個消費は成功扱い
         if use == 0 {
             return true
         }

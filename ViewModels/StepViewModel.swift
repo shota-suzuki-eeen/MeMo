@@ -44,7 +44,6 @@ final class StepViewModel: ObservableObject {
 
         weekTotalSteps = await hk.fetchWeekStepTotal(now: now)
 
-        // ✅ 今日の実歩数を正として、未受取ぶんの bank を再同期する
         state.stepEnjoyDailyRewardStepBank = StepRewardPolicy.bank(
             totalWalkedSteps: dayTotalSteps,
             claimedToday: state.stepEnjoyDailyRewardCount
@@ -59,14 +58,15 @@ final class StepViewModel: ObservableObject {
     }
 
     func claimNormalReward(state: AppState, save: () -> Void) {
-        claimReward(state: state, decreaseSatisfaction: false, save: save)
+        claimReward(state: state, save: save)
     }
 
     func claimAdReward(state: AppState, save: () -> Void) {
-        claimReward(state: state, decreaseSatisfaction: true, save: save)
+        claimReward(state: state, save: save)
     }
 
-    private func claimReward(state: AppState, decreaseSatisfaction: Bool, save: () -> Void) {
+    // ✅ シンプル化（満足度削除）
+    private func claimReward(state: AppState, save: () -> Void) {
         guard !isClaiming else { return }
         isClaiming = true
         defer { isClaiming = false }
@@ -81,7 +81,6 @@ final class StepViewModel: ObservableObject {
         state.stepEnjoyDailyRewardCount += 1
         state.stepEnjoyLastRewardAt = Date()
 
-        // ✅ 受け取り後も「今日の実歩数」を正として bank を再計算
         state.stepEnjoyDailyRewardStepBank = StepRewardPolicy.bank(
             totalWalkedSteps: dayTotalSteps,
             claimedToday: state.stepEnjoyDailyRewardCount
@@ -92,10 +91,6 @@ final class StepViewModel: ObservableObject {
             gainedFoodName = reward.name
         } else {
             gainedFoodName = nil
-        }
-
-        if decreaseSatisfaction {
-            _ = state.decreaseSatisfaction(by: 1, now: Date())
         }
 
         claimableCount = StepRewardPolicy.claimableCount(

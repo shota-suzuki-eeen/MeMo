@@ -8,7 +8,6 @@
 import SwiftUI
 import SwiftData
 import UIKit
-import UniformTypeIdentifiers
 #if canImport(WidgetKit)
 import WidgetKit
 #endif
@@ -17,70 +16,50 @@ struct HomeView: View {
     @Environment(\.modelContext) private var modelContext
     @EnvironmentObject private var bgmManager: BGMManager
 
-    // ✅ Rootから渡された“同一のAppState”を使う
     let state: AppState
-
     @ObservedObject var hk: HealthKitManager
 
-    // ✅ 初回のみ目標設定シートを出すためのフラグ（AppStateに持たせずUserDefaultsで保持）
     @AppStorage("didSetDailyGoalOnce") private var didSetDailyGoalOnce: Bool = false
 
-    // 表示用
     @State private var todaySteps: Int = 0
     @State private var todayKcal: Int = 0
-
-    // ✅ リング中央表示（演出でカウントアップさせる）
     @State private var displayedTodayKcal: Int = 0
-
-    // ✅ 所持通貨表示（演出でカウントアップ/ダウンさせる）
     @State private var displayedWalletKcal: Int = 0
 
-    // ✅ 満足度（表示用：0..3）
-    @State private var displayedSatisfaction: Int = 0
-    @State private var satisfactionRemainingText: String = "--:--"
-
-    // 目標入力（初回必須）
     @State private var showGoalSheet: Bool = false
 
-    // ✅ 今日の一枚（撮影ボタンに紐づける）
     @State private var todayPhotoImage: UIImage?
     @State private var todayPhotoEntry: TodayPhotoEntry?
 
-    // ✅ 撮影ボタンで開くキャプチャ画面制御
     @State private var showCaptureModeDialog: Bool = false
     @State private var selectedCaptureMode: CameraCaptureView.Mode?
 
-    // 軽いトースト（保存完了など）
     @State private var toastMessage: String?
     @State private var showToast: Bool = false
 
-    // ✅ メーター演出用（表示値を別で持って滑らかに伸ばす）
     @State private var displayedFriendship: Double = 0
-
-    /// ✅ リング進捗（1周目=0..1、2周目以降=1..2..）
     @State private var displayedKcalProgress: Double = 0
 
-    // gain演出
     @State private var isAnimatingGain: Bool = false
-
-    // ✅ Home表示中か（ショップ滞在中に onChange が走っても演出しない）
     @State private var isHomeVisible: Bool = false
 
-    // ✅ MAX到達時 “もじゃ” 演出
     @State private var showMojaOverlay: Bool = false
     @State private var rewardScale: CGFloat = 0.8
     @State private var rewardOpacity: Double = 0.0
 
-    // ✅ ごはん棚
-    @State private var showFoodShelf: Bool = false
-
-    // ✅ ドロップターゲット演出
-    @State private var isDropTargeted: Bool = false
-
-    // ✅ 追加：ドラッグでキャラ上ホバー中か（表情差し替えのため）
-    @State private var isFoodHoveringOverCharacter: Bool = false
-
     @State private var showStepEnjoy: Bool = false
+
+    // ✅ 追加：ワークタイマー準備画面
+    @State private var showWorkTimerPreparation: Bool = false
+
+    // ✅ メニューポップアップ
+    @State private var showRightMenuPopup: Bool = false
+
+    // ✅ ごはんセレクター
+    @State private var showFoodSelector: Bool = false
+    @State private var selectedFoodID: String?
+    @State private var foodSelectorDragOffset: CGSize = .zero
+    @State private var isFoodFeedingAnimationRunning: Bool = false
 
     // =========================================================
     // ✅ キャラクターアニメ（アイドルまばたき / タップジャンプ）
@@ -101,39 +80,35 @@ struct HomeView: View {
     // ✅ トイレ中モジモジ（左右揺れ）
     @State private var isToiletWiggleOn: Bool = false
 
-    // =========================================================
-    // ✅ おふろフラグ演出（yogore）
-    // =========================================================
-    @State private var showBathOverlay: Bool = false
-    @State private var bathOverlayOpacity: Double = 0.0
-    @State private var isBathCleaningAnimationRunning: Bool = false
-
-    // ✅ 追加：現在育成中キャラの「ベースアセット名」
     private var currentBaseAssetName: String {
         PetMaster.assetName(for: state.normalizedCurrentPetID)
     }
 
-    // ✅ 追加：表示用キャラ名
     private var currentPetName: String {
         PetMaster.all.first(where: { $0.id == state.normalizedCurrentPetID })?.name ?? "ペット"
     }
 
-    // ✅ 追加：トイレロック中か
     private var isToiletLocked: Bool {
         state.hasToiletFlag
     }
 
-    // ✅ 追加：おふろフラグ中か
-    private var hasBathFlag: Bool {
-        state.hasBathFlag
+    private var hasFoodFlag: Bool {
+        state.hasFoodFlag
     }
 
-    // ✅ 追加：ウィジェット連携時に使う歩数
     private var widgetLinkedTodaySteps: Int {
         max(todaySteps, state.widgetTodaySteps)
     }
 
-    // ✅ 追加：トイレ中に表示する *_wc が用意されているキャラ
+    private var ownedFoods: [FoodCatalog.FoodItem] {
+        FoodCatalog.all.filter { state.foodCount(foodId: $0.id) > 0 }
+    }
+
+    private var selectedFood: FoodCatalog.FoodItem? {
+        guard let selectedFoodID else { return ownedFoods.first }
+        return ownedFoods.first(where: { $0.id == selectedFoodID }) ?? ownedFoods.first
+    }
+
     private var canShowWcAsset: Bool {
         [
             "person",
@@ -188,62 +163,6 @@ struct HomeView: View {
         ].contains(currentBaseAssetName)
     }
 
-    // ✅ 追加：ごはんホバー時の表情差し替え（*_hungry / *_burp）に対応しているキャラ
-    private var canPlayCharacterAnimation: Bool {
-        [
-            "person",
-            "dog",
-            "cat",
-            "chicken",
-            "monkey",
-            "rabbit",
-            "frog",
-            "penguin",
-            "sheep",
-            "shark",
-            "turtle",
-            "dolphin",
-            "Sloth",
-            "baku",
-            "blackGibbon",
-            "bulldog",
-            "deer",
-            "fox",
-            "frilledLizard",
-            "giraffe",
-            "koala",
-            "okapi",
-            "platypus",
-            "raccoon",
-            "Shoebill",
-            "Triceratops",
-            "bee",
-            "amesho",
-            "barinys",
-            "blue",
-            "shiba",
-            "gorilla",
-            "lizard",
-            "meerkat",
-            "otter",
-            "owl",
-            "parakeet",
-            "peacock",
-            "pig",
-            "raccoonDog",
-            "redPanda",
-            "seal",
-            "seaOtter",
-            "skunk",
-            "swallow",
-            "tiger",
-            "whiteTiger",
-            "zebra",
-            "wolf"
-        ].contains(currentBaseAssetName)
-    }
-
-    // ✅ 追加：タップアクション対応キャラ
     private var canPlayTapAnimation: Bool {
         [
             "person",
@@ -298,7 +217,6 @@ struct HomeView: View {
         ].contains(currentBaseAssetName)
     }
 
-    // ✅ 追加：まばたき対応キャラ
     private var canPlayBlinkAnimation: Bool {
         [
             "person",
@@ -353,25 +271,13 @@ struct HomeView: View {
         ].contains(currentBaseAssetName)
     }
 
-    // ✅ 追加：満足度MAX判定
-    private var isSatisfactionMax: Bool {
-        displayedSatisfaction >= Layout.satisfactionSegments
-    }
-
-    // ✅ 追加：静止状態で表示すべきアセット名
     private var preferredCharacterRestAssetName: String {
         if isToiletLocked, canShowWcAsset {
             return "\(currentBaseAssetName)_wc"
         }
-
-        if isFoodHoveringOverCharacter, canPlayCharacterAnimation {
-            return isSatisfactionMax ? "\(currentBaseAssetName)_burp" : "\(currentBaseAssetName)_hungry"
-        }
-
         return currentBaseAssetName
     }
 
-    // ✅ 追加：撮影画面に渡す表示用メトリクス
     private var captureMetricValues: (steps: Int, activeKcal: Int, totalKcal: Int) {
         let steps = max(todaySteps, hk.todaySteps)
         let total = max(todayKcal, hk.todayTotalEnergyKcal)
@@ -400,18 +306,6 @@ struct HomeView: View {
 
         static let friendshipTextFont: CGFloat = 11
 
-        static let satisfactionSpacingFromWallet: CGFloat = 16
-        static let satisfactionBarWidth: CGFloat = 125
-        static let satisfactionBarHeight: CGFloat = 23
-        static let satisfactionSegments: Int = 3
-        static let satisfactionSegmentGap: CGFloat = 4
-        static let satisfactionCornerRadius: CGFloat = 11
-
-        static let satisfactionIconAssetName: String = "food_Icon"
-        static let satisfactionIconSize: CGFloat = 24
-        static let satisfactionIconSpacing: CGFloat = 10
-        static let satisfactionCountdownFont: CGFloat = 11
-
         static let kcalRingTop: CGFloat = 36
         static let kcalRingTrailing: CGFloat = 18
         static let kcalRingSizeOuter: CGFloat = 135
@@ -420,20 +314,48 @@ struct HomeView: View {
         static let characterTopOffset: CGFloat = 45
         static let characterMaxWidth: CGFloat = 210
 
-        static let rightButtonsTopOffset: CGFloat = 210
-        static let rightButtonsTrailing: CGFloat = 20
+        // ✅ メニューポップアップ
+        static let menuPopupCornerRadius: CGFloat = 20
+        static let menuPopupHorizontalPadding: CGFloat = 28
+        static let menuPopupVerticalPadding: CGFloat = 24
+        static let menuPopupMaxWidth: CGFloat = 160
+        static let zMenuPopup: Double = 900
+
         static let rightButtonSize: CGFloat = 40
         static let rightButtonsSpacing: CGFloat = 18
 
-        static let bottomButtonSize: CGFloat = 60
-        static let bottomButtonsSpacing: CGFloat = 22
-        static let bottomPadding: CGFloat = 80
-        static let bottomHorizontalPadding: CGFloat = 20
+        // ✅ 下部ボタンを少し大きく + 間隔調整
+        static let bottomButtonSize: CGFloat = 68
+        static let bottomButtonsSpacing: CGFloat = 16
+        static let bottomPadding: CGFloat = 72
+        static let bottomHorizontalPadding: CGFloat = 18
 
-        static let foodShelfHeight: CGFloat = 45
-        static let foodShelfHorizontalPadding: CGFloat = 18
-        static let foodShelfBottomGapFromButtons: CGFloat = 120
-        static let foodItemSize: CGFloat = 64
+        // ✅ 下部ボタン背景
+        static let bottomButtonBackgroundSize: CGFloat = 76
+        static let bottomButtonIconSize: CGFloat = 68
+        static let bottomButtonCornerRadius: CGFloat = 22
+        static let bottomButtonBackgroundColor = Color.black.opacity(0.34)
+        static let bottomButtonStrokeColor = Color.white.opacity(0.16)
+        static let bottomBarHorizontalPadding: CGFloat = 14
+        static let bottomBarVerticalPadding: CGFloat = 12
+        static let bottomBarCornerRadius: CGFloat = 28
+        static let bottomBarBackgroundColor = Color.black.opacity(0.18)
+
+        // ✅ 吹き出しボタン
+        static let floatingBubbleSize: CGFloat = 90
+        static let foodBubbleLeading: CGFloat = 42
+        static let foodBubbleTop: CGFloat = 246
+        static let wcBubbleTrailing: CGFloat = 32
+        static let wcBubbleTop: CGFloat = 230
+        static let floatingBubbleAmplitude: CGFloat = 6
+        static let floatingBubbleDuration: Double = 1.7
+        static let zFloatingButtons: Double = 240
+        static let zFoodSelector: Double = 245
+
+        static let foodSelectorBottomGapFromButtons: CGFloat = 118
+        static let foodSelectorHitAreaWidth: CGFloat = 320
+        static let foodSelectorHitAreaHeight: CGFloat = 220
+        static let foodSelectorInstructionOffsetY: CGFloat = 150
 
         static let rewardMaxWidth: CGFloat = 220
         static let getTextMaxWidth: CGFloat = 200
@@ -448,8 +370,6 @@ struct HomeView: View {
         static let kcalCenterSpacing: CGFloat = 4
 
         static let zCharacter: Double = 50
-        static let zBathOverlay: Double = 170
-        static let zFoodShelf: Double = 220
         static let zBottomButtons: Double = 260
         static let zReward: Double = 300
         static let zBanner: Double = 1000
@@ -461,9 +381,6 @@ struct HomeView: View {
         static let lockedPopupPaddingH: CGFloat = 18
         static let lockedPopupPaddingV: CGFloat = 12
         static let lockedPopupShowSeconds: Double = 1.1
-
-        static let bathFadeInDuration: Double = 0.95
-        static let bathFadeOutDuration: Double = 1.15
 
         static let careSpawnCheckInterval: Double = 1.0
     }
@@ -486,80 +403,36 @@ struct HomeView: View {
                         let characterWidth = min(geo.size.width * 0.62, Layout.characterMaxWidth)
 
                         ZStack {
-                            if showFoodShelf {
-                                Color.clear
-                                    .contentShape(Rectangle())
-                                    .onTapGesture { closeFoodShelf() }
-                            }
-
-                            ZStack {
-                                Rectangle()
-                                    .fill(Color.black.opacity(0.001))
-                                    .frame(width: characterWidth, height: characterWidth * 1.15)
-                                    .offset(y: Layout.characterTopOffset)
-                                    .zIndex(Layout.zCharacter)
-                                    .highPriorityGesture(
-                                        TapGesture().onEnded {
-                                            if isToiletLocked {
-                                                showToiletLockedMessage()
-                                            } else {
-                                                triggerCharacterJump()
-                                            }
-                                        }
-                                    )
-                                    .simultaneousGesture(
-                                        TapGesture().onEnded {
-                                            if showFoodShelf { closeFoodShelf() }
-                                        }
-                                    )
-                                    .onDrop(
-                                        of: [UTType.plainText.identifier, UTType.text.identifier],
-                                        isTargeted: $isDropTargeted
-                                    ) { providers in
+                            Rectangle()
+                                .fill(Color.black.opacity(0.001))
+                                .frame(width: characterWidth, height: characterWidth * 1.15)
+                                .offset(y: Layout.characterTopOffset)
+                                .zIndex(Layout.zCharacter)
+                                .highPriorityGesture(
+                                    TapGesture().onEnded {
                                         if isToiletLocked {
                                             showToiletLockedMessage()
-                                            return false
+                                        } else {
+                                            triggerCharacterJump()
                                         }
-
-                                        guard let provider = providers.first else { return false }
-
-                                        provider.loadItem(
-                                            forTypeIdentifier: UTType.plainText.identifier,
-                                            options: nil
-                                        ) { item, _ in
-                                            let id: String? = {
-                                                if let s = item as? String { return s }
-                                                if let data = item as? Data,
-                                                   let s = String(data: data, encoding: .utf8) { return s }
-                                                if let url = item as? URL { return url.absoluteString }
-                                                return nil
-                                            }()
-
-                                            guard let foodId = id else { return }
-                                            DispatchQueue.main.async {
-                                                _ = handleFoodDrop(foodId: foodId, state: state)
-                                                endFoodHoverIfNeeded()
-                                            }
-                                        }
-                                        return true
                                     }
+                                )
 
-                                Image(characterAssetName.isEmpty ? preferredCharacterRestAssetName : characterAssetName)
-                                    .resizable()
-                                    .scaledToFit()
-                                    .frame(maxWidth: characterWidth)
-                                    .offset(
-                                        x: isToiletLocked ? (isToiletWiggleOn ? Layout.toiletWiggleOffset : -Layout.toiletWiggleOffset) : 0,
-                                        y: Layout.characterTopOffset
-                                    )
-                                    .animation(
-                                        isToiletLocked
-                                        ? .easeInOut(duration: Layout.toiletWiggleDuration).repeatForever(autoreverses: true)
-                                        : .default,
-                                        value: isToiletWiggleOn
-                                    )
-                                    .allowsHitTesting(false)
-                            }
+                            Image(characterAssetName.isEmpty ? preferredCharacterRestAssetName : characterAssetName)
+                                .resizable()
+                                .scaledToFit()
+                                .frame(maxWidth: characterWidth)
+                                .offset(
+                                    x: isToiletLocked ? (isToiletWiggleOn ? Layout.toiletWiggleOffset : -Layout.toiletWiggleOffset) : 0,
+                                    y: Layout.characterTopOffset
+                                )
+                                .animation(
+                                    isToiletLocked
+                                    ? .easeInOut(duration: Layout.toiletWiggleDuration).repeatForever(autoreverses: true)
+                                    : .default,
+                                    value: isToiletWiggleOn
+                                )
+                                .allowsHitTesting(false)
 
                             VStack(alignment: .leading, spacing: Layout.meterStackSpacing) {
                                 FriendshipMeter(
@@ -573,38 +446,18 @@ struct HomeView: View {
                                     redMinWidth: Layout.redMinWidth
                                 )
 
-                                VStack(alignment: .leading, spacing: Layout.satisfactionSpacingFromWallet) {
-                                    WalletCapsule(
-                                        walletKcal: displayedWalletKcal,
-                                        barWidth: Layout.walletWidth,
-                                        height: Layout.capsuleHeight,
-                                        iconSize: Layout.iconCoinSize
-                                    )
-
-                                    SatisfactionMeter(
-                                        level: displayedSatisfaction,
-                                        maxLevel: Layout.satisfactionSegments,
-                                        barWidth: Layout.satisfactionBarWidth,
-                                        height: Layout.satisfactionBarHeight,
-                                        gap: Layout.satisfactionSegmentGap,
-                                        cornerRadius: Layout.satisfactionCornerRadius,
-                                        iconAssetName: Layout.satisfactionIconAssetName,
-                                        iconSize: Layout.satisfactionIconSize,
-                                        iconSpacing: Layout.satisfactionIconSpacing,
-                                        countdownText: satisfactionRemainingText
-                                    )
-                                }
+                                WalletCapsule(
+                                    walletKcal: displayedWalletKcal,
+                                    barWidth: Layout.walletWidth,
+                                    height: Layout.capsuleHeight,
+                                    iconSize: Layout.iconCoinSize
+                                )
 
                                 Spacer()
                             }
                             .padding(.top, Layout.leftTopPaddingTop)
                             .padding(.leading, Layout.leftTopPaddingLeading)
                             .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
-                            .simultaneousGesture(
-                                TapGesture().onEnded {
-                                    if showFoodShelf { closeFoodShelf() }
-                                }
-                            )
 
                             KcalRing(
                                 progress: displayedKcalProgress,
@@ -616,42 +469,72 @@ struct HomeView: View {
                             .padding(.top, Layout.kcalRingTop)
                             .padding(.trailing, Layout.kcalRingTrailing)
                             .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topTrailing)
-                            .simultaneousGesture(
-                                TapGesture().onEnded {
-                                    if showFoodShelf { closeFoodShelf() }
-                                }
-                            )
 
-                            RightSideButtons(
-                                state: state,
-                                onCamera: {
-                                    if isToiletLocked {
-                                        showToiletLockedMessage()
-                                        return
+                            if hasFoodFlag {
+                                FloatingThoughtButton(
+                                    imageName: "food_button",
+                                    size: Layout.floatingBubbleSize,
+                                    amplitude: Layout.floatingBubbleAmplitude,
+                                    duration: Layout.floatingBubbleDuration,
+                                    action: {
+                                        onTapFood(state: state)
                                     }
-                                    showCaptureModeDialog = true
-                                },
-                                isToiletLocked: isToiletLocked,
-                                onBlocked: { showToiletLockedMessage() },
-                                buttonSize: Layout.rightButtonSize,
-                                spacing: Layout.rightButtonsSpacing
-                            )
-                            .padding(.top, Layout.rightButtonsTopOffset)
-                            .padding(.trailing, Layout.rightButtonsTrailing)
-                            .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topTrailing)
-                            .simultaneousGesture(
-                                TapGesture().onEnded {
-                                    if showFoodShelf { closeFoodShelf() }
-                                }
-                            )
+                                )
+                                .padding(.leading, Layout.foodBubbleLeading)
+                                .padding(.top, Layout.foodBubbleTop)
+                                .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
+                                .zIndex(Layout.zFloatingButtons)
+                            }
 
-                            if showFoodShelf {
-                                FoodShelfPanel(state: state)
-                                    .padding(.horizontal, Layout.foodShelfHorizontalPadding)
-                                    .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .bottom)
-                                    .padding(.bottom, Layout.bottomPadding + Layout.foodShelfBottomGapFromButtons)
-                                    .transition(.move(edge: .bottom).combined(with: .opacity))
-                                    .zIndex(Layout.zFoodShelf)
+                            if state.hasToiletFlag {
+                                FloatingThoughtButton(
+                                    imageName: "wc_button",
+                                    size: Layout.floatingBubbleSize,
+                                    amplitude: Layout.floatingBubbleAmplitude,
+                                    duration: Layout.floatingBubbleDuration,
+                                    action: {
+                                        onTapToilet(state: state)
+                                    }
+                                )
+                                .padding(.trailing, Layout.wcBubbleTrailing)
+                                .padding(.top, Layout.wcBubbleTop)
+                                .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topTrailing)
+                                .zIndex(Layout.zFloatingButtons)
+                            }
+
+                            if showFoodSelector {
+                                Color.black.opacity(0.001)
+                                    .ignoresSafeArea()
+                                    .contentShape(Rectangle())
+                                    .onTapGesture {
+                                        closeFoodSelector()
+                                    }
+                                    .zIndex(Layout.zFoodSelector)
+
+                                FoodSelectionCarousel(
+                                    foods: ownedFoods,
+                                    countProvider: { foodID in
+                                        state.foodCount(foodId: foodID)
+                                    },
+                                    selectedFoodID: selectedFoodID,
+                                    dragOffset: foodSelectorDragOffset,
+                                    isFeedingAnimationRunning: isFoodFeedingAnimationRunning,
+                                    onMoveSelection: { delta in
+                                        moveFoodSelection(delta)
+                                    },
+                                    onFeed: {
+                                        feedSelectedFood(state: state)
+                                    },
+                                    onDragChanged: { value in
+                                        foodSelectorDragOffset = value.translation
+                                    },
+                                    onDragEnded: { value in
+                                        handleFoodSelectorDragEnded(value, state: state)
+                                    }
+                                )
+                                .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .bottom)
+                                .padding(.bottom, Layout.bottomPadding + Layout.foodSelectorBottomGapFromButtons)
+                                .zIndex(Layout.zFoodSelector + 1)
                             }
 
                             if showMojaOverlay {
@@ -707,45 +590,61 @@ struct HomeView: View {
                     }
                 }
 
-                if showBathOverlay || hasBathFlag {
-                    Color.clear
+                if showRightMenuPopup {
+                    Color.black.opacity(0.28)
                         .ignoresSafeArea()
-                        .overlay {
-                            Image("yogore")
-                                .resizable()
-                                .scaledToFill()
-                                .ignoresSafeArea()
-                                .opacity(bathOverlayOpacity)
-                                .allowsHitTesting(false)
+                        .transition(.opacity)
+                        .zIndex(Layout.zMenuPopup)
+                        .onTapGesture {
+                            withAnimation(.easeInOut(duration: 0.18)) {
+                                showRightMenuPopup = false
+                            }
                         }
-                        .zIndex(Layout.zBathOverlay)
+
+                    CenterMenuPopup(
+                        state: state,
+                        isToiletLocked: isToiletLocked,
+                        onBlocked: { showToiletLockedMessage() },
+                        onCamera: {
+                            if isToiletLocked {
+                                showToiletLockedMessage()
+                                return
+                            }
+                            showRightMenuPopup = false
+                            showCaptureModeDialog = true
+                        },
+                        onDismiss: {
+                            bgmManager.playSE(.push)
+                            withAnimation(.easeInOut(duration: 0.18)) {
+                                showRightMenuPopup = false
+                            }
+                        },
+                        buttonSize: Layout.rightButtonSize,
+                        spacing: Layout.rightButtonsSpacing
+                    )
+                    .frame(maxWidth: Layout.menuPopupMaxWidth)
+                    .padding(.horizontal, Layout.menuPopupHorizontalPadding)
+                    .zIndex(Layout.zMenuPopup + 1)
+                    .transition(.scale(scale: 0.92).combined(with: .opacity))
                 }
             }
             .overlay(alignment: .bottom) {
                 TimelineView(.periodic(from: Date(), by: Layout.careSpawnCheckInterval)) { timeline in
                     let now = timeline.date
 
-                    let canFood = true
-                    let canBath = hasBathFlag
-                    let canWc = true
-
                     BottomButtons(
-                        onBath: {
-                            if isToiletLocked {
-                                showToiletLockedMessage()
-                                return
+                        onMenu: {
+                            bgmManager.playSE(.open)
+                            withAnimation(.easeInOut(duration: 0.18)) {
+                                showRightMenuPopup = true
                             }
-                            onTapBath(state: state)
                         },
-                        onFood: {
-                            if isToiletLocked {
-                                showToiletLockedMessage()
-                                return
-                            }
-                            onTapFood(state: state)
+                        onGatya: {
+                            bgmManager.playSE(.push)
+                            toast("ガチャ機能は準備中です")
                         },
-                        onWc: {
-                            onTapToilet(state: state)
+                        onWork: {
+                            showWorkTimerPreparation = true
                         },
                         onStep: {
                             if isToiletLocked {
@@ -754,53 +653,37 @@ struct HomeView: View {
                             }
                             onTapStep()
                         },
-                        isBathAvailable: canBath,
-                        isFoodAvailable: canFood,
-                        isWcAvailable: canWc,
-                        isToiletLocked: isToiletLocked,
-                        onBlocked: { showToiletLockedMessage() },
                         buttonSize: Layout.bottomButtonSize,
                         spacing: Layout.bottomButtonsSpacing,
                         horizontalPadding: Layout.bottomHorizontalPadding
                     )
                     .onChange(of: timeline.date) { _, newDate in
-                        displayedSatisfaction = state.currentSatisfaction(now: newDate)
-                        updateSatisfactionCountdown(now: newDate)
                         state.ensureDailyResetIfNeeded(now: newDate)
 
-                        state.ensureBathNextSpawnScheduled(now: newDate)
                         state.ensureToiletNextSpawnScheduled(now: newDate)
+                        state.ensureFoodNextSpawnScheduled(now: newDate)
 
-                        maybeSpawnBathFlag(state: state, now: newDate)
                         maybeSpawnToiletFlag(state: state, now: newDate)
+                        maybeSpawnFoodFlag(state: state, now: newDate)
 
                         save()
                     }
                     .onAppear {
-                        displayedSatisfaction = state.currentSatisfaction(now: now)
-                        updateSatisfactionCountdown(now: now)
                         state.ensureDailyResetIfNeeded(now: now)
 
-                        state.ensureBathNextSpawnScheduled(now: now)
                         state.ensureToiletNextSpawnScheduled(now: now)
+                        state.ensureFoodNextSpawnScheduled(now: now)
 
-                        maybeSpawnBathFlag(state: state, now: now)
                         maybeSpawnToiletFlag(state: state, now: now)
+                        maybeSpawnFoodFlag(state: state, now: now)
 
-                        syncBathOverlayFromState(animated: false)
                         save()
                     }
                 }
                 .padding(.bottom, Layout.bottomPadding)
                 .zIndex(Layout.zBottomButtons)
-                .simultaneousGesture(
-                    TapGesture().onEnded {
-                        if showFoodShelf { closeFoodShelf() }
-                    }
-                )
             }
             .overlay(alignment: .top) {
-                // ✅ AdMob バナーを一旦停止
                 Color.clear
                     .frame(width: Layout.bannerWidthIPhone, height: Layout.bannerHeight)
                     .frame(maxWidth: .infinity)
@@ -848,6 +731,9 @@ struct HomeView: View {
                 selectedCaptureMode = nil
             }
         }
+        .fullScreenCover(isPresented: $showWorkTimerPreparation) {
+            WorkTimerPreparationView()
+        }
         .task {
             state.ensureInitialPetsIfNeeded()
 
@@ -862,9 +748,6 @@ struct HomeView: View {
 
             displayedTodayKcal = todayKcal
             displayedWalletKcal = state.walletKcal
-            displayedSatisfaction = state.currentSatisfaction(now: Date())
-            updateSatisfactionCountdown(now: Date())
-
             displayedFriendship = Double(state.friendshipPoint)
             displayedKcalProgress = calcKcalProgressRaw(todayKcal: displayedTodayKcal, goalKcal: state.dailyGoalKcal)
 
@@ -872,19 +755,20 @@ struct HomeView: View {
 
             await runSync(state: state)
 
-            state.ensureBathNextSpawnScheduled(now: Date())
             state.ensureToiletNextSpawnScheduled(now: Date())
+            state.ensureFoodNextSpawnScheduled(now: Date())
 
-            maybeSpawnBathFlag(state: state)
             maybeSpawnToiletFlag(state: state)
+            maybeSpawnFoodFlag(state: state)
+
             loadTodayPhoto()
+            syncFoodSelectorSelection()
 
             if !didSetDailyGoalOnce, state.dailyGoalKcal <= 0 {
                 showGoalSheet = true
             }
 
             updateToiletWiggle()
-            syncBathOverlayFromState(animated: false)
             syncCharacterBaseFromState(force: true)
             updateWidgetSnapshot(forceReload: true)
         }
@@ -899,27 +783,25 @@ struct HomeView: View {
             displayedTodayKcal = todayKcal
             displayedKcalProgress = calcKcalProgressRaw(todayKcal: displayedTodayKcal, goalKcal: state.dailyGoalKcal)
 
-            displayedSatisfaction = state.currentSatisfaction(now: Date())
-            updateSatisfactionCountdown(now: Date())
-
             handleDayRolloverIfNeeded(state: state)
 
             Task {
                 await runSync(state: state)
 
-                state.ensureBathNextSpawnScheduled(now: Date())
                 state.ensureToiletNextSpawnScheduled(now: Date())
+                state.ensureFoodNextSpawnScheduled(now: Date())
 
-                maybeSpawnBathFlag(state: state)
                 maybeSpawnToiletFlag(state: state)
+                maybeSpawnFoodFlag(state: state)
+
                 loadTodayPhoto()
+                syncFoodSelectorSelection()
 
                 if isHomeVisible {
                     await reconcileWalletDisplayIfNeeded(state: state)
                 }
 
                 updateToiletWiggle()
-                syncBathOverlayFromState(animated: false)
                 syncCharacterBaseFromState(force: true)
                 updateWidgetSnapshot(forceReload: true)
             }
@@ -959,13 +841,10 @@ struct HomeView: View {
                 displayedKcalProgress = calcKcalProgressRaw(todayKcal: displayedTodayKcal, goalKcal: state.dailyGoalKcal)
             }
 
-            displayedSatisfaction = state.currentSatisfaction(now: Date())
-            updateSatisfactionCountdown(now: Date())
-
             Task { await reconcileWalletDisplayIfNeeded(state: state) }
 
+            syncFoodSelectorSelection()
             updateToiletWiggle()
-            syncBathOverlayFromState(animated: false)
             syncCharacterBaseFromState(force: true)
             updateWidgetSnapshot(forceReload: true)
         }
@@ -975,8 +854,10 @@ struct HomeView: View {
 
             stopCharacterIdleLoop()
             isCharacterActionRunning = false
-
             characterAssetName = preferredCharacterRestAssetName
+            showFoodSelector = false
+            foodSelectorDragOffset = .zero
+            isFoodFeedingAnimationRunning = false
         }
         .onChange(of: state.walletKcal) { _, _ in
             guard isHomeVisible else { return }
@@ -998,34 +879,159 @@ struct HomeView: View {
             syncCharacterBaseFromState(force: true)
             updateWidgetSnapshot(forceReload: true)
         }
-        .onChange(of: isDropTargeted) { _, newValue in
-            if newValue {
-                beginFoodHover()
-            } else {
-                endFoodHoverIfNeeded()
-            }
-        }
-        .onChange(of: displayedSatisfaction) { _, _ in
-            guard isFoodHoveringOverCharacter else { return }
-            beginFoodHover()
-        }
         .onChange(of: state.toiletFlagAt) { _, _ in
             syncCharacterBaseFromState(force: true)
             updateToiletWiggle()
             updateWidgetSnapshot(forceReload: true)
         }
-        .onChange(of: state.bathFlagAt) { _, _ in
-            syncBathOverlayFromState(animated: true)
+        .onChange(of: state.foodFlagAt) { _, _ in
+            if state.hasFoodFlag {
+                syncFoodSelectorSelection()
+            } else {
+                closeFoodSelector()
+            }
             updateWidgetSnapshot(forceReload: true)
         }
         .onChange(of: state.toiletNextSpawnAt) { _, _ in
             updateWidgetSnapshot(forceReload: true)
         }
-        .onChange(of: state.bathNextSpawnAt) { _, _ in
+        .onChange(of: state.foodNextSpawnAt) { _, _ in
             updateWidgetSnapshot(forceReload: true)
+        }
+        .onChange(of: state.ownedFoodCountsData) { _, _ in
+            syncFoodSelectorSelection()
         }
         .onChange(of: state.lastDayKey) { _, _ in
             updateWidgetSnapshot(forceReload: true)
+        }
+    }
+
+    private func syncFoodSelectorSelection() {
+        let foods = ownedFoods
+
+        guard !foods.isEmpty else {
+            selectedFoodID = nil
+            showFoodSelector = false
+            foodSelectorDragOffset = .zero
+            isFoodFeedingAnimationRunning = false
+            return
+        }
+
+        if let selectedFoodID,
+           foods.contains(where: { $0.id == selectedFoodID }) {
+            return
+        }
+
+        selectedFoodID = foods.first?.id
+    }
+
+    private func closeFoodSelector() {
+        foodSelectorDragOffset = .zero
+        isFoodFeedingAnimationRunning = false
+
+        withAnimation(.spring(response: 0.28, dampingFraction: 0.88)) {
+            showFoodSelector = false
+        }
+    }
+
+    private func openFoodSelector() {
+        syncFoodSelectorSelection()
+
+        guard !ownedFoods.isEmpty else { return }
+
+        foodSelectorDragOffset = .zero
+        isFoodFeedingAnimationRunning = false
+
+        withAnimation(.spring(response: 0.32, dampingFraction: 0.85)) {
+            showFoodSelector = true
+        }
+    }
+
+    private func moveFoodSelection(_ delta: Int) {
+        let foods = ownedFoods
+        guard foods.count >= 2 else { return }
+
+        syncFoodSelectorSelection()
+        guard let currentID = selectedFoodID,
+              let currentIndex = foods.firstIndex(where: { $0.id == currentID }) else {
+            selectedFoodID = foods.first?.id
+            return
+        }
+
+        let nextIndex = (currentIndex + delta).positiveModulo(foods.count)
+
+        withAnimation(.spring(response: 0.34, dampingFraction: 0.82)) {
+            selectedFoodID = foods[nextIndex].id
+            foodSelectorDragOffset = .zero
+        }
+
+        Task { @MainActor in
+            Haptics.tap(style: .soft)
+        }
+    }
+
+    private func handleFoodSelectorDragEnded(_ value: DragGesture.Value, state: AppState) {
+        let horizontal = value.translation.width
+        let vertical = value.translation.height
+        let predictedHorizontal = value.predictedEndTranslation.width
+        let predictedVertical = value.predictedEndTranslation.height
+
+        defer {
+            withAnimation(.spring(response: 0.28, dampingFraction: 0.9)) {
+                foodSelectorDragOffset = .zero
+            }
+        }
+
+        if predictedVertical < -95, abs(predictedHorizontal) < 70, abs(horizontal) < 80 {
+            feedSelectedFood(state: state)
+            return
+        }
+
+        if predictedHorizontal <= -70 || horizontal <= -55 {
+            moveFoodSelection(1)
+            return
+        }
+
+        if predictedHorizontal >= 70 || horizontal >= 55 {
+            moveFoodSelection(-1)
+            return
+        }
+
+        if vertical < -85, abs(horizontal) < 55 {
+            feedSelectedFood(state: state)
+        }
+    }
+
+    private func feedSelectedFood(state: AppState) {
+        guard !isFoodFeedingAnimationRunning else { return }
+        guard let selectedFood else {
+            toast("ご飯を持っていません")
+            Task { @MainActor in
+                Haptics.rattle(duration: 0.12, style: .light)
+            }
+            closeFoodSelector()
+            return
+        }
+
+        isFoodFeedingAnimationRunning = true
+
+        withAnimation(.spring(response: 0.24, dampingFraction: 0.78)) {
+            foodSelectorDragOffset = CGSize(width: 0, height: -120)
+        }
+
+        Task { @MainActor in
+            Haptics.tap(style: .medium)
+        }
+
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.16) {
+            let didFeed = resolveFood(foodId: selectedFood.id, state: state)
+            isFoodFeedingAnimationRunning = false
+            foodSelectorDragOffset = .zero
+
+            if didFeed {
+                syncFoodSelectorSelection()
+                closeFoodSelector()
+            }
         }
     }
 
@@ -1057,108 +1063,11 @@ struct HomeView: View {
         }
     }
 
-    private func updateSatisfactionCountdown(now: Date = Date()) {
-        guard let remaining = state.satisfactionRemainingSecondsUntilNextDecay(now: now),
-              displayedSatisfaction > 0 else {
-            satisfactionRemainingText = "--:--"
-            return
-        }
-
-        let totalSeconds = max(0, Int(ceil(remaining)))
-        let minutes = totalSeconds / 60
-        let seconds = totalSeconds % 60
-        satisfactionRemainingText = String(format: "%02d:%02d", minutes, seconds)
-    }
-
-    private func syncBathOverlayFromState(animated: Bool) {
-        let shouldShow = state.hasBathFlag
-
-        if shouldShow {
-            if !showBathOverlay {
-                showBathOverlay = true
-            }
-
-            if animated {
-                guard bathOverlayOpacity < 0.999 else { return }
-                withAnimation(.easeInOut(duration: Layout.bathFadeInDuration)) {
-                    bathOverlayOpacity = 1.0
-                }
-            } else {
-                bathOverlayOpacity = 1.0
-            }
-            return
-        }
-
-        guard showBathOverlay || bathOverlayOpacity > 0.001 else { return }
-
-        if animated {
-            withAnimation(.easeInOut(duration: Layout.bathFadeOutDuration)) {
-                bathOverlayOpacity = 0.0
-            }
-
-            DispatchQueue.main.asyncAfter(deadline: .now() + Layout.bathFadeOutDuration) {
-                if !state.hasBathFlag {
-                    showBathOverlay = false
-                    bathOverlayOpacity = 0.0
-                }
-            }
-        } else {
-            bathOverlayOpacity = 0.0
-            showBathOverlay = false
-        }
-    }
-
     private func syncCharacterBaseFromState(force: Bool) {
         if !force {
             guard !isCharacterActionRunning else { return }
         }
-
         characterAssetName = preferredCharacterRestAssetName
-    }
-
-    private func beginFoodHover() {
-        guard !isToiletLocked else {
-            isFoodHoveringOverCharacter = false
-            syncCharacterBaseFromState(force: true)
-            return
-        }
-
-        isFoodHoveringOverCharacter = true
-
-        guard canPlayCharacterAnimation else {
-            characterAssetName = preferredCharacterRestAssetName
-            return
-        }
-
-        guard !isCharacterActionRunning else { return }
-
-        let base = currentBaseAssetName
-        characterAssetName = isSatisfactionMax ? "\(base)_burp" : "\(base)_hungry"
-    }
-
-    private func endFoodHoverIfNeeded() {
-        guard isFoodHoveringOverCharacter else { return }
-        isFoodHoveringOverCharacter = false
-
-        guard !isCharacterActionRunning else { return }
-
-        characterAssetName = preferredCharacterRestAssetName
-    }
-
-    private func closeFoodShelf() {
-        guard showFoodShelf else { return }
-        withAnimation(.easeInOut(duration: 0.18)) {
-            showFoodShelf = false
-        }
-    }
-
-    private func maybeSpawnBathFlag(state: AppState, now: Date = Date()) {
-        let didRaise = state.raiseBathFlagIfNeeded(now: now)
-        if didRaise {
-            save()
-            syncBathOverlayFromState(animated: true)
-            toast("よごれちゃった！")
-        }
     }
 
     private func maybeSpawnToiletFlag(state: AppState, now: Date = Date()) {
@@ -1168,6 +1077,14 @@ struct HomeView: View {
             toast("トイレ行きたい！")
             syncCharacterBaseFromState(force: true)
             updateToiletWiggle()
+        }
+    }
+
+    private func maybeSpawnFoodFlag(state: AppState, now: Date = Date()) {
+        let didRaise = state.raiseFoodFlagIfNeeded(now: now)
+        if didRaise {
+            save()
+            toast("おなかすいた！")
         }
     }
 
@@ -1188,11 +1105,6 @@ struct HomeView: View {
                     continue
                 }
 
-                if isFoodHoveringOverCharacter {
-                    try? await Task.sleep(nanoseconds: 120_000_000)
-                    continue
-                }
-
                 if isCharacterActionRunning {
                     try? await Task.sleep(nanoseconds: 120_000_000)
                     continue
@@ -1204,7 +1116,6 @@ struct HomeView: View {
                 if Task.isCancelled { break }
                 if !isHomeVisible { continue }
                 if isToiletLocked { continue }
-                if isFoodHoveringOverCharacter { continue }
                 if isCharacterActionRunning { continue }
 
                 if !canPlayBlinkAnimation {
@@ -1225,7 +1136,6 @@ struct HomeView: View {
                     if Task.isCancelled { break }
                     if !isHomeVisible { continue }
                     if isToiletLocked { continue }
-                    if isFoodHoveringOverCharacter { continue }
                     if isCharacterActionRunning { continue }
 
                     await playBlink()
@@ -1243,7 +1153,6 @@ struct HomeView: View {
         guard isHomeVisible else { return }
         guard !isCharacterActionRunning else { return }
         guard !isToiletLocked else { return }
-        guard !isFoodHoveringOverCharacter else { return }
         guard canPlayTapAnimation else { return }
 
         Task { await playJump() }
@@ -1253,7 +1162,6 @@ struct HomeView: View {
         guard isHomeVisible else { return }
         guard !isCharacterActionRunning else { return }
         guard !isToiletLocked else { return }
-        guard !isFoodHoveringOverCharacter else { return }
 
         guard canPlayBlinkAnimation else {
             await MainActor.run { characterAssetName = preferredCharacterRestAssetName }
@@ -1268,19 +1176,16 @@ struct HomeView: View {
         try? await Task.sleep(nanoseconds: 70_000_000)
         if isCharacterActionRunning || !isHomeVisible { return }
         if isToiletLocked { return }
-        if isFoodHoveringOverCharacter { return }
 
         await MainActor.run { characterAssetName = blink2 }
         try? await Task.sleep(nanoseconds: 60_000_000)
         if isCharacterActionRunning || !isHomeVisible { return }
         if isToiletLocked { return }
-        if isFoodHoveringOverCharacter { return }
 
         await MainActor.run { characterAssetName = blink1 }
         try? await Task.sleep(nanoseconds: 70_000_000)
         if isCharacterActionRunning || !isHomeVisible { return }
         if isToiletLocked { return }
-        if isFoodHoveringOverCharacter { return }
 
         await MainActor.run { characterAssetName = preferredCharacterRestAssetName }
     }
@@ -1289,7 +1194,6 @@ struct HomeView: View {
         guard isHomeVisible else { return }
         guard !isCharacterActionRunning else { return }
         guard !isToiletLocked else { return }
-        guard !isFoodHoveringOverCharacter else { return }
 
         guard canPlayTapAnimation else {
             await MainActor.run { characterAssetName = preferredCharacterRestAssetName }
@@ -1316,74 +1220,6 @@ struct HomeView: View {
             characterAssetName = preferredCharacterRestAssetName
             isCharacterActionRunning = false
         }
-
-        if isFoodHoveringOverCharacter {
-            await MainActor.run { beginFoodHover() }
-        }
-    }
-
-    private func handleFoodDrop(foodId: String, state: AppState) -> Bool {
-        defer {
-            closeFoodShelf()
-            endFoodHoverIfNeeded()
-        }
-
-        guard !isToiletLocked else {
-            showToiletLockedMessage()
-            return false
-        }
-
-        guard let food = FoodCatalog.byId(foodId) else {
-            toast("ご飯が見つかりません")
-            return false
-        }
-
-        let check = state.canFeedNow(now: Date())
-        guard check.can else {
-            toast(check.reason ?? "今はご飯できません")
-            return false
-        }
-
-        guard state.foodCount(foodId: foodId) > 0 else {
-            toast("そのご飯は所持していません")
-            return false
-        }
-
-        let ok = state.consumeFood(foodId: foodId, count: 1)
-        guard ok else {
-            toast("消費に失敗しました")
-            return false
-        }
-
-        let fed = state.feedOnce(now: Date())
-        guard fed.didFeed else {
-            toast(fed.reason ?? "今はご飯できません")
-            return false
-        }
-
-        let isSuperFavorite = isSuperFavoriteFood(foodId: food.id, petID: state.normalizedCurrentPetID)
-        let basePoint = 10
-        let gainedPoint = isSuperFavorite ? (basePoint * 2) : basePoint
-
-        if isSuperFavorite {
-            state.revealSuperFavorite(petID: state.normalizedCurrentPetID)
-        }
-
-        save()
-
-        displayedSatisfaction = fed.after
-        updateSatisfactionCountdown(now: Date())
-        addFriendshipWithAnimation(points: gainedPoint, state: state)
-        playFeedSound(isSuperFavorite: isSuperFavorite)
-
-        if isSuperFavorite {
-            toast("\(food.name)をあげた！ 大好物だ！ +\(gainedPoint)")
-            playSuperFavoriteReactionIfPossible()
-        } else {
-            toast("\(food.name)をあげた！ +\(gainedPoint)")
-        }
-
-        return true
     }
 
     private func isSuperFavoriteFood(foodId: String, petID: String) -> Bool {
@@ -1406,8 +1242,6 @@ struct HomeView: View {
 
     private func playSuperFavoriteReactionIfPossible() {
         guard !isToiletLocked else { return }
-
-        endFoodHoverIfNeeded()
 
         let base = currentBaseAssetName
         let love = "\(base)_love"
@@ -1438,6 +1272,58 @@ struct HomeView: View {
             try? await Task.sleep(nanoseconds: 120_000_000)
             bgmManager.playSE(.love)
         }
+    }
+
+    @discardableResult
+    private func resolveFood(foodId: String, state: AppState) -> Bool {
+        guard state.hasFoodFlag else { return false }
+        guard let food = FoodCatalog.byId(foodId) else {
+            toast("ご飯が見つかりません")
+            return false
+        }
+
+        guard state.foodCount(foodId: foodId) > 0 else {
+            toast("そのご飯は持っていません")
+            Task { @MainActor in
+                Haptics.rattle(duration: 0.12, style: .light)
+            }
+            syncFoodSelectorSelection()
+            return false
+        }
+
+        guard state.consumeFood(foodId: foodId, count: 1) else {
+            toast("ご飯の消費に失敗しました")
+            return false
+        }
+
+        guard state.resolveFood(now: Date()) else {
+            toast("今はごはんの時間じゃないよ")
+            syncFoodSelectorSelection()
+            return false
+        }
+
+        let isSuperFavorite = isSuperFavoriteFood(foodId: food.id, petID: state.normalizedCurrentPetID)
+        let gainedPoint = isSuperFavorite ? 20 : 10
+
+        if isSuperFavorite {
+            _ = state.revealSuperFavorite(petID: state.normalizedCurrentPetID)
+        }
+
+        save()
+
+        addFriendshipWithAnimation(points: gainedPoint, state: state)
+        playFeedSound(isSuperFavorite: isSuperFavorite)
+
+        if isSuperFavorite {
+            toast("\(food.name)をあげた！ 大好物だ！ +\(gainedPoint)")
+            playSuperFavoriteReactionIfPossible()
+        } else {
+            toast("\(food.name)をあげた！ +\(gainedPoint)")
+        }
+
+        syncFoodSelectorSelection()
+        updateWidgetSnapshot(forceReload: true)
+        return true
     }
 
     private func calcKcalProgressRaw(todayKcal: Int, goalKcal: Int) -> Double {
@@ -1504,8 +1390,6 @@ struct HomeView: View {
 
         let result = state.addFriendship(points: points, maxMeter: maxMeter)
 
-        // ✅ 仕様変更:
-        // なかよし度MAX到達時に獲得した分の「もじゃ」を AppState に反映する
         let gainedMoja = max(0, result.gainedCards)
         if gainedMoja > 0 {
             state.addMoja(gainedMoja)
@@ -1579,7 +1463,7 @@ struct HomeView: View {
         do {
             var descriptor = FetchDescriptor<TodayPhotoEntry>(
                 predicate: #Predicate { $0.dayKey == key },
-                sortBy: [SortDescriptor(\TodayPhotoEntry.date, order: .reverse)]
+                sortBy: [SortDescriptor(\.date, order: .reverse)]
             )
             descriptor.fetchLimit = 1
 
@@ -1650,61 +1534,33 @@ struct HomeView: View {
     }
 
     private func onTapFood(state: AppState) {
-        guard !isToiletLocked else {
-            showToiletLockedMessage()
-            return
-        }
-
-        Task { @MainActor in
-            Haptics.rattle(duration: 0.12, style: .light)
-        }
-
-        if showFoodShelf {
-            closeFoodShelf()
-            return
-        }
-
-        withAnimation(.easeInOut(duration: 0.18)) {
-            showFoodShelf = true
-        }
-    }
-
-    private func onTapBath(state: AppState) {
-        guard !isToiletLocked else {
-            showToiletLockedMessage()
-            return
-        }
-
-        guard state.hasBathFlag else {
-            toast("今はまだおふろしなくて大丈夫")
+        guard state.hasFoodFlag else {
             Task { @MainActor in
                 Haptics.rattle(duration: 0.12, style: .light)
             }
             return
         }
 
-        guard !isBathCleaningAnimationRunning else { return }
-        isBathCleaningAnimationRunning = true
+        syncFoodSelectorSelection()
 
-        bgmManager.playSE(.bath)
-
-        withAnimation(.easeInOut(duration: Layout.bathFadeOutDuration)) {
-            bathOverlayOpacity = 0.0
-        }
-
-        DispatchQueue.main.asyncAfter(deadline: .now() + Layout.bathFadeOutDuration) {
-            let didResolve = state.resolveBath(now: Date())
-            if didResolve {
-                addFriendshipWithAnimation(points: 20, state: state)
-                toast("おふろできれいになった！ +20")
-                save()
+        guard !ownedFoods.isEmpty else {
+            bgmManager.playSE(.push)
+            toast("ご飯を持っていません")
+            Task { @MainActor in
+                Haptics.rattle(duration: 0.12, style: .light)
             }
-
-            showBathOverlay = false
-            isBathCleaningAnimationRunning = false
-            syncBathOverlayFromState(animated: false)
-            updateWidgetSnapshot(forceReload: true)
+            return
         }
+
+        bgmManager.playSE(.push)
+
+        if showFoodSelector {
+            closeFoodSelector()
+        } else {
+            openFoodSelector()
+        }
+
+        updateWidgetSnapshot(forceReload: true)
     }
 
     private func onTapToilet(state: AppState) {
@@ -1767,7 +1623,6 @@ struct HomeView: View {
             state.lastSyncedAt = Calendar.current.startOfDay(for: now)
             save()
             loadTodayPhoto()
-            updateSatisfactionCountdown(now: now)
             return
         }
     }
@@ -1791,7 +1646,7 @@ struct HomeView: View {
         let shouldProtectKcal = (fetchedKcal == 0 && previousCachedKcal > 0)
 
         todaySteps = shouldProtectSteps ? previousCachedSteps : fetchedSteps
-        todayKcal  = shouldProtectKcal ? previousCachedKcal : fetchedKcal
+        todayKcal = shouldProtectKcal ? previousCachedKcal : fetchedKcal
 
         if !shouldProtectSteps { state.cachedTodaySteps = todaySteps }
         if !shouldProtectKcal { state.cachedTodayKcal = todayKcal }
@@ -1888,7 +1743,6 @@ struct HomeView: View {
 
 // MARK: - Widget Bridge
 private enum HomeWidgetBridge {
-    // ⚠️ Widget 側と同じ App Group ID を設定してください
     static let appGroupID = "group.com.shota.CalPet"
     static let widgetKind = "CalPetMediumWidget"
 
@@ -1897,7 +1751,6 @@ private enum HomeWidgetBridge {
     private static let currentPetIDKey = "currentPetID"
     private static let todayStepsKey = "todaySteps"
 
-    // ✅ アプリ未起動中でも Widget 側で状態判定できるように care 関連時刻も保存
     private static let toiletFlagAtKey = "toiletFlagAt"
     private static let bathFlagAtKey = "bathFlagAt"
     private static let toiletNextSpawnAtKey = "toiletNextSpawnAt"
@@ -2052,61 +1905,6 @@ private struct WalletCapsule: View {
     }
 }
 
-private struct SatisfactionMeter: View {
-    let level: Int
-    let maxLevel: Int
-    let barWidth: CGFloat
-    let height: CGFloat
-    let gap: CGFloat
-    let cornerRadius: CGFloat
-
-    let iconAssetName: String
-    let iconSize: CGFloat
-    let iconSpacing: CGFloat
-    let countdownText: String
-
-    private var clamped: Int { min(max(0, level), maxLevel) }
-
-    var body: some View {
-        let segments = max(1, maxLevel)
-        let totalGap = gap * CGFloat(max(0, segments - 1))
-        let segWidth = (barWidth - totalGap) / CGFloat(segments)
-        let countdownIndex = max(0, clamped - 1)
-
-        HStack(spacing: iconSpacing) {
-            Image(iconAssetName)
-                .resizable()
-                .scaledToFit()
-                .frame(width: iconSize, height: iconSize)
-
-            HStack(spacing: gap) {
-                ForEach(0..<segments, id: \.self) { idx in
-                    ZStack {
-                        RoundedRectangle(cornerRadius: cornerRadius)
-                            .fill(idx < clamped ? Color.green.opacity(0.95) : Color.black.opacity(0.55))
-                            .frame(width: segWidth, height: height)
-                            .overlay(
-                                RoundedRectangle(cornerRadius: cornerRadius)
-                                    .stroke(Color.black.opacity(0.35), lineWidth: 1)
-                            )
-
-                        if clamped > 0, idx == countdownIndex {
-                            Text(countdownText)
-                                .font(.system(size: HomeView.Layout.satisfactionCountdownFont, weight: .bold))
-                                .foregroundStyle(.black)
-                                .monospacedDigit()
-                                .lineLimit(1)
-                                .minimumScaleFactor(0.7)
-                                .padding(.horizontal, 2)
-                        }
-                    }
-                }
-            }
-            .frame(width: barWidth, height: height, alignment: .leading)
-        }
-    }
-}
-
 private struct KcalRing: View {
     let progress: Double
     let currentKcal: Int
@@ -2180,6 +1978,86 @@ private struct KcalRing: View {
             }
             .frame(width: innerSize * 0.9)
         }
+    }
+}
+
+private struct FloatingThoughtButton: View {
+    let imageName: String
+    let size: CGFloat
+    let amplitude: CGFloat
+    let duration: Double
+    let action: () -> Void
+
+    @State private var startDate: Date = Date()
+
+    var body: some View {
+        TimelineView(.animation(minimumInterval: 1.0 / 60.0)) { timeline in
+            let elapsed = timeline.date.timeIntervalSince(startDate)
+            let cycle = max(duration, 0.01)
+            let phase = (elapsed / cycle) * (.pi * 2)
+            let yOffset = CGFloat(sin(phase)) * amplitude
+
+            Button(action: action) {
+                ZStack {
+                    Color.clear
+                        .frame(width: size, height: size)
+
+                    Image(imageName)
+                        .resizable()
+                        .scaledToFit()
+                        .frame(width: size, height: size)
+                        .offset(y: yOffset)
+                }
+                .frame(width: size, height: size)
+                .contentShape(Rectangle())
+            }
+            .buttonStyle(.plain)
+        }
+        .onAppear {
+            startDate = Date()
+        }
+    }
+}
+
+private struct CenterMenuPopup: View {
+    let state: AppState
+    let isToiletLocked: Bool
+    let onBlocked: () -> Void
+    let onCamera: () -> Void
+    let onDismiss: () -> Void
+    let buttonSize: CGFloat
+    let spacing: CGFloat
+
+    var body: some View {
+        VStack(spacing: 16) {
+            HStack {
+                Spacer()
+
+                Button(action: onDismiss) {
+                    Image(systemName: "xmark")
+                        .font(.system(size: 14, weight: .bold))
+                        .foregroundStyle(.white)
+                        .frame(width: 28, height: 28)
+                        .background(Color.black.opacity(0.75))
+                        .clipShape(Circle())
+                }
+                .buttonStyle(.plain)
+            }
+
+            RightSideButtons(
+                state: state,
+                onCamera: onCamera,
+                isToiletLocked: isToiletLocked,
+                onBlocked: onBlocked,
+                buttonSize: buttonSize,
+                spacing: spacing
+            )
+        }
+        .padding(.horizontal, HomeView.Layout.menuPopupHorizontalPadding)
+        .padding(.vertical, HomeView.Layout.menuPopupVerticalPadding)
+        .background(.ultraThinMaterial)
+        .clipShape(RoundedRectangle(cornerRadius: HomeView.Layout.menuPopupCornerRadius, style: .continuous))
+        .shadow(radius: 18)
     }
 }
 
@@ -2328,81 +2206,337 @@ private struct RightSideButtons: View {
 private struct BottomButtons: View {
     @EnvironmentObject private var bgmManager: BGMManager
 
-    let onBath: () -> Void
-    let onFood: () -> Void
-    let onWc: () -> Void
+    let onMenu: () -> Void
+    let onGatya: () -> Void
+    let onWork: () -> Void
     let onStep: () -> Void
-
-    let isBathAvailable: Bool
-    let isFoodAvailable: Bool
-    let isWcAvailable: Bool
-
-    let isToiletLocked: Bool
-    let onBlocked: () -> Void
 
     let buttonSize: CGFloat
     let spacing: CGFloat
     let horizontalPadding: CGFloat
 
-    private var bathImageName: String { isBathAvailable ? "bath_button_on" : "bath_button" }
-    private var foodImageName: String { isFoodAvailable ? "food_button_on" : "food_button" }
-    private var wcImageName: String { isToiletLocked ? "wc_button_on" : "wc_button" }
-
     var body: some View {
         HStack(spacing: spacing) {
-            Button(action: {
-                bgmManager.playSE(.push)
-                if isToiletLocked {
-                    onBlocked()
-                } else {
-                    onBath()
+            BottomActionButton(
+                imageName: "menu_button",
+                buttonSize: buttonSize,
+                action: {
+                    bgmManager.playSE(.push)
+                    onMenu()
                 }
-            }) {
-                Image(bathImageName)
-                    .resizable()
-                    .scaledToFit()
-                    .frame(width: buttonSize, height: buttonSize)
-            }
+            )
 
-            Button(action: {
-                bgmManager.playSE(.push)
-                if isToiletLocked {
-                    onBlocked()
-                } else {
-                    onFood()
+            BottomActionButton(
+                imageName: "gatya_button",
+                buttonSize: buttonSize,
+                action: {
+                    bgmManager.playSE(.push)
+                    onGatya()
                 }
-            }) {
-                Image(foodImageName)
-                    .resizable()
-                    .scaledToFit()
-                    .frame(width: buttonSize, height: buttonSize)
-            }
+            )
 
-            Button(action: {
-                bgmManager.playSE(.push)
-                onWc()
-            }) {
-                Image(wcImageName)
-                    .resizable()
-                    .scaledToFit()
-                    .frame(width: buttonSize, height: buttonSize)
-            }
+            BottomActionButton(
+                imageName: "work_button",
+                buttonSize: buttonSize,
+                action: {
+                    bgmManager.playSE(.push)
+                    onWork()
+                }
+            )
 
-            Button(action: {
-                bgmManager.playSE(.push)
-                if isToiletLocked {
-                    onBlocked()
-                } else {
+            BottomActionButton(
+                imageName: "step_button",
+                buttonSize: buttonSize,
+                action: {
+                    bgmManager.playSE(.push)
                     onStep()
                 }
-            }) {
-                Image("step_button")
+            )
+        }
+        .padding(.horizontal, HomeView.Layout.bottomBarHorizontalPadding)
+        .padding(.vertical, HomeView.Layout.bottomBarVerticalPadding)
+        .background(
+            RoundedRectangle(
+                cornerRadius: HomeView.Layout.bottomBarCornerRadius,
+                style: .continuous
+            )
+            .fill(HomeView.Layout.bottomBarBackgroundColor)
+        )
+        .overlay(
+            RoundedRectangle(
+                cornerRadius: HomeView.Layout.bottomBarCornerRadius,
+                style: .continuous
+            )
+            .stroke(Color.white.opacity(0.10), lineWidth: 1)
+        )
+        .padding(.horizontal, horizontalPadding)
+    }
+}
+
+private struct BottomActionButton: View {
+    let imageName: String
+    let buttonSize: CGFloat
+    let action: () -> Void
+
+    var body: some View {
+        Button(action: action) {
+            ZStack {
+                RoundedRectangle(
+                    cornerRadius: HomeView.Layout.bottomButtonCornerRadius,
+                    style: .continuous
+                )
+                .fill(HomeView.Layout.bottomButtonBackgroundColor)
+                .frame(
+                    width: HomeView.Layout.bottomButtonBackgroundSize,
+                    height: HomeView.Layout.bottomButtonBackgroundSize
+                )
+
+                RoundedRectangle(
+                    cornerRadius: HomeView.Layout.bottomButtonCornerRadius,
+                    style: .continuous
+                )
+                .stroke(HomeView.Layout.bottomButtonStrokeColor, lineWidth: 1)
+
+                Image(imageName)
                     .resizable()
                     .scaledToFit()
-                    .frame(width: buttonSize, height: buttonSize)
+                    .frame(
+                        width: HomeView.Layout.bottomButtonIconSize,
+                        height: HomeView.Layout.bottomButtonIconSize
+                    )
+            }
+            .frame(
+                width: HomeView.Layout.bottomButtonBackgroundSize,
+                height: HomeView.Layout.bottomButtonBackgroundSize
+            )
+            .contentShape(RoundedRectangle(
+                cornerRadius: HomeView.Layout.bottomButtonCornerRadius,
+                style: .continuous
+            ))
+        }
+        .buttonStyle(.plain)
+        .shadow(color: .black.opacity(0.18), radius: 8, x: 0, y: 4)
+    }
+}
+
+private struct FoodSelectionCarousel: View {
+    let foods: [FoodCatalog.FoodItem]
+    let countProvider: (String) -> Int
+    let selectedFoodID: String?
+    let dragOffset: CGSize
+    let isFeedingAnimationRunning: Bool
+    let onMoveSelection: (Int) -> Void
+    let onFeed: () -> Void
+    let onDragChanged: (DragGesture.Value) -> Void
+    let onDragEnded: (DragGesture.Value) -> Void
+
+    private struct VisibleCard: Identifiable {
+        let id: String
+        let item: FoodCatalog.FoodItem
+        let relativeIndex: Int
+    }
+
+    private var selectedIndex: Int {
+        guard !foods.isEmpty else { return 0 }
+        guard let selectedFoodID,
+              let idx = foods.firstIndex(where: { $0.id == selectedFoodID }) else {
+            return 0
+        }
+        return idx
+    }
+
+    private var visibleCards: [VisibleCard] {
+        guard !foods.isEmpty else { return [] }
+
+        let candidateOffsets = [0, -1, 1, -2, 2]
+        var seenIndexes: Set<Int> = []
+        var cards: [VisibleCard] = []
+
+        for relative in candidateOffsets {
+            let index = (selectedIndex + relative).positiveModulo(foods.count)
+            guard seenIndexes.insert(index).inserted else { continue }
+
+            cards.append(
+                VisibleCard(
+                    id: foods[index].id + "_\(relative)",
+                    item: foods[index],
+                    relativeIndex: relative
+                )
+            )
+        }
+
+        return cards
+    }
+
+    var body: some View {
+        ZStack {
+            Color.clear
+                .frame(
+                    width: HomeView.Layout.foodSelectorHitAreaWidth,
+                    height: HomeView.Layout.foodSelectorHitAreaHeight
+                )
+                .contentShape(Rectangle())
+
+            ForEach(visibleCards.sorted(by: { abs($0.relativeIndex) > abs($1.relativeIndex) })) { card in
+                FoodCarouselCard(
+                    item: card.item,
+                    countText: countText(for: card.item.id),
+                    relativeIndex: card.relativeIndex,
+                    dragOffset: dragOffset,
+                    isFeedingAnimationRunning: isFeedingAnimationRunning
+                )
+                .zIndex(zIndex(for: card.relativeIndex))
+            }
+
+            VStack(spacing: 6) {
+                if let selected = foods[safe: selectedIndex] {
+                    Text(selected.name)
+                        .font(.system(size: 14, weight: .bold))
+                        .foregroundStyle(.white)
+
+                    Text("左右フリックで選択 / 上フリックであげる")
+                        .font(.system(size: 11, weight: .medium))
+                        .foregroundStyle(.white.opacity(0.8))
+                }
+            }
+            .offset(y: HomeView.Layout.foodSelectorInstructionOffsetY)
+        }
+        .gesture(
+            DragGesture(minimumDistance: 12)
+                .onChanged(onDragChanged)
+                .onEnded(onDragEnded)
+        )
+        .simultaneousGesture(
+            TapGesture(count: 2)
+                .onEnded {
+                    onFeed()
+                }
+        )
+        .onTapGesture {
+            let width = dragOffset.width
+            if abs(width) < 8 {
+                onFeed()
             }
         }
-        .padding(.horizontal, horizontalPadding)
+        .accessibilityElement(children: .combine)
+        .accessibilityLabel("ごはんセレクター")
+        .accessibilityHint("左右フリックでごはんを選び、上フリックであげます")
+    }
+
+    private func countText(for foodID: String) -> String {
+        let count = max(1, countProvider(foodID))
+        return "x\(count)"
+    }
+
+    private func zIndex(for relativeIndex: Int) -> Double {
+        switch abs(relativeIndex) {
+        case 0: return 10
+        case 1: return 7
+        default: return 4
+        }
+    }
+}
+
+private struct FoodCarouselCard: View {
+    let item: FoodCatalog.FoodItem
+    let countText: String
+    let relativeIndex: Int
+    let dragOffset: CGSize
+    let isFeedingAnimationRunning: Bool
+
+    private var config: (x: CGFloat, y: CGFloat, scale: CGFloat, opacity: Double, rotation: Double, color: Color, blur: CGFloat) {
+        switch relativeIndex {
+        case -2:
+            return (-146, -12, 0.72, 0.34, 54, .green, 0.8)
+        case -1:
+            return (-88, 34, 0.88, 0.72, 28, .blue, 0.0)
+        case 1:
+            return (88, 34, 0.88, 0.72, -28, .blue, 0.0)
+        case 2:
+            return (146, -12, 0.72, 0.34, -54, .green, 0.8)
+        default:
+            return (0, 72, 1.06, 1.0, 0, .red, 0.0)
+        }
+    }
+
+    private var dragX: CGFloat {
+        switch relativeIndex {
+        case 0: return dragOffset.width * 0.42
+        case -1, 1: return dragOffset.width * 0.18
+        default: return dragOffset.width * 0.08
+        }
+    }
+
+    private var dragY: CGFloat {
+        switch relativeIndex {
+        case 0: return min(0, dragOffset.height * 0.48)
+        case -1, 1: return min(0, dragOffset.height * 0.12)
+        default: return 0
+        }
+    }
+
+    private var feedLift: CGFloat {
+        guard isFeedingAnimationRunning, relativeIndex == 0 else { return 0 }
+        return -118
+    }
+
+    private var cardSize: CGSize {
+        switch abs(relativeIndex) {
+        case 0: return CGSize(width: 126, height: 126)
+        case 1: return CGSize(width: 114, height: 114)
+        default: return CGSize(width: 96, height: 96)
+        }
+    }
+
+    var body: some View {
+        ZStack(alignment: .bottomTrailing) {
+            RoundedRectangle(cornerRadius: 26, style: .continuous)
+                .fill(Color.black.opacity(relativeIndex == 0 ? 0.24 : 0.18))
+                .frame(width: cardSize.width, height: cardSize.height)
+
+            Image(item.assetName)
+                .resizable()
+                .scaledToFit()
+                .frame(width: cardSize.width * 0.68, height: cardSize.height * 0.68)
+                .padding(10)
+
+            Text(countText)
+                .font(.system(size: 12, weight: .bold))
+                .foregroundStyle(.white)
+                .padding(.horizontal, 10)
+                .padding(.vertical, 6)
+                .background(Color.black.opacity(0.72), in: Capsule())
+                .offset(x: 10, y: 10)
+        }
+        .scaleEffect(config.scale)
+        .opacity(config.opacity)
+        .blur(radius: config.blur)
+        .rotation3DEffect(
+            .degrees(config.rotation),
+            axis: (x: 0, y: 1, z: 0),
+            perspective: 0.65
+        )
+        .offset(
+            x: config.x + dragX,
+            y: config.y + dragY + feedLift
+        )
+        .animation(.spring(response: 0.32, dampingFraction: 0.82), value: dragOffset)
+        .animation(.spring(response: 0.28, dampingFraction: 0.8), value: isFeedingAnimationRunning)
+    }
+}
+
+private extension Int {
+    func positiveModulo(_ n: Int) -> Int {
+        guard n > 0 else { return self }
+        let remainder = self % n
+        return remainder >= 0 ? remainder : remainder + n
+    }
+}
+
+private extension Array {
+    subscript(safe index: Int) -> Element? {
+        guard indices.contains(index) else { return nil }
+        return self[index]
     }
 }
 
@@ -2464,152 +2598,5 @@ private struct GoalSettingSheet: View {
             }
         }
         .onAppear { text = currentGoal > 0 ? String(currentGoal) : "" }
-    }
-}
-
-private struct FoodShelfPanel: View {
-    let state: AppState
-
-    @State private var currentPage: Int = 0
-
-    private var ownedFoods: [FoodCatalog.FoodItem] {
-        FoodCatalog.all.filter { state.foodCount(foodId: $0.id) > 0 }
-    }
-
-    private var pages: [[FoodCatalog.FoodItem]] {
-        chunked(ownedFoods, size: 3)
-    }
-
-    private var pageCount: Int { pages.count }
-    private var canGoPrev: Bool { currentPage > 0 }
-    private var canGoNext: Bool { currentPage + 1 < pageCount }
-
-    var body: some View {
-        ZStack {
-            Image("gohan_telop")
-                .resizable()
-                .scaledToFill()
-                .clipShape(RoundedRectangle(cornerRadius: 16))
-                .clipped()
-
-            if ownedFoods.isEmpty {
-                Text("ご飯がありません（ショップで購入してください）")
-                    .font(.footnote)
-                    .foregroundStyle(.black.opacity(0.75))
-                    .padding(.horizontal, 12)
-            } else {
-                ZStack {
-                    TabView(selection: $currentPage) {
-                        ForEach(Array(pages.enumerated()), id: \.offset) { idx, foods in
-                            HStack(spacing: 12) {
-                                ForEach(foods) { food in
-                                    FoodItemCell(
-                                        food: food,
-                                        count: state.foodCount(foodId: food.id)
-                                    )
-                                }
-                            }
-                            .padding(.horizontal, 22)
-                            .padding(.vertical, 6)
-                            .frame(maxWidth: .infinity, maxHeight: .infinity)
-                            .tag(idx)
-                        }
-                    }
-                    .tabViewStyle(.page(indexDisplayMode: .never))
-                    .onChange(of: pageCount) { _, _ in
-                        if currentPage >= pageCount {
-                            currentPage = max(0, pageCount - 1)
-                        }
-                    }
-
-                    HStack {
-                        arrowButton(systemName: "chevron.left", enabled: canGoPrev) {
-                            guard canGoPrev else { return }
-                            withAnimation(.easeInOut(duration: 0.18)) {
-                                currentPage -= 1
-                            }
-                        }
-
-                        Spacer()
-
-                        arrowButton(systemName: "chevron.right", enabled: canGoNext) {
-                            guard canGoNext else { return }
-                            withAnimation(.easeInOut(duration: 0.18)) {
-                                currentPage += 1
-                            }
-                        }
-                    }
-                    .padding(.horizontal, 10)
-                }
-            }
-        }
-        .frame(height: HomeView.Layout.foodShelfHeight)
-    }
-
-    private func chunked<T>(_ items: [T], size: Int) -> [[T]] {
-        guard size > 0, !items.isEmpty else { return [] }
-        var result: [[T]] = []
-        var i = 0
-        while i < items.count {
-            let end = min(i + size, items.count)
-            result.append(Array(items[i..<end]))
-            i = end
-        }
-        return result
-    }
-
-    @ViewBuilder
-    private func arrowButton(systemName: String, enabled: Bool, action: @escaping () -> Void) -> some View {
-        Button(action: action) {
-            Image(systemName: systemName)
-                .font(.system(size: 16, weight: .heavy))
-                .foregroundStyle(enabled ? Color.black.opacity(0.85) : Color.gray.opacity(0.55))
-                .frame(width: 26, height: 26)
-                .background(Color.white.opacity(enabled ? 0.72 : 0.35))
-                .clipShape(Circle())
-                .overlay(
-                    Circle().stroke(Color.black.opacity(enabled ? 0.28 : 0.12), lineWidth: 1)
-                )
-        }
-        .buttonStyle(.plain)
-        .disabled(!enabled)
-        .opacity(enabled ? 1.0 : 0.85)
-        .contentShape(Circle())
-    }
-}
-
-private struct FoodItemCell: View {
-    let food: FoodCatalog.FoodItem
-    let count: Int
-
-    var body: some View {
-        ZStack(alignment: .bottomTrailing) {
-            Image(food.assetName)
-                .resizable()
-                .scaledToFit()
-                .frame(width: HomeView.Layout.foodItemSize, height: HomeView.Layout.foodItemSize)
-                .padding(6)
-                .background(Color.white.opacity(0.18))
-                .clipShape(RoundedRectangle(cornerRadius: 14))
-                .overlay(
-                    RoundedRectangle(cornerRadius: 14)
-                        .stroke(Color.black.opacity(0.45), lineWidth: 2)
-                )
-                .draggable(food.id) {
-                    Image(food.assetName)
-                        .resizable()
-                        .scaledToFit()
-                        .frame(width: HomeView.Layout.foodItemSize, height: HomeView.Layout.foodItemSize)
-                }
-
-            Text("x\(count)")
-                .font(.system(size: 12, weight: .heavy))
-                .foregroundStyle(.white)
-                .padding(.horizontal, 8)
-                .padding(.vertical, 4)
-                .background(Color.black.opacity(0.85))
-                .clipShape(Capsule())
-                .padding(6)
-        }
     }
 }
