@@ -60,6 +60,7 @@ struct HomeView: View {
     @State private var selectedFoodID: String?
     @State private var foodSelectorDragOffset: CGSize = .zero
     @State private var isFoodFeedingAnimationRunning: Bool = false
+    @State private var isFoodSelectorHorizontalRattling: Bool = false
 
     // =========================================================
     // ✅ キャラクターアニメ（アイドルまばたき / タップジャンプ）
@@ -79,6 +80,11 @@ struct HomeView: View {
 
     // ✅ トイレ中モジモジ（左右揺れ）
     @State private var isToiletWiggleOn: Bool = false
+
+    // ✅ トイレ掃除モード
+    @State private var isToiletCleaningMode: Bool = false
+    @State private var toiletPoopActivePoint: [String: CGPoint] = [:]
+    @State private var homeContentSize: CGSize = .zero
 
     private var currentBaseAssetName: String {
         PetMaster.assetName(for: state.normalizedCurrentPetID)
@@ -107,6 +113,10 @@ struct HomeView: View {
     private var selectedFood: FoodCatalog.FoodItem? {
         guard let selectedFoodID else { return ownedFoods.first }
         return ownedFoods.first(where: { $0.id == selectedFoodID }) ?? ownedFoods.first
+    }
+
+    private var visibleToiletPoops: [AppState.ToiletPoopItem] {
+        state.toiletPoops().filter { !$0.isCleared }
     }
 
     private var canShowWcAsset: Bool {
@@ -352,10 +362,12 @@ struct HomeView: View {
         static let zFloatingButtons: Double = 240
         static let zFoodSelector: Double = 245
 
-        static let foodSelectorBottomGapFromButtons: CGFloat = 118
+        static let foodSelectorBottomGapFromButtons: CGFloat = 146
         static let foodSelectorHitAreaWidth: CGFloat = 320
         static let foodSelectorHitAreaHeight: CGFloat = 220
         static let foodSelectorInstructionOffsetY: CGFloat = 150
+        static let foodSelectorRollStepWidth: CGFloat = 96
+        static let foodSelectorRollMaxVisibleOffset: Double = 3.0
 
         static let rewardMaxWidth: CGFloat = 220
         static let getTextMaxWidth: CGFloat = 200
@@ -372,7 +384,18 @@ struct HomeView: View {
         static let zCharacter: Double = 50
         static let zBottomButtons: Double = 260
         static let zReward: Double = 300
+        static let zToiletPoops: Double = 980
         static let zBanner: Double = 1000
+
+        static let toiletPoopSize: CGFloat = 140
+        static let toiletPoopHitSize: CGFloat = 156
+        static let toiletPoopHorizontalInset: CGFloat = 14
+        static let toiletPoopTopInset: CGFloat = 78
+        static let toiletPoopBottomInset: CGFloat = 170
+        static let toiletPoopMinSpacing: CGFloat = 6
+        static let toiletPoopScratchDistanceToClear: CGFloat = 320
+        static let toiletPoopScratchRectInset: CGFloat = 10
+        static let toiletPoopWcExclusionPadding: CGFloat = 16
 
         static let toiletWiggleOffset: CGFloat = 3
         static let toiletWiggleDuration: Double = 0.12
@@ -477,6 +500,10 @@ struct HomeView: View {
                                     amplitude: Layout.floatingBubbleAmplitude,
                                     duration: Layout.floatingBubbleDuration,
                                     action: {
+                                        if isToiletLocked {
+                                            showToiletLockedMessage()
+                                            return
+                                        }
                                         onTapFood(state: state)
                                     }
                                 )
@@ -500,6 +527,30 @@ struct HomeView: View {
                                 .padding(.top, Layout.wcBubbleTop)
                                 .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topTrailing)
                                 .zIndex(Layout.zFloatingButtons)
+                            }
+
+                            if state.hasToiletFlag {
+                                ZStack {
+                                    ForEach(visibleToiletPoops) { poop in
+                                        ToiletPoopView(
+                                            item: poop,
+                                            size: Layout.toiletPoopSize,
+                                            hitSize: Layout.toiletPoopHitSize,
+                                            opacity: toiletPoopOpacity(for: poop),
+                                            isCleaningMode: isToiletCleaningMode,
+                                            onScratchChanged: { value in
+                                                handleToiletPoopScratchChanged(poop, value: value)
+                                            },
+                                            onScratchEnded: {
+                                                handleToiletPoopScratchEnded(poop)
+                                            }
+                                        )
+                                        .position(position(for: poop, in: geo.size))
+                                    }
+                                }
+                                .frame(maxWidth: .infinity, maxHeight: .infinity)
+                                .allowsHitTesting(isToiletCleaningMode)
+                                .zIndex(Layout.zToiletPoops)
                             }
 
                             if showFoodSelector {
@@ -526,7 +577,7 @@ struct HomeView: View {
                                         feedSelectedFood(state: state)
                                     },
                                     onDragChanged: { value in
-                                        foodSelectorDragOffset = value.translation
+                                        handleFoodSelectorDragChanged(value)
                                     },
                                     onDragEnded: { value in
                                         handleFoodSelectorDragEnded(value, state: state)
@@ -580,6 +631,14 @@ struct HomeView: View {
                             }
                         }
                         .frame(maxWidth: .infinity, maxHeight: .infinity)
+                        .onAppear {
+                            homeContentSize = geo.size
+                            syncToiletPoopsIfNeeded(containerSize: geo.size)
+                        }
+                        .onChange(of: geo.size) { _, newSize in
+                            homeContentSize = newSize
+                            syncToiletPoopsIfNeeded(containerSize: newSize)
+                        }
                         .overlay(alignment: .bottom) {
                             if showToast, let toastMessage {
                                 ToastView(message: toastMessage)
@@ -647,12 +706,10 @@ struct HomeView: View {
                             showWorkTimerPreparation = true
                         },
                         onStep: {
-                            if isToiletLocked {
-                                showToiletLockedMessage()
-                                return
-                            }
                             onTapStep()
                         },
+                        isToiletLocked: isToiletLocked,
+                        onBlocked: { showToiletLockedMessage() },
                         buttonSize: Layout.bottomButtonSize,
                         spacing: Layout.bottomButtonsSpacing,
                         horizontalPadding: Layout.bottomHorizontalPadding
@@ -761,6 +818,7 @@ struct HomeView: View {
             maybeSpawnToiletFlag(state: state)
             maybeSpawnFoodFlag(state: state)
 
+            syncToiletPoopsIfNeeded(containerSize: homeContentSize)
             loadTodayPhoto()
             syncFoodSelectorSelection()
 
@@ -794,6 +852,7 @@ struct HomeView: View {
                 maybeSpawnToiletFlag(state: state)
                 maybeSpawnFoodFlag(state: state)
 
+                syncToiletPoopsIfNeeded(containerSize: homeContentSize)
                 loadTodayPhoto()
                 syncFoodSelectorSelection()
 
@@ -844,6 +903,7 @@ struct HomeView: View {
             Task { await reconcileWalletDisplayIfNeeded(state: state) }
 
             syncFoodSelectorSelection()
+            syncToiletPoopsIfNeeded(containerSize: homeContentSize)
             updateToiletWiggle()
             syncCharacterBaseFromState(force: true)
             updateWidgetSnapshot(forceReload: true)
@@ -858,6 +918,9 @@ struct HomeView: View {
             showFoodSelector = false
             foodSelectorDragOffset = .zero
             isFoodFeedingAnimationRunning = false
+            stopFoodSelectorHorizontalRattleIfNeeded()
+            isToiletCleaningMode = false
+            toiletPoopActivePoint.removeAll()
         }
         .onChange(of: state.walletKcal) { _, _ in
             guard isHomeVisible else { return }
@@ -880,6 +943,27 @@ struct HomeView: View {
             updateWidgetSnapshot(forceReload: true)
         }
         .onChange(of: state.toiletFlagAt) { _, _ in
+            if state.hasToiletFlag {
+                isToiletCleaningMode = false
+                toiletPoopActivePoint.removeAll()
+
+                if showFoodSelector {
+                    closeFoodSelector()
+                }
+
+                if showRightMenuPopup {
+                    withAnimation(.easeInOut(duration: 0.18)) {
+                        showRightMenuPopup = false
+                    }
+                }
+
+                showCaptureModeDialog = false
+                syncToiletPoopsIfNeeded(containerSize: homeContentSize)
+            } else {
+                isToiletCleaningMode = false
+                toiletPoopActivePoint.removeAll()
+            }
+
             syncCharacterBaseFromState(force: true)
             updateToiletWiggle()
             updateWidgetSnapshot(forceReload: true)
@@ -906,6 +990,193 @@ struct HomeView: View {
         }
     }
 
+    private func syncToiletPoopsIfNeeded(containerSize: CGSize) {
+        guard containerSize.width > 1, containerSize.height > 1 else { return }
+
+        if !state.hasToiletFlag {
+            isToiletCleaningMode = false
+            toiletPoopActivePoint.removeAll()
+
+            if !state.toiletPoops().isEmpty {
+                state.clearToiletPoops()
+                save()
+            }
+            return
+        }
+
+        guard state.toiletPoops().isEmpty else { return }
+
+        let generated = generateToiletPoops(in: containerSize)
+        guard !generated.isEmpty else { return }
+
+        state.setToiletPoops(generated)
+        save()
+    }
+
+    private func generateToiletPoops(in containerSize: CGSize) -> [AppState.ToiletPoopItem] {
+        let poopSize = Layout.toiletPoopSize
+        let horizontalInset = Layout.toiletPoopHorizontalInset + poopSize * 0.5
+        let topInset = Layout.toiletPoopTopInset + poopSize * 0.5
+        let bottomInset = Layout.toiletPoopBottomInset + poopSize * 0.5
+
+        let minX = horizontalInset
+        let maxX = max(minX, containerSize.width - horizontalInset)
+        let minY = topInset
+        let maxY = max(minY, containerSize.height - bottomInset)
+
+        guard maxX > minX, maxY > minY else { return [] }
+
+        let wcRect = CGRect(
+            x: containerSize.width - Layout.wcBubbleTrailing - Layout.floatingBubbleSize,
+            y: Layout.wcBubbleTop,
+            width: Layout.floatingBubbleSize,
+            height: Layout.floatingBubbleSize
+        ).insetBy(dx: -Layout.toiletPoopWcExclusionPadding, dy: -Layout.toiletPoopWcExclusionPadding)
+
+        var items: [AppState.ToiletPoopItem] = []
+        let maxCount = 5
+        let maxAttempts = 600
+
+        for _ in 0..<maxCount {
+            var created: AppState.ToiletPoopItem?
+
+            for _ in 0..<maxAttempts {
+                let point = CGPoint(
+                    x: CGFloat.random(in: minX...maxX),
+                    y: CGFloat.random(in: minY...maxY)
+                )
+
+                let poopRect = CGRect(
+                    x: point.x - poopSize * 0.5,
+                    y: point.y - poopSize * 0.5,
+                    width: poopSize,
+                    height: poopSize
+                ).insetBy(
+                    dx: -(Layout.toiletPoopMinSpacing * 0.5),
+                    dy: -(Layout.toiletPoopMinSpacing * 0.5)
+                )
+
+                if poopRect.intersects(wcRect) {
+                    continue
+                }
+
+                let overlapsAnotherPoop = items.contains { existing in
+                    let existingPoint = CGPoint(
+                        x: existing.centerXRatio * containerSize.width,
+                        y: existing.centerYRatio * containerSize.height
+                    )
+
+                    let existingRect = CGRect(
+                        x: existingPoint.x - poopSize * 0.5,
+                        y: existingPoint.y - poopSize * 0.5,
+                        width: poopSize,
+                        height: poopSize
+                    ).insetBy(
+                        dx: -(Layout.toiletPoopMinSpacing * 0.5),
+                        dy: -(Layout.toiletPoopMinSpacing * 0.5)
+                    )
+
+                    return poopRect.intersects(existingRect)
+                }
+
+                if overlapsAnotherPoop {
+                    continue
+                }
+
+                created = AppState.ToiletPoopItem(
+                    centerXRatio: Double(point.x / max(containerSize.width, 1)),
+                    centerYRatio: Double(point.y / max(containerSize.height, 1)),
+                    rotationDegrees: Double.random(in: -32...32),
+                    isFlippedHorizontally: Bool.random()
+                )
+                break
+            }
+
+            if let created {
+                items.append(created)
+            }
+        }
+
+        return items
+    }
+
+    private func position(for poop: AppState.ToiletPoopItem, in containerSize: CGSize) -> CGPoint {
+        CGPoint(
+            x: max(0, min(containerSize.width, CGFloat(poop.centerXRatio) * containerSize.width)),
+            y: max(0, min(containerSize.height, CGFloat(poop.centerYRatio) * containerSize.height))
+        )
+    }
+
+    private func currentToiletPoopProgress(id: String) -> CGFloat {
+        let progress = state.toiletPoops().first(where: { $0.id == id })?.cleanedProgress ?? 0
+        return CGFloat(max(0, min(1, progress)))
+    }
+
+    private func toiletPoopOpacity(for poop: AppState.ToiletPoopItem) -> Double {
+        let progress = max(0, min(1, CGFloat(poop.cleanedProgress)))
+        return max(0.02, 1 - (progress * 0.98))
+    }
+
+    private func toiletPoopScratchRect() -> CGRect {
+        let inset = Layout.toiletPoopScratchRectInset
+        let origin = (Layout.toiletPoopHitSize - Layout.toiletPoopSize) * 0.5 + inset
+        let side = max(18, Layout.toiletPoopSize - (inset * 2))
+        return CGRect(x: origin, y: origin, width: side, height: side)
+    }
+
+    private func handleToiletPoopScratchChanged(_ poop: AppState.ToiletPoopItem, value: DragGesture.Value) {
+        guard isToiletCleaningMode else { return }
+
+        let scratchRect = toiletPoopScratchRect()
+        let point = value.location
+
+        guard scratchRect.contains(point) else {
+            toiletPoopActivePoint.removeValue(forKey: poop.id)
+            return
+        }
+
+        let current = currentToiletPoopProgress(id: poop.id)
+
+        if let lastPoint = toiletPoopActivePoint[poop.id], scratchRect.contains(lastPoint) {
+            let segmentDistance = hypot(point.x - lastPoint.x, point.y - lastPoint.y)
+
+            if segmentDistance > 0 {
+                let progress = min(1, current + (segmentDistance / Layout.toiletPoopScratchDistanceToClear))
+                _ = state.updateToiletPoopProgress(id: poop.id, progress: Double(progress))
+
+                if progress >= 1 {
+                    completeToiletPoopIfNeeded(id: poop.id)
+                    return
+                }
+            }
+        }
+
+        toiletPoopActivePoint[poop.id] = point
+    }
+
+    private func handleToiletPoopScratchEnded(_ poop: AppState.ToiletPoopItem) {
+        toiletPoopActivePoint.removeValue(forKey: poop.id)
+        save()
+    }
+
+    private func completeToiletPoopIfNeeded(id: String) {
+        guard state.markToiletPoopCleared(id: id) else { return }
+
+        toiletPoopActivePoint.removeValue(forKey: id)
+
+        Task { @MainActor in
+            Haptics.tap(style: .soft)
+        }
+
+        save()
+
+        if !state.hasRemainingToiletPoops {
+            isToiletCleaningMode = false
+            toiletPoopActivePoint.removeAll()
+            resolveToilet(state: state)
+        }
+    }
+
     private func syncFoodSelectorSelection() {
         let foods = ownedFoods
 
@@ -928,6 +1199,7 @@ struct HomeView: View {
     private func closeFoodSelector() {
         foodSelectorDragOffset = .zero
         isFoodFeedingAnimationRunning = false
+        stopFoodSelectorHorizontalRattleIfNeeded()
 
         withAnimation(.spring(response: 0.28, dampingFraction: 0.88)) {
             showFoodSelector = false
@@ -935,12 +1207,18 @@ struct HomeView: View {
     }
 
     private func openFoodSelector() {
+        guard !isToiletLocked else {
+            showToiletLockedMessage()
+            return
+        }
+
         syncFoodSelectorSelection()
 
         guard !ownedFoods.isEmpty else { return }
 
         foodSelectorDragOffset = .zero
         isFoodFeedingAnimationRunning = false
+        stopFoodSelectorHorizontalRattleIfNeeded()
 
         withAnimation(.spring(response: 0.32, dampingFraction: 0.85)) {
             showFoodSelector = true
@@ -950,6 +1228,12 @@ struct HomeView: View {
     private func moveFoodSelection(_ delta: Int) {
         let foods = ownedFoods
         guard foods.count >= 2 else { return }
+        guard delta != 0 else {
+            withAnimation(.spring(response: 0.28, dampingFraction: 0.9)) {
+                foodSelectorDragOffset = .zero
+            }
+            return
+        }
 
         syncFoodSelectorSelection()
         guard let currentID = selectedFoodID,
@@ -970,7 +1254,22 @@ struct HomeView: View {
         }
     }
 
+    private func handleFoodSelectorDragChanged(_ value: DragGesture.Value) {
+        foodSelectorDragOffset = value.translation
+
+        let horizontal = abs(value.translation.width)
+        let vertical = abs(value.translation.height)
+        let isHorizontalDrag = horizontal > 14 && horizontal > vertical * 1.1
+
+        if isHorizontalDrag {
+            startFoodSelectorHorizontalRattleIfNeeded()
+        } else {
+            stopFoodSelectorHorizontalRattleIfNeeded()
+        }
+    }
+
     private func handleFoodSelectorDragEnded(_ value: DragGesture.Value, state: AppState) {
+        stopFoodSelectorHorizontalRattleIfNeeded()
         let horizontal = value.translation.width
         let vertical = value.translation.height
         let predictedHorizontal = value.predictedEndTranslation.width
@@ -987,13 +1286,15 @@ struct HomeView: View {
             return
         }
 
-        if predictedHorizontal <= -70 || horizontal <= -55 {
-            moveFoodSelection(1)
-            return
-        }
+        let projectedHorizontal = abs(predictedHorizontal) > abs(horizontal)
+            ? predictedHorizontal
+            : horizontal
 
-        if predictedHorizontal >= 70 || horizontal >= 55 {
-            moveFoodSelection(-1)
+        let rawStepDelta = Int(round((-projectedHorizontal) / Layout.foodSelectorRollStepWidth))
+        let clampedStepDelta = min(3, max(-3, rawStepDelta))
+
+        if clampedStepDelta != 0 {
+            moveFoodSelection(clampedStepDelta)
             return
         }
 
@@ -1002,7 +1303,33 @@ struct HomeView: View {
         }
     }
 
+    private func startFoodSelectorHorizontalRattleIfNeeded() {
+        guard !isFoodSelectorHorizontalRattling else { return }
+        isFoodSelectorHorizontalRattling = true
+
+        Task { @MainActor in
+            Haptics.startRattle(style: .soft, interval: 0.028, intensity: 0.72)
+        }
+    }
+
+    private func stopFoodSelectorHorizontalRattleIfNeeded() {
+        guard isFoodSelectorHorizontalRattling else { return }
+        isFoodSelectorHorizontalRattling = false
+
+        Task { @MainActor in
+            Haptics.stopRattle()
+        }
+    }
+
     private func feedSelectedFood(state: AppState) {
+        stopFoodSelectorHorizontalRattleIfNeeded()
+
+        guard !isToiletLocked else {
+            showToiletLockedMessage()
+            closeFoodSelector()
+            return
+        }
+
         guard !isFoodFeedingAnimationRunning else { return }
         guard let selectedFood else {
             toast("ご飯を持っていません")
@@ -1074,6 +1401,7 @@ struct HomeView: View {
         let didRaise = state.raiseToiletFlag(now: now)
         if didRaise {
             save()
+            syncToiletPoopsIfNeeded(containerSize: homeContentSize)
             toast("トイレ行きたい！")
             syncCharacterBaseFromState(force: true)
             updateToiletWiggle()
@@ -1276,6 +1604,11 @@ struct HomeView: View {
 
     @discardableResult
     private func resolveFood(foodId: String, state: AppState) -> Bool {
+        guard !isToiletLocked else {
+            showToiletLockedMessage()
+            return false
+        }
+
         guard state.hasFoodFlag else { return false }
         guard let food = FoodCatalog.byId(foodId) else {
             toast("ご飯が見つかりません")
@@ -1534,6 +1867,11 @@ struct HomeView: View {
     }
 
     private func onTapFood(state: AppState) {
+        guard !isToiletLocked else {
+            showToiletLockedMessage()
+            return
+        }
+
         guard state.hasFoodFlag else {
             Task { @MainActor in
                 Haptics.rattle(duration: 0.12, style: .light)
@@ -1565,10 +1903,19 @@ struct HomeView: View {
 
     private func onTapToilet(state: AppState) {
         if state.hasToiletFlag {
+            syncToiletPoopsIfNeeded(containerSize: homeContentSize)
+
+            guard !visibleToiletPoops.isEmpty else {
+                bgmManager.playSE(.wc)
+                resolveToilet(state: state)
+                syncCharacterBaseFromState(force: true)
+                updateToiletWiggle()
+                return
+            }
+
             bgmManager.playSE(.wc)
-            resolveToilet(state: state)
-            syncCharacterBaseFromState(force: true)
-            updateToiletWiggle()
+            isToiletCleaningMode = true
+            toast("うんちをこすって掃除しよう！")
             return
         }
 
@@ -1578,6 +1925,11 @@ struct HomeView: View {
     }
 
     private func onTapStep() {
+        guard !isToiletLocked else {
+            showToiletLockedMessage()
+            return
+        }
+
         bgmManager.playSE(.open)
         showStepEnjoy = true
     }
@@ -1585,6 +1937,9 @@ struct HomeView: View {
     private func resolveToilet(state: AppState) {
         let r = state.resolveToilet(now: Date())
         guard r.didResolve else { return }
+
+        isToiletCleaningMode = false
+        toiletPoopActivePoint.removeAll()
 
         addFriendshipWithAnimation(points: r.isWithin1h ? 20 : 10, state: state)
         toast(r.isWithin1h ? "トイレ成功（1時間以内）+20" : "トイレ成功 +10")
@@ -1981,6 +2336,36 @@ private struct KcalRing: View {
     }
 }
 
+private struct ToiletPoopView: View {
+    let item: AppState.ToiletPoopItem
+    let size: CGFloat
+    let hitSize: CGFloat
+    let opacity: Double
+    let isCleaningMode: Bool
+    let onScratchChanged: (DragGesture.Value) -> Void
+    let onScratchEnded: () -> Void
+
+    var body: some View {
+        Image("poop")
+            .resizable()
+            .scaledToFit()
+            .frame(width: size, height: size)
+            .scaleEffect(x: item.isFlippedHorizontally ? -1 : 1, y: 1)
+            .rotationEffect(.degrees(item.rotationDegrees))
+            .opacity(opacity)
+            .frame(width: hitSize, height: hitSize)
+            .contentShape(Rectangle())
+            .gesture(
+                DragGesture(minimumDistance: 0)
+                    .onChanged(onScratchChanged)
+                    .onEnded { _ in
+                        onScratchEnded()
+                    }
+            )
+            .allowsHitTesting(isCleaningMode)
+    }
+}
+
 private struct FloatingThoughtButton: View {
     let imageName: String
     let size: CGFloat
@@ -2211,6 +2596,9 @@ private struct BottomButtons: View {
     let onWork: () -> Void
     let onStep: () -> Void
 
+    let isToiletLocked: Bool
+    let onBlocked: () -> Void
+
     let buttonSize: CGFloat
     let spacing: CGFloat
     let horizontalPadding: CGFloat
@@ -2222,6 +2610,10 @@ private struct BottomButtons: View {
                 buttonSize: buttonSize,
                 action: {
                     bgmManager.playSE(.push)
+                    if isToiletLocked {
+                        onBlocked()
+                        return
+                    }
                     onMenu()
                 }
             )
@@ -2231,6 +2623,10 @@ private struct BottomButtons: View {
                 buttonSize: buttonSize,
                 action: {
                     bgmManager.playSE(.push)
+                    if isToiletLocked {
+                        onBlocked()
+                        return
+                    }
                     onGatya()
                 }
             )
@@ -2240,6 +2636,10 @@ private struct BottomButtons: View {
                 buttonSize: buttonSize,
                 action: {
                     bgmManager.playSE(.push)
+                    if isToiletLocked {
+                        onBlocked()
+                        return
+                    }
                     onWork()
                 }
             )
@@ -2249,6 +2649,10 @@ private struct BottomButtons: View {
                 buttonSize: buttonSize,
                 action: {
                     bgmManager.playSE(.push)
+                    if isToiletLocked {
+                        onBlocked()
+                        return
+                    }
                     onStep()
                 }
             )
@@ -2345,10 +2749,26 @@ private struct FoodSelectionCarousel: View {
         return idx
     }
 
+    private var normalizedHorizontalProgress: Double {
+        guard HomeView.Layout.foodSelectorRollStepWidth > 0 else { return 0 }
+        let raw = dragOffset.width / HomeView.Layout.foodSelectorRollStepWidth
+        let clamped = min(
+            HomeView.Layout.foodSelectorRollMaxVisibleOffset,
+            max(-HomeView.Layout.foodSelectorRollMaxVisibleOffset, Double(raw))
+        )
+        return clamped
+    }
+
+    private var focusedIndex: Int {
+        guard !foods.isEmpty else { return 0 }
+        let previewDelta = Int(round(-normalizedHorizontalProgress))
+        return (selectedIndex + previewDelta).positiveModulo(foods.count)
+    }
+
     private var visibleCards: [VisibleCard] {
         guard !foods.isEmpty else { return [] }
 
-        let candidateOffsets = [0, -1, 1, -2, 2]
+        let candidateOffsets = [-3, -2, -1, 0, 1, 2, 3]
         var seenIndexes: Set<Int> = []
         var cards: [VisibleCard] = []
 
@@ -2377,24 +2797,29 @@ private struct FoodSelectionCarousel: View {
                 )
                 .contentShape(Rectangle())
 
-            ForEach(visibleCards.sorted(by: { abs($0.relativeIndex) > abs($1.relativeIndex) })) { card in
+            ForEach(visibleCards.sorted(by: {
+                abs(Double($0.relativeIndex) + normalizedHorizontalProgress) >
+                abs(Double($1.relativeIndex) + normalizedHorizontalProgress)
+            })) { card in
+                let relativePosition = Double(card.relativeIndex) + normalizedHorizontalProgress
+
                 FoodCarouselCard(
                     item: card.item,
                     countText: countText(for: card.item.id),
-                    relativeIndex: card.relativeIndex,
+                    relativePosition: relativePosition,
                     dragOffset: dragOffset,
                     isFeedingAnimationRunning: isFeedingAnimationRunning
                 )
-                .zIndex(zIndex(for: card.relativeIndex))
+                .zIndex(zIndex(for: relativePosition))
             }
 
             VStack(spacing: 6) {
-                if let selected = foods[safe: selectedIndex] {
-                    Text(selected.name)
+                if let focused = foods[safe: focusedIndex] {
+                    Text(focused.name)
                         .font(.system(size: 14, weight: .bold))
                         .foregroundStyle(.white)
 
-                    Text("左右フリックで選択 / 上フリックであげる")
+                    Text("左右にドラムロール / 上フリックであげる")
                         .font(.system(size: 11, weight: .medium))
                         .foregroundStyle(.white.opacity(0.8))
                 }
@@ -2406,21 +2831,9 @@ private struct FoodSelectionCarousel: View {
                 .onChanged(onDragChanged)
                 .onEnded(onDragEnded)
         )
-        .simultaneousGesture(
-            TapGesture(count: 2)
-                .onEnded {
-                    onFeed()
-                }
-        )
-        .onTapGesture {
-            let width = dragOffset.width
-            if abs(width) < 8 {
-                onFeed()
-            }
-        }
         .accessibilityElement(children: .combine)
         .accessibilityLabel("ごはんセレクター")
-        .accessibilityHint("左右フリックでごはんを選び、上フリックであげます")
+        .accessibilityHint("左右にドラムロールのように動かしてごはんを選び、上フリックであげます")
     }
 
     private func countText(for foodID: String) -> String {
@@ -2428,70 +2841,71 @@ private struct FoodSelectionCarousel: View {
         return "x\(count)"
     }
 
-    private func zIndex(for relativeIndex: Int) -> Double {
-        switch abs(relativeIndex) {
-        case 0: return 10
-        case 1: return 7
-        default: return 4
-        }
+    private func zIndex(for relativePosition: Double) -> Double {
+        10 - min(9, abs(relativePosition) * 2.4)
     }
 }
 
 private struct FoodCarouselCard: View {
     let item: FoodCatalog.FoodItem
     let countText: String
-    let relativeIndex: Int
+    let relativePosition: Double
     let dragOffset: CGSize
     let isFeedingAnimationRunning: Bool
 
-    private var config: (x: CGFloat, y: CGFloat, scale: CGFloat, opacity: Double, rotation: Double, color: Color, blur: CGFloat) {
-        switch relativeIndex {
-        case -2:
-            return (-146, -12, 0.72, 0.34, 54, .green, 0.8)
-        case -1:
-            return (-88, 34, 0.88, 0.72, 28, .blue, 0.0)
-        case 1:
-            return (88, 34, 0.88, 0.72, -28, .blue, 0.0)
-        case 2:
-            return (146, -12, 0.72, 0.34, -54, .green, 0.8)
-        default:
-            return (0, 72, 1.06, 1.0, 0, .red, 0.0)
-        }
+    private var clampedPosition: Double {
+        min(
+            HomeView.Layout.foodSelectorRollMaxVisibleOffset,
+            max(-HomeView.Layout.foodSelectorRollMaxVisibleOffset, relativePosition)
+        )
     }
 
-    private var dragX: CGFloat {
-        switch relativeIndex {
-        case 0: return dragOffset.width * 0.42
-        case -1, 1: return dragOffset.width * 0.18
-        default: return dragOffset.width * 0.08
-        }
+    private var absPosition: Double {
+        abs(clampedPosition)
+    }
+
+    private var config: (x: CGFloat, y: CGFloat, scale: CGFloat, opacity: Double, rotation: Double, blur: CGFloat) {
+        let sign = clampedPosition == 0 ? 0 : (clampedPosition > 0 ? 1.0 : -1.0)
+        let x = (clampedPosition * 88.0) - (sign * max(0, absPosition - 1.0) * 30.0)
+        let y = 72.0 - (absPosition * 38.0) - (max(0, absPosition - 1.0) * 8.0)
+        let scale = max(0.60, 1.06 - (absPosition * 0.18))
+        let opacity = max(0.12, 1.0 - (absPosition * 0.28) - (max(0, absPosition - 1.0) * 0.10))
+        let rotation = -clampedPosition * 28.0
+        let blur = max(0, (absPosition - 1.2) * 1.0)
+
+        return (
+            x: CGFloat(x),
+            y: CGFloat(y),
+            scale: CGFloat(scale),
+            opacity: opacity,
+            rotation: rotation,
+            blur: CGFloat(blur)
+        )
     }
 
     private var dragY: CGFloat {
-        switch relativeIndex {
-        case 0: return min(0, dragOffset.height * 0.48)
-        case -1, 1: return min(0, dragOffset.height * 0.12)
-        default: return 0
-        }
+        guard absPosition < 0.75 else { return 0 }
+        return min(0, dragOffset.height * 0.48)
     }
 
     private var feedLift: CGFloat {
-        guard isFeedingAnimationRunning, relativeIndex == 0 else { return 0 }
+        guard isFeedingAnimationRunning, absPosition < 0.75 else { return 0 }
         return -118
     }
 
     private var cardSize: CGSize {
-        switch abs(relativeIndex) {
-        case 0: return CGSize(width: 126, height: 126)
-        case 1: return CGSize(width: 114, height: 114)
-        default: return CGSize(width: 96, height: 96)
-        }
+        let side = max(92.0, 126.0 - (absPosition * 14.0) - (max(0, absPosition - 1.0) * 4.0))
+        return CGSize(width: side, height: side)
+    }
+
+    private var backgroundOpacity: Double {
+        absPosition < 0.75 ? 0.24 : 0.18
     }
 
     var body: some View {
         ZStack(alignment: .bottomTrailing) {
             RoundedRectangle(cornerRadius: 26, style: .continuous)
-                .fill(Color.black.opacity(relativeIndex == 0 ? 0.24 : 0.18))
+                .fill(Color.black.opacity(backgroundOpacity))
                 .frame(width: cardSize.width, height: cardSize.height)
 
             Image(item.assetName)
@@ -2517,10 +2931,10 @@ private struct FoodCarouselCard: View {
             perspective: 0.65
         )
         .offset(
-            x: config.x + dragX,
+            x: config.x,
             y: config.y + dragY + feedLift
         )
-        .animation(.spring(response: 0.32, dampingFraction: 0.82), value: dragOffset)
+        .animation(.interactiveSpring(response: 0.26, dampingFraction: 0.82), value: dragOffset)
         .animation(.spring(response: 0.28, dampingFraction: 0.8), value: isFeedingAnimationRunning)
     }
 }

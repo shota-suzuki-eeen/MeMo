@@ -54,6 +54,9 @@ final class AppState {
     var toiletLastRaisedAt: Date?
     var toiletNextSpawnAt: Date?
 
+    // ✅ トイレ中のpoop配置（同一イベント中のみ保持）
+    var toiletPoopsData: Data?
+
     // ✅ 卵（ショップ）
     var eggOwned: Bool
     var eggHatchAt: Date?
@@ -121,6 +124,7 @@ final class AppState {
         toiletFlagAt: Date? = nil,
         toiletLastRaisedAt: Date? = nil,
         toiletNextSpawnAt: Date? = nil,
+        toiletPoopsData: Data? = nil,
 
         eggOwned: Bool = false,
         eggHatchAt: Date? = nil,
@@ -182,6 +186,7 @@ final class AppState {
         self.toiletFlagAt = toiletFlagAt
         self.toiletLastRaisedAt = toiletLastRaisedAt
         self.toiletNextSpawnAt = toiletNextSpawnAt
+        self.toiletPoopsData = toiletPoopsData
 
         self.eggOwned = eggOwned
         self.eggHatchAt = eggHatchAt
@@ -383,6 +388,120 @@ extension AppState {
 
         dict[petID] = true
         setSuperFavoriteRevealedMap(dict)
+        return true
+    }
+}
+
+
+// MARK: - Toilet Poops
+extension AppState {
+    struct ToiletPoopItem: Codable, Identifiable, Equatable {
+        let id: String
+        var centerXRatio: Double
+        var centerYRatio: Double
+        var rotationDegrees: Double
+        var isFlippedHorizontally: Bool
+        var cleanedProgress: Double
+        var isCleared: Bool
+
+        private enum CodingKeys: String, CodingKey {
+            case id
+            case centerXRatio
+            case centerYRatio
+            case rotationDegrees
+            case isFlippedHorizontally
+            case cleanedProgress
+            case isCleared
+        }
+
+        init(
+            id: String = UUID().uuidString,
+            centerXRatio: Double,
+            centerYRatio: Double,
+            rotationDegrees: Double,
+            isFlippedHorizontally: Bool,
+            cleanedProgress: Double = 0,
+            isCleared: Bool = false
+        ) {
+            self.id = id
+            self.centerXRatio = centerXRatio
+            self.centerYRatio = centerYRatio
+            self.rotationDegrees = rotationDegrees
+            self.isFlippedHorizontally = isFlippedHorizontally
+            self.cleanedProgress = max(0, min(1, cleanedProgress))
+            self.isCleared = isCleared
+        }
+
+        init(from decoder: Decoder) throws {
+            let container = try decoder.container(keyedBy: CodingKeys.self)
+            id = try container.decodeIfPresent(String.self, forKey: .id) ?? UUID().uuidString
+            centerXRatio = try container.decode(Double.self, forKey: .centerXRatio)
+            centerYRatio = try container.decode(Double.self, forKey: .centerYRatio)
+            rotationDegrees = try container.decode(Double.self, forKey: .rotationDegrees)
+            isFlippedHorizontally = try container.decode(Bool.self, forKey: .isFlippedHorizontally)
+            cleanedProgress = max(0, min(1, try container.decodeIfPresent(Double.self, forKey: .cleanedProgress) ?? 0))
+            isCleared = try container.decodeIfPresent(Bool.self, forKey: .isCleared) ?? false
+        }
+
+        func encode(to encoder: Encoder) throws {
+            var container = encoder.container(keyedBy: CodingKeys.self)
+            try container.encode(id, forKey: .id)
+            try container.encode(centerXRatio, forKey: .centerXRatio)
+            try container.encode(centerYRatio, forKey: .centerYRatio)
+            try container.encode(rotationDegrees, forKey: .rotationDegrees)
+            try container.encode(isFlippedHorizontally, forKey: .isFlippedHorizontally)
+            try container.encode(cleanedProgress, forKey: .cleanedProgress)
+            try container.encode(isCleared, forKey: .isCleared)
+        }
+    }
+
+    func toiletPoops() -> [ToiletPoopItem] {
+        guard let data = toiletPoopsData,
+              let items = try? JSONDecoder().decode([ToiletPoopItem].self, from: data) else {
+            return []
+        }
+        return items
+    }
+
+    func setToiletPoops(_ items: [ToiletPoopItem]) {
+        if items.isEmpty {
+            toiletPoopsData = nil
+        } else {
+            toiletPoopsData = try? JSONEncoder().encode(items)
+        }
+    }
+
+    func clearToiletPoops() {
+        toiletPoopsData = nil
+    }
+
+    var hasRemainingToiletPoops: Bool {
+        toiletPoops().contains(where: { !$0.isCleared })
+    }
+
+    @discardableResult
+    func updateToiletPoopProgress(id: String, progress: Double) -> Bool {
+        var items = toiletPoops()
+        guard let index = items.firstIndex(where: { $0.id == id }) else { return false }
+        guard items[index].isCleared == false else { return false }
+
+        let clamped = max(0, min(1, progress))
+        guard abs(items[index].cleanedProgress - clamped) > 0.0001 else { return false }
+
+        items[index].cleanedProgress = clamped
+        setToiletPoops(items)
+        return true
+    }
+
+    @discardableResult
+    func markToiletPoopCleared(id: String) -> Bool {
+        var items = toiletPoops()
+        guard let index = items.firstIndex(where: { $0.id == id }) else { return false }
+        guard items[index].isCleared == false else { return false }
+
+        items[index].cleanedProgress = 1
+        items[index].isCleared = true
+        setToiletPoops(items)
         return true
     }
 }
@@ -770,6 +889,7 @@ extension AppState {
 
         toiletFlagAt = now
         toiletLastRaisedAt = now
+        toiletPoopsData = nil
         return true
     }
 
@@ -785,6 +905,7 @@ extension AppState {
 
         toiletFlagAt = nil
         toiletNextSpawnAt = now.addingTimeInterval(randomCareInterval())
+        toiletPoopsData = nil
         return (true, within)
     }
 }
