@@ -19,14 +19,9 @@ struct HomeView: View {
     let state: AppState
     @ObservedObject var hk: HealthKitManager
 
-    @AppStorage("didSetDailyGoalOnce") private var didSetDailyGoalOnce: Bool = false
-
     @State private var todaySteps: Int = 0
-    @State private var todayKcal: Int = 0
-    @State private var displayedTodayKcal: Int = 0
-    @State private var displayedWalletKcal: Int = 0
-
-    @State private var showGoalSheet: Bool = false
+    @State private var displayedTodaySteps: Int = 0
+    @State private var displayedWalletSteps: Int = 0
 
     @State private var todayPhotoImage: UIImage?
     @State private var todayPhotoEntry: TodayPhotoEntry?
@@ -38,7 +33,7 @@ struct HomeView: View {
     @State private var showToast: Bool = false
 
     @State private var displayedFriendship: Double = 0
-    @State private var displayedKcalProgress: Double = 0
+    @State private var displayedStepProgress: Double = 0
 
     @State private var isAnimatingGain: Bool = false
     @State private var isHomeVisible: Bool = false
@@ -100,6 +95,10 @@ struct HomeView: View {
 
     private var hasFoodFlag: Bool {
         state.hasFoodFlag
+    }
+
+    private var fixedDailyGoalSteps: Int {
+        AppState.fixedDailyStepGoal
     }
 
     private var widgetLinkedTodaySteps: Int {
@@ -290,10 +289,14 @@ struct HomeView: View {
 
     private var captureMetricValues: (steps: Int, activeKcal: Int, totalKcal: Int) {
         let steps = max(todaySteps, hk.todaySteps)
-        let total = max(todayKcal, hk.todayTotalEnergyKcal)
-        let active = max(0, hk.todayActiveEnergyKcal)
 
-        return (steps: steps, activeKcal: active, totalKcal: total)
+        // CameraCaptureView 側の互換のため引数名は残すが、
+        // 仕様上は歩数主軸に統一する。
+        return (
+            steps: steps,
+            activeKcal: 0,
+            totalKcal: steps
+        )
     }
 
     // MARK: - Layout
@@ -316,10 +319,10 @@ struct HomeView: View {
 
         static let friendshipTextFont: CGFloat = 11
 
-        static let kcalRingTop: CGFloat = 36
-        static let kcalRingTrailing: CGFloat = 18
-        static let kcalRingSizeOuter: CGFloat = 135
-        static let kcalRingSizeInner: CGFloat = 115
+        static let stepRingTop: CGFloat = 36
+        static let stepRingTrailing: CGFloat = 18
+        static let stepRingSizeOuter: CGFloat = 135
+        static let stepRingSizeInner: CGFloat = 115
 
         static let characterTopOffset: CGFloat = 45
         static let characterMaxWidth: CGFloat = 210
@@ -375,11 +378,11 @@ struct HomeView: View {
         static let getTextOffsetX: CGFloat = 11
         static let getTextOffsetY: CGFloat = -160
 
-        static let kcalCenterCurrentFont: CGFloat = 18
-        static let kcalCenterGoalFont: CGFloat = 12
-        static let kcalCenterDividerHeight: CGFloat = 1
-        static let kcalCenterDividerWidthRatio: CGFloat = 0.62
-        static let kcalCenterSpacing: CGFloat = 4
+        static let stepCenterCurrentFont: CGFloat = 18
+        static let stepCenterGoalFont: CGFloat = 12
+        static let stepCenterDividerHeight: CGFloat = 1
+        static let stepCenterDividerWidthRatio: CGFloat = 0.62
+        static let stepCenterSpacing: CGFloat = 4
 
         static let zCharacter: Double = 50
         static let zBottomButtons: Double = 260
@@ -469,7 +472,7 @@ struct HomeView: View {
                                 )
 
                                 WalletCapsule(
-                                    walletKcal: displayedWalletKcal,
+                                    walletSteps: displayedWalletSteps,
                                     barWidth: Layout.walletWidth,
                                     height: Layout.capsuleHeight,
                                     iconSize: Layout.iconCoinSize
@@ -481,15 +484,15 @@ struct HomeView: View {
                             .padding(.leading, Layout.leftTopPaddingLeading)
                             .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
 
-                            KcalRing(
-                                progress: displayedKcalProgress,
-                                currentKcal: displayedTodayKcal,
-                                goalKcal: state.dailyGoalKcal,
-                                outerSize: Layout.kcalRingSizeOuter,
-                                innerSize: Layout.kcalRingSizeInner
+                            StepRing(
+                                progress: displayedStepProgress,
+                                currentSteps: displayedTodaySteps,
+                                goalSteps: fixedDailyGoalSteps,
+                                outerSize: Layout.stepRingSizeOuter,
+                                innerSize: Layout.stepRingSizeInner
                             )
-                            .padding(.top, Layout.kcalRingTop)
-                            .padding(.trailing, Layout.kcalRingTrailing)
+                            .padding(.top, Layout.stepRingTop)
+                            .padding(.trailing, Layout.stepRingTrailing)
                             .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topTrailing)
 
                             if hasFoodFlag {
@@ -793,25 +796,27 @@ struct HomeView: View {
         .fullScreenCover(isPresented: $showWorkTimerPreparation) {
             WorkTimerPreparationView()
         }
+        .fullScreenCover(isPresented: $showStepEnjoy) {
+            NavigationStack {
+                StepView(state: state, hk: hk, onSave: save)
+            }
+        }
         .task {
             state.ensureInitialPetsIfNeeded()
+            let didNormalizeGoal = state.normalizeFixedDailyStepGoal()
 
             syncCharacterBaseFromState(force: true)
 
-            if state.dailyGoalKcal > 0, didSetDailyGoalOnce == false {
-                didSetDailyGoalOnce = true
-            }
-
             todaySteps = state.widgetTodaySteps
-            todayKcal = state.cachedTodayKcal
-
-            displayedTodayKcal = todayKcal
-            displayedWalletKcal = state.walletKcal
+            displayedTodaySteps = todaySteps
+            displayedWalletSteps = state.walletSteps
             displayedFriendship = Double(state.friendshipPoint)
-            displayedKcalProgress = calcKcalProgressRaw(todayKcal: displayedTodayKcal, goalKcal: state.dailyGoalKcal)
+            displayedStepProgress = calcStepProgressRaw(
+                todaySteps: displayedTodaySteps,
+                goalSteps: fixedDailyGoalSteps
+            )
 
             handleDayRolloverIfNeeded(state: state)
-
             await runSync(state: state)
 
             state.ensureToiletNextSpawnScheduled(now: Date())
@@ -824,24 +829,26 @@ struct HomeView: View {
             loadTodayPhoto()
             syncFoodSelectorSelection()
 
-            if !didSetDailyGoalOnce, state.dailyGoalKcal <= 0 {
-                showGoalSheet = true
-            }
-
             updateToiletWiggle()
             syncCharacterBaseFromState(force: true)
             updateWidgetSnapshot(forceReload: true)
+
+            if didNormalizeGoal {
+                save()
+            }
         }
         .onReceive(NotificationCenter.default.publisher(for: UIApplication.willEnterForegroundNotification)) { _ in
             state.ensureInitialPetsIfNeeded()
+            _ = state.normalizeFixedDailyStepGoal()
 
             syncCharacterBaseFromState(force: true)
 
             todaySteps = state.widgetTodaySteps
-            todayKcal = state.cachedTodayKcal
-
-            displayedTodayKcal = todayKcal
-            displayedKcalProgress = calcKcalProgressRaw(todayKcal: displayedTodayKcal, goalKcal: state.dailyGoalKcal)
+            displayedTodaySteps = todaySteps
+            displayedStepProgress = calcStepProgressRaw(
+                todaySteps: displayedTodaySteps,
+                goalSteps: fixedDailyGoalSteps
+            )
 
             handleDayRolloverIfNeeded(state: state)
 
@@ -867,39 +874,18 @@ struct HomeView: View {
                 updateWidgetSnapshot(forceReload: true)
             }
         }
-        .sheet(isPresented: $showGoalSheet) {
-            GoalSettingSheet(
-                currentGoal: state.dailyGoalKcal,
-                isDismissDisabled: state.dailyGoalKcal <= 0,
-                onSave: { newGoal in
-                    state.dailyGoalKcal = newGoal
-                    didSetDailyGoalOnce = true
-                    save()
-
-                    withAnimation(.easeOut(duration: 0.35)) {
-                        displayedKcalProgress = calcKcalProgressRaw(
-                            todayKcal: displayedTodayKcal,
-                            goalKcal: state.dailyGoalKcal
-                        )
-                    }
-
-                    showGoalSheet = false
-                }
-            )
-        }
-        .fullScreenCover(isPresented: $showStepEnjoy) {
-            NavigationStack {
-                StepView(state: state, hk: hk, onSave: save)
-            }
-        }
         .onAppear {
             isHomeVisible = true
 
+            _ = state.normalizeFixedDailyStepGoal()
             syncCharacterBaseFromState(force: true)
             startCharacterIdleLoopIfNeeded()
 
             withAnimation(.easeOut(duration: 0.25)) {
-                displayedKcalProgress = calcKcalProgressRaw(todayKcal: displayedTodayKcal, goalKcal: state.dailyGoalKcal)
+                displayedStepProgress = calcStepProgressRaw(
+                    todaySteps: displayedTodaySteps,
+                    goalSteps: fixedDailyGoalSteps
+                )
             }
 
             Task { await reconcileWalletDisplayIfNeeded(state: state) }
@@ -930,11 +916,15 @@ struct HomeView: View {
             updateWidgetSnapshot()
         }
         .onChange(of: state.dailyGoalKcal) { _, _ in
-            if state.dailyGoalKcal > 0, didSetDailyGoalOnce == false {
-                didSetDailyGoalOnce = true
+            let didNormalize = state.normalizeFixedDailyStepGoal()
+            if didNormalize {
+                save()
             }
             withAnimation(.easeOut(duration: 0.25)) {
-                displayedKcalProgress = calcKcalProgressRaw(todayKcal: displayedTodayKcal, goalKcal: state.dailyGoalKcal)
+                displayedStepProgress = calcStepProgressRaw(
+                    todaySteps: displayedTodaySteps,
+                    goalSteps: fixedDailyGoalSteps
+                )
             }
         }
         .onChange(of: todaySteps) { _, _ in
@@ -1703,24 +1693,24 @@ struct HomeView: View {
         return true
     }
 
-    private func calcKcalProgressRaw(todayKcal: Int, goalKcal: Int) -> Double {
-        guard goalKcal > 0 else { return 0 }
-        return Double(todayKcal) / Double(goalKcal)
+    private func calcStepProgressRaw(todaySteps: Int, goalSteps: Int) -> Double {
+        guard goalSteps > 0 else { return 0 }
+        return Double(todaySteps) / Double(goalSteps)
     }
 
     private func reconcileWalletDisplayIfNeeded(state: AppState) async {
         guard isHomeVisible else { return }
         guard !isAnimatingGain else { return }
 
-        let target = state.walletKcal
+        let target = state.walletSteps
 
-        if displayedWalletKcal > target {
-            await playWalletCountDownAnimation(from: displayedWalletKcal, to: target)
+        if displayedWalletSteps > target {
+            await playWalletCountDownAnimation(from: displayedWalletSteps, to: target)
             return
         }
 
-        if displayedWalletKcal != target {
-            await MainActor.run { displayedWalletKcal = target }
+        if displayedWalletSteps != target {
+            await MainActor.run { displayedWalletSteps = target }
         }
     }
 
@@ -1747,14 +1737,14 @@ struct HomeView: View {
             let v = from - Int(Double(magnitude) * eased)
 
             await MainActor.run {
-                displayedWalletKcal = max(to, v)
+                displayedWalletSteps = max(to, v)
             }
 
             try? await Task.sleep(nanoseconds: UInt64(1_000_000_000 / fps))
         }
 
         await MainActor.run {
-            displayedWalletKcal = to
+            displayedWalletSteps = to
             Haptics.stopRattle()
         }
     }
@@ -2015,6 +2005,11 @@ struct HomeView: View {
         let now = Date()
         let todayKey = AppState.makeDayKey(now)
         guard state.lastDayKey == todayKey else {
+            state.cachedTodaySteps = 0
+            state.cachedTodayMeterSteps = 0
+            todaySteps = 0
+            displayedTodaySteps = 0
+
             state.ensureDailyResetIfNeeded(now: now)
             state.lastSyncedAt = Calendar.current.startOfDay(for: now)
             save()
@@ -2026,49 +2021,48 @@ struct HomeView: View {
     private func runSync(state: AppState) async {
         guard hk.authState == .authorized else { return }
 
-        let previousCachedSteps = state.cachedTodaySteps
-        let previousCachedKcal = state.cachedTodayKcal
+        let now = Date()
+        let todayKey = AppState.makeDayKey(now)
 
-        let beforeDisplayedTodayKcal = displayedTodayKcal
-        let beforeDisplayedWallet = displayedWalletKcal
+        let previousCachedSteps = max(0, state.cachedTodaySteps)
+        let beforeDisplayedTodaySteps = displayedTodaySteps
+        let beforeDisplayedWallet = displayedWalletSteps
 
-        let result = await hk.syncAndGetDeltaKcal(lastSyncedAt: state.lastSyncedAt)
-        state.lastSyncedAt = result.newLastSyncedAt
+        await hk.refreshTodayStepsForWidget(now: now)
+        let fetchedSteps = max(hk.todaySteps, await hk.fetchTodayStepTotal(now: now))
 
-        let fetchedSteps = hk.todaySteps
-        let fetchedKcal = hk.todayTotalEnergyKcal
+        let cacheResult = state.updateTodayStepCacheProtectingZero(
+            fetchedSteps: fetchedSteps,
+            todayKey: todayKey
+        )
 
-        let shouldProtectSteps = (fetchedSteps == 0 && previousCachedSteps > 0)
-        let shouldProtectKcal = (fetchedKcal == 0 && previousCachedKcal > 0)
+        state.lastSyncedAt = now
 
-        todaySteps = shouldProtectSteps ? previousCachedSteps : fetchedSteps
-        todayKcal = shouldProtectKcal ? previousCachedKcal : fetchedKcal
+        todaySteps = cacheResult.stepsToUse
 
-        if !shouldProtectSteps { state.cachedTodaySteps = todaySteps }
-        if !shouldProtectKcal { state.cachedTodayKcal = todayKcal }
-
-        if result.deltaKcal > 0 {
-            state.pendingKcal += result.deltaKcal
+        let deltaSteps = max(0, cacheResult.stepsToUse - previousCachedSteps)
+        if deltaSteps > 0 {
+            state.pendingSteps += deltaSteps
         }
         save()
 
         await playGainAnimationIfNeeded(
             state: state,
-            fromDisplayedTodayKcal: beforeDisplayedTodayKcal,
+            fromDisplayedTodaySteps: beforeDisplayedTodaySteps,
             fromDisplayedWallet: beforeDisplayedWallet
         )
 
         if !isAnimatingGain {
-            displayedTodayKcal = todayKcal
+            displayedTodaySteps = todaySteps
 
             if isHomeVisible {
-                displayedWalletKcal = state.walletKcal
+                displayedWalletSteps = state.walletSteps
             }
 
             withAnimation(.easeOut(duration: 0.25)) {
-                displayedKcalProgress = calcKcalProgressRaw(
-                    todayKcal: displayedTodayKcal,
-                    goalKcal: state.dailyGoalKcal
+                displayedStepProgress = calcStepProgressRaw(
+                    todaySteps: displayedTodaySteps,
+                    goalSteps: fixedDailyGoalSteps
                 )
             }
         }
@@ -2079,27 +2073,27 @@ struct HomeView: View {
 
     private func playGainAnimationIfNeeded(
         state: AppState,
-        fromDisplayedTodayKcal: Int,
+        fromDisplayedTodaySteps: Int,
         fromDisplayedWallet: Int
     ) async {
         guard !isAnimatingGain else { return }
 
-        let deltaWallet = state.pendingKcal
-        let targetWallet = state.walletKcal + max(0, deltaWallet)
-        let targetTodayKcal = todayKcal
+        let deltaWallet = state.pendingSteps
+        let targetWallet = state.walletSteps + max(0, deltaWallet)
+        let targetTodaySteps = todaySteps
 
-        let hasAnyIncrease = (targetWallet > fromDisplayedWallet) || (targetTodayKcal > fromDisplayedTodayKcal)
+        let hasAnyIncrease = (targetWallet > fromDisplayedWallet) || (targetTodaySteps > fromDisplayedTodaySteps)
         guard hasAnyIncrease else { return }
 
         isAnimatingGain = true
 
         if deltaWallet > 0 {
-            state.pendingKcal = 0
-            state.walletKcal = targetWallet
+            state.pendingSteps = 0
+            state.walletSteps = targetWallet
             save()
         }
 
-        let totalMagnitude = max(targetWallet - fromDisplayedWallet, targetTodayKcal - fromDisplayedTodayKcal)
+        let totalMagnitude = max(targetWallet - fromDisplayedWallet, targetTodaySteps - fromDisplayedTodaySteps)
         let duration = min(1.6, max(0.45, Double(totalMagnitude) * 0.008))
 
         let fps: Double = 60
@@ -2114,21 +2108,27 @@ struct HomeView: View {
             let eased = 1 - pow(1 - t, 3)
 
             let newWallet = fromDisplayedWallet + Int(Double(targetWallet - fromDisplayedWallet) * eased)
-            let newTodayKcal = fromDisplayedTodayKcal + Int(Double(targetTodayKcal - fromDisplayedTodayKcal) * eased)
+            let newTodaySteps = fromDisplayedTodaySteps + Int(Double(targetTodaySteps - fromDisplayedTodaySteps) * eased)
 
             await MainActor.run {
-                displayedWalletKcal = newWallet
-                displayedTodayKcal = newTodayKcal
-                displayedKcalProgress = calcKcalProgressRaw(todayKcal: displayedTodayKcal, goalKcal: state.dailyGoalKcal)
+                displayedWalletSteps = newWallet
+                displayedTodaySteps = newTodaySteps
+                displayedStepProgress = calcStepProgressRaw(
+                    todaySteps: displayedTodaySteps,
+                    goalSteps: fixedDailyGoalSteps
+                )
             }
 
             try? await Task.sleep(nanoseconds: UInt64(1_000_000_000 / fps))
         }
 
         await MainActor.run {
-            displayedWalletKcal = targetWallet
-            displayedTodayKcal = targetTodayKcal
-            displayedKcalProgress = calcKcalProgressRaw(todayKcal: displayedTodayKcal, goalKcal: state.dailyGoalKcal)
+            displayedWalletSteps = targetWallet
+            displayedTodaySteps = targetTodaySteps
+            displayedStepProgress = calcStepProgressRaw(
+                todaySteps: displayedTodaySteps,
+                goalSteps: fixedDailyGoalSteps
+            )
             Haptics.stopRattle()
         }
 
@@ -2274,7 +2274,7 @@ private struct FriendshipMeter: View {
 }
 
 private struct WalletCapsule: View {
-    let walletKcal: Int
+    let walletSteps: Int
 
     let barWidth: CGFloat
     let height: CGFloat
@@ -2292,7 +2292,7 @@ private struct WalletCapsule: View {
                     .fill(Color.black.opacity(0.85))
                     .frame(width: barWidth, height: height)
 
-                Text("\(walletKcal)")
+                Text("\(walletSteps)")
                     .font(.system(size: 18, weight: .bold))
                     .foregroundStyle(.white)
                     .monospacedDigit()
@@ -2301,15 +2301,15 @@ private struct WalletCapsule: View {
     }
 }
 
-private struct KcalRing: View {
+private struct StepRing: View {
     let progress: Double
-    let currentKcal: Int
-    let goalKcal: Int
+    let currentSteps: Int
+    let goalSteps: Int
 
     let outerSize: CGFloat
     let innerSize: CGFloat
 
-    private var goalText: String { goalKcal > 0 ? "\(goalKcal)" : "—" }
+    private var goalText: String { "\(goalSteps)" }
 
     private var lap1: CGFloat {
         CGFloat(min(1.0, max(0.0, progress)))
@@ -2350,9 +2350,9 @@ private struct KcalRing: View {
                     .animation(.easeOut(duration: 0.55), value: lap2)
             }
 
-            VStack(spacing: HomeView.Layout.kcalCenterSpacing) {
-                Text("\(currentKcal)")
-                    .font(.system(size: HomeView.Layout.kcalCenterCurrentFont, weight: .bold))
+            VStack(spacing: HomeView.Layout.stepCenterSpacing) {
+                Text("\(currentSteps)")
+                    .font(.system(size: HomeView.Layout.stepCenterCurrentFont, weight: .bold))
                     .foregroundStyle(.white)
                     .monospacedDigit()
                     .lineLimit(1)
@@ -2361,12 +2361,12 @@ private struct KcalRing: View {
                 Rectangle()
                     .fill(Color.white.opacity(0.75))
                     .frame(
-                        width: innerSize * HomeView.Layout.kcalCenterDividerWidthRatio,
-                        height: HomeView.Layout.kcalCenterDividerHeight
+                        width: innerSize * HomeView.Layout.stepCenterDividerWidthRatio,
+                        height: HomeView.Layout.stepCenterDividerHeight
                     )
 
                 Text("\(goalText)")
-                    .font(.system(size: HomeView.Layout.kcalCenterGoalFont, weight: .semibold))
+                    .font(.system(size: HomeView.Layout.stepCenterGoalFont, weight: .semibold))
                     .foregroundStyle(.white.opacity(0.92))
                     .monospacedDigit()
                     .lineLimit(1)
@@ -3048,52 +3048,5 @@ private struct ToastView: View {
             .background(.thinMaterial)
             .clipShape(Capsule())
             .shadow(radius: 8)
-    }
-}
-
-private struct GoalSettingSheet: View {
-    let currentGoal: Int
-    let isDismissDisabled: Bool
-    let onSave: (Int) -> Void
-
-    @Environment(\.dismiss) private var dismiss
-    @State private var text: String = ""
-    @State private var error: String?
-
-    var body: some View {
-        NavigationStack {
-            Form {
-                Section("目標消費カロリー（kcal）") {
-                    TextField("例：300", text: $text)
-                        .keyboardType(.numberPad)
-
-                    if let error {
-                        Text(error).foregroundStyle(.red).font(.footnote)
-                    }
-
-                    Text("当日中の変更も即時反映されます。")
-                        .font(.footnote)
-                        .foregroundStyle(.secondary)
-                }
-
-                Section {
-                    Button("保存") {
-                        guard let v = Int(text), v > 0 else {
-                            error = "1以上の数値を入力してください。"
-                            return
-                        }
-                        onSave(v)
-                    }
-                }
-            }
-            .navigationTitle("目標設定")
-            .toolbar {
-                ToolbarItem(placement: .cancellationAction) {
-                    Button("閉じる") { if !isDismissDisabled { dismiss() } }
-                        .disabled(isDismissDisabled)
-                }
-            }
-        }
-        .onAppear { text = currentGoal > 0 ? String(currentGoal) : "" }
     }
 }

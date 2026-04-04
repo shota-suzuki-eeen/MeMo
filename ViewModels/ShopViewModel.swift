@@ -12,13 +12,25 @@ import Combine
 struct ShopFoodItem: Codable, Identifiable, Equatable {
     let id: String
     let name: String
+
+    // NOTE:
+    // 既存の ShopView 側との互換のため stored property 名は維持する。
+    // 実際の意味は「価格歩数」。
     let kcal: Int
     var stock: Int
+
+    var priceSteps: Int {
+        max(0, kcal)
+    }
 }
 
 @MainActor
 final class ShopViewModel: ObservableObject {
+    // NOTE:
+    // 既存の ShopView 側との互換のため名前は維持する。
+    // 実際の意味は「所持歩数通貨」。
     @Published var displayedWalletKcal: Int = 0
+
     @Published var toastMessage: String?
     @Published var showToast: Bool = false
     @Published var showHatchAlert: Bool = false
@@ -26,11 +38,12 @@ final class ShopViewModel: ObservableObject {
 
     func onAppear(state: AppState) {
         state.ensureInitialPetsIfNeeded()
+        _ = state.normalizeFixedDailyStepGoal()
         handleDayRolloverIfNeeded(state: state)
         ensureDailyShopIfNeeded(state: state)
 
-        _ = state.drainPendingKcalToWallet()   // ✅ 一元化
-        displayedWalletKcal = state.walletKcal
+        _ = state.drainPendingStepsToWallet()
+        displayedWalletKcal = state.walletSteps
     }
 
     func decodeShopItems(from state: AppState) -> [ShopFoodItem]? {
@@ -48,7 +61,7 @@ final class ShopViewModel: ObservableObject {
     func buyFood(itemID: String, state: AppState) {
         handleDayRolloverIfNeeded(state: state)
         ensureDailyShopIfNeeded(state: state)
-        _ = state.drainPendingKcalToWallet()   // ✅ 一元化
+        _ = state.drainPendingStepsToWallet()
 
         guard var items = decodeShopItems(from: state) else { return }
         guard let idx = items.firstIndex(where: { $0.id == itemID }) else { return }
@@ -59,9 +72,9 @@ final class ShopViewModel: ObservableObject {
             return
         }
 
-        let price = items[idx].kcal
-        guard state.walletKcal >= price else {
-            failToast("kcalが足りません（必要: \(price)）")
+        let priceSteps = items[idx].priceSteps
+        guard state.walletSteps >= priceSteps else {
+            failToast("歩数が足りません（必要: \(priceSteps)歩）")
             Haptics.rattle(duration: 0.12, style: .light)
             return
         }
@@ -73,16 +86,17 @@ final class ShopViewModel: ObservableObject {
         }
 
         let fromDisplayed = displayedWalletKcal
-        state.walletKcal -= price
+
+        state.walletSteps -= priceSteps
         _ = state.addFood(foodId: itemID, count: 1)
 
         items[idx].stock = 0
         state.shopItemsData = encodeShopItems(items)
 
-        Task { await animateShopWalletCountDown(from: fromDisplayed, to: state.walletKcal) }
+        Task { await animateShopWalletCountDown(from: fromDisplayed, to: state.walletSteps) }
 
         Haptics.tap(style: .medium)
-        toast("\(items[idx].name) を購入しました（-\(price)kcal）")
+        toast("\(items[idx].name) を購入しました（-\(priceSteps)歩）")
     }
 
     /// ✅ Reward_food（広告視聴完了後）に呼ばれる想定
@@ -207,18 +221,29 @@ final class ShopViewModel: ObservableObject {
 
     private func drawDailySix() -> [ShopFoodItem] {
         let picked = Array(FoodCatalog.all.shuffled().prefix(6))
-        return picked.map { .init(id: $0.id, name: $0.name, kcal: $0.priceKcal, stock: 1) }
+        return picked.map {
+            .init(
+                id: $0.id,
+                name: $0.name,
+                kcal: $0.priceKcal,
+                stock: 1
+            )
+        }
     }
 
     private func handleDayRolloverIfNeeded(state: AppState) {
         let now = Date()
         let todayKey = AppState.makeDayKey(now)
-        guard state.lastDayKey != todayKey else { return }
+        guard state.lastDayKey != todayKey else {
+            _ = state.normalizeFixedDailyStepGoal()
+            return
+        }
 
         state.ensureDailyResetIfNeeded(now: now)
         state.shopRewardResetsToday = 0
         state.eggAdUsedToday = false
         state.lastSyncedAt = Calendar.current.startOfDay(for: now)
+        _ = state.normalizeFixedDailyStepGoal()
     }
 
     private func failToast(_ message: String) {

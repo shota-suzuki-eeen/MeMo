@@ -92,12 +92,17 @@ private struct AuthRequestView: View {
 
     var body: some View {
         VStack(spacing: 16) {
-            Text("Health連動が必要です").font(.title2).bold()
-            Text("歩数と消費カロリー（Active Energy）を取得します。\n許可しない場合は利用できません。")
+            Text("Health連動が必要です")
+                .font(.title2)
+                .bold()
+
+            Text("歩数を取得します。\n許可しない場合は利用できません。")
                 .multilineTextAlignment(.center)
 
-            Button("許可してはじめる") { onAuthorize() }
-                .buttonStyle(.borderedProminent)
+            Button("許可してはじめる") {
+                onAuthorize()
+            }
+            .buttonStyle(.borderedProminent)
 
             if let errorMessage {
                 Text(errorMessage)
@@ -115,12 +120,17 @@ private struct DeniedView: View {
 
     var body: some View {
         VStack(spacing: 16) {
-            Text("Healthの許可が必要です").font(.title2).bold()
-            Text("設定アプリでHealthアクセスを許可してください。\n許可されない場合、このアプリは利用できません。")
+            Text("Healthの許可が必要です")
+                .font(.title2)
+                .bold()
+
+            Text("設定アプリで歩数のHealthアクセスを許可してください。\n許可されない場合、このアプリは利用できません。")
                 .multilineTextAlignment(.center)
 
             Button("設定を開く") {
-                if let url = URL(string: UIApplication.openSettingsURLString) { openURL(url) }
+                if let url = URL(string: UIApplication.openSettingsURLString) {
+                    openURL(url)
+                }
             }
             .buttonStyle(.borderedProminent)
         }

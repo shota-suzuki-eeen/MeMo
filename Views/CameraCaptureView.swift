@@ -16,6 +16,10 @@ import Combine
 struct CameraCaptureView: View {
 
     typealias Snapshotter = (@escaping (UIImage?) -> Void) -> Void
+
+    // NOTE:
+    // 既存呼び出し互換のため activeKcal / totalKcal の名前は残す。
+    // 仕様上は歩数表示のみを使用する。
     typealias MetricValueProvider = () -> (steps: Int, activeKcal: Int, totalKcal: Int)
 
     enum Mode: String, Identifiable {
@@ -38,8 +42,6 @@ struct CameraCaptureView: View {
 
     enum MetricDisplay: CaseIterable, Equatable {
         case none
-        case totalKcal
-        case activeKcal
         case steps
 
         var next: MetricDisplay {
@@ -51,8 +53,6 @@ struct CameraCaptureView: View {
         var title: String {
             switch self {
             case .none: return "なし"
-            case .totalKcal: return "TOTAL"
-            case .activeKcal: return "ACTIVE"
             case .steps: return "STEPS"
             }
         }
@@ -60,7 +60,6 @@ struct CameraCaptureView: View {
         var unit: String {
             switch self {
             case .none: return ""
-            case .totalKcal, .activeKcal: return "kcal"
             case .steps: return "steps"
             }
         }
@@ -68,8 +67,6 @@ struct CameraCaptureView: View {
         var systemImage: String {
             switch self {
             case .none: return "nosign"
-            case .totalKcal: return "flame.fill"
-            case .activeKcal: return "bolt.fill"
             case .steps: return "figure.walk"
             }
         }
@@ -164,7 +161,14 @@ struct CameraCaptureView: View {
     // MARK: - Live Values
 
     private var currentMetricValues: (steps: Int, activeKcal: Int, totalKcal: Int) {
-        metricValueProvider?() ?? (todaySteps, todayActiveKcal, todayTotalKcal)
+        if let metricValueProvider {
+            let values = metricValueProvider()
+            let resolvedSteps = max(0, max(values.steps, values.totalKcal))
+            return (steps: resolvedSteps, activeKcal: 0, totalKcal: resolvedSteps)
+        }
+
+        let resolvedSteps = max(0, max(todaySteps, todayTotalKcal))
+        return (steps: resolvedSteps, activeKcal: 0, totalKcal: resolvedSteps)
     }
 
     private var alternateCharacterAssetName: String {
@@ -258,9 +262,11 @@ struct CameraCaptureView: View {
                         )
                     }
                     .disabled(!canUseAlternatePose)
-                    .accessibilityLabel(canUseAlternatePose
-                                        ? (isAlternatePoseEnabled ? "通常ポーズに切り替え" : "ポーズを切り替え")
-                                        : "切り替え可能なポーズ画像がありません")
+                    .accessibilityLabel(
+                        canUseAlternatePose
+                        ? (isAlternatePoseEnabled ? "通常ポーズに切り替え" : "ポーズを切り替え")
+                        : "切り替え可能なポーズ画像がありません"
+                    )
 
                     VerticalScaleSlider(
                         value: $sliderScale,
@@ -671,10 +677,10 @@ private struct MetricOverlayView: View {
 
     private var value: String {
         switch display {
-        case .none: return ""
-        case .totalKcal: return "\(totalKcal)"
-        case .activeKcal: return "\(activeKcal)"
-        case .steps: return "\(steps)"
+        case .none:
+            return ""
+        case .steps:
+            return "\(max(0, max(steps, totalKcal)))"
         }
     }
 
@@ -1005,9 +1011,11 @@ private struct CameraPreviewView: UIViewRepresentable {
             photoOutput.capturePhoto(with: settings, delegate: self)
         }
 
-        func photoOutput(_ output: AVCapturePhotoOutput,
-                         didFinishProcessingPhoto photo: AVCapturePhoto,
-                         error: Error?) {
+        func photoOutput(
+            _ output: AVCapturePhotoOutput,
+            didFinishProcessingPhoto photo: AVCapturePhoto,
+            error: Error?
+        ) {
             let image: UIImage?
             if let data = photo.fileDataRepresentation() {
                 image = UIImage(data: data)

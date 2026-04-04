@@ -13,7 +13,11 @@ final class AppState {
     // ✅ なかよし度メーター上限（0..(max-1)）
     static let friendshipMaxMeter: Int = 100
 
-    // MARK: - Currency (kcal)
+    // MARK: - Currency (Step)
+    // NOTE:
+    // SwiftData の既存保存データを壊しにくくするため、
+    // backing store のプロパティ名は一旦そのまま維持する。
+    // 実際の意味は「歩数通貨」として扱う。
     var walletKcal: Int
     var pendingKcal: Int
 
@@ -21,12 +25,17 @@ final class AppState {
     var lastSyncedAt: Date?
 
     // MARK: - Goal
+    // NOTE:
+    // 仕様変更により目標は固定 10,000 歩。
+    // 既存保存データ互換のため backing store 名は維持する。
     var dailyGoalKcal: Int
 
     // 日跨ぎ判定用（yyyyMMdd）
     var lastDayKey: String
 
     // MARK: - Today Cache (Offline / Protect Zero)
+    // cachedTodaySteps      : 実歩数のキャッシュ
+    // cachedTodayKcal       : メーター表示用の歩数キャッシュとして再利用
     var cachedTodaySteps: Int
     var cachedTodayKcal: Int
 
@@ -104,7 +113,7 @@ final class AppState {
         walletKcal: Int = 0,
         pendingKcal: Int = 0,
         lastSyncedAt: Date? = nil,
-        dailyGoalKcal: Int = 0,
+        dailyGoalKcal: Int = AppState.fixedDailyStepGoal,
         lastDayKey: String = AppState.makeDayKey(Date()),
 
         cachedTodaySteps: Int = 0,
@@ -162,16 +171,16 @@ final class AppState {
         stepEnjoyDailyRewardStepBank: Int = 0,
         stepEnjoyLastRewardAt: Date? = nil
     ) {
-        self.walletKcal = walletKcal
-        self.pendingKcal = pendingKcal
+        self.walletKcal = max(0, walletKcal)
+        self.pendingKcal = max(0, pendingKcal)
 
         self.lastSyncedAt = lastSyncedAt
 
         self.dailyGoalKcal = dailyGoalKcal
         self.lastDayKey = lastDayKey
 
-        self.cachedTodaySteps = cachedTodaySteps
-        self.cachedTodayKcal = cachedTodayKcal
+        self.cachedTodaySteps = max(0, cachedTodaySteps)
+        self.cachedTodayKcal = max(0, cachedTodayKcal)
 
         self.friendshipPoint = friendshipPoint
         self.friendshipCardCount = friendshipCardCount
@@ -224,6 +233,8 @@ final class AppState {
         self.stepEnjoyDailyRewardCount = stepEnjoyDailyRewardCount
         self.stepEnjoyDailyRewardStepBank = stepEnjoyDailyRewardStepBank
         self.stepEnjoyLastRewardAt = stepEnjoyLastRewardAt
+
+        _ = normalizeFixedDailyStepGoal()
     }
 
     static func makeDayKey(_ date: Date) -> String {
@@ -233,6 +244,42 @@ final class AppState {
         f.timeZone = TimeZone.current
         f.dateFormat = "yyyyMMdd"
         return f.string(from: date)
+    }
+}
+
+// MARK: - Step-based aliases / fixed goal
+extension AppState {
+    static let fixedDailyStepGoal: Int = 10_000
+
+    /// 歩数通貨の所持数
+    var walletSteps: Int {
+        get { max(0, walletKcal) }
+        set { walletKcal = max(0, newValue) }
+    }
+
+    /// 未反映の歩数通貨
+    var pendingSteps: Int {
+        get { max(0, pendingKcal) }
+        set { pendingKcal = max(0, newValue) }
+    }
+
+    /// 1日の固定目標歩数（変更不可）
+    var dailyStepGoal: Int {
+        get { AppState.fixedDailyStepGoal }
+        set { dailyGoalKcal = AppState.fixedDailyStepGoal }
+    }
+
+    /// Home 右上メーター表示用の歩数キャッシュ
+    var cachedTodayMeterSteps: Int {
+        get { max(0, cachedTodayKcal) }
+        set { cachedTodayKcal = max(0, newValue) }
+    }
+
+    @discardableResult
+    func normalizeFixedDailyStepGoal() -> Bool {
+        guard dailyGoalKcal != AppState.fixedDailyStepGoal else { return false }
+        dailyGoalKcal = AppState.fixedDailyStepGoal
+        return true
     }
 }
 
@@ -298,12 +345,18 @@ extension AppState {
 // MARK: - Currency helpers
 extension AppState {
     @discardableResult
-    func drainPendingKcalToWallet() -> Int {
-        let delta = max(0, pendingKcal)
+    func drainPendingStepsToWallet() -> Int {
+        let delta = max(0, pendingSteps)
         guard delta > 0 else { return 0 }
-        walletKcal += delta
-        pendingKcal = 0
+        walletSteps += delta
+        pendingSteps = 0
         return delta
+    }
+
+    /// 互換用
+    @discardableResult
+    func drainPendingKcalToWallet() -> Int {
+        drainPendingStepsToWallet()
     }
 }
 
@@ -551,7 +604,7 @@ extension AppState {
         guard safeCount > 0 else { return [] }
 
         var results: [ToiletPoopItem] = []
-        var occupied = existing.filter { !$0.isCleared }
+        let occupied = existing.filter { !$0.isCleared }
 
         for _ in 0..<safeCount {
             let item = randomToiletPoopItem(existing: occupied + results)
@@ -599,7 +652,10 @@ extension AppState {
 extension AppState {
     func ensureDailyResetIfNeeded(now: Date = Date()) {
         let todayKey = AppState.makeDayKey(now)
-        guard lastDayKey != todayKey else { return }
+        guard lastDayKey != todayKey else {
+            _ = normalizeFixedDailyStepGoal()
+            return
+        }
 
         if satisfactionLastUpdatedAt == nil, satisfactionLevel > 0 {
             satisfactionLastUpdatedAt = now
@@ -607,6 +663,7 @@ extension AppState {
 
         // ✅ 発生中フラグ・次回予定時刻は日跨ぎでも維持
         lastDayKey = todayKey
+        _ = normalizeFixedDailyStepGoal()
     }
 }
 
@@ -617,44 +674,66 @@ extension AppState {
         let kcalToUse: Int
         let didUpdateStepsCache: Bool
         let didUpdateKcalCache: Bool
+
+        // 新仕様向けの読み替え
+        var meterStepsToUse: Int { kcalToUse }
+        var didUpdateMeterStepsCache: Bool { didUpdateKcalCache }
     }
 
+    /// 新仕様用
+    func updateTodayStepCacheProtectingZero(
+        fetchedSteps: Int,
+        todayKey: String
+    ) -> CacheUpdateResult {
+        updateTodayCacheProtectingZero(
+            fetchedSteps: fetchedSteps,
+            fetchedKcal: fetchedSteps,
+            todayKey: todayKey
+        )
+    }
+
+    /// 互換用
     func updateTodayCacheProtectingZero(
         fetchedSteps: Int,
         fetchedKcal: Int,
         todayKey: String
     ) -> CacheUpdateResult {
+        _ = normalizeFixedDailyStepGoal()
+
         if lastDayKey != todayKey {
             cachedTodaySteps = 0
             cachedTodayKcal = 0
         }
 
-        let prevSteps = cachedTodaySteps
-        let prevKcal = cachedTodayKcal
+        let safeFetchedSteps = max(0, fetchedSteps)
+        let safeFetchedMeterSteps = max(0, fetchedKcal)
 
-        let protectSteps = (fetchedSteps == 0 && prevSteps > 0)
-        let protectKcal  = (fetchedKcal == 0 && prevKcal > 0)
+        let prevSteps = max(0, cachedTodaySteps)
+        let prevMeterSteps = max(0, cachedTodayKcal)
 
-        let stepsToUse = protectSteps ? prevSteps : fetchedSteps
-        let kcalToUse  = protectKcal  ? prevKcal  : fetchedKcal
+        let protectSteps = (safeFetchedSteps == 0 && prevSteps > 0)
+        let protectMeterSteps = (safeFetchedMeterSteps == 0 && prevMeterSteps > 0)
+
+        let stepsToUse = protectSteps ? prevSteps : safeFetchedSteps
+        let meterStepsToUse = protectMeterSteps ? prevMeterSteps : safeFetchedMeterSteps
 
         var didUpdateStepsCache = false
-        var didUpdateKcalCache = false
+        var didUpdateMeterStepsCache = false
 
         if !protectSteps {
             cachedTodaySteps = stepsToUse
             didUpdateStepsCache = true
         }
-        if !protectKcal {
-            cachedTodayKcal = kcalToUse
-            didUpdateKcalCache = true
+        if !protectMeterSteps {
+            cachedTodayKcal = meterStepsToUse
+            didUpdateMeterStepsCache = true
         }
 
         return .init(
             stepsToUse: stepsToUse,
-            kcalToUse: kcalToUse,
+            kcalToUse: meterStepsToUse,
             didUpdateStepsCache: didUpdateStepsCache,
-            didUpdateKcalCache: didUpdateKcalCache
+            didUpdateKcalCache: didUpdateMeterStepsCache
         )
     }
 }

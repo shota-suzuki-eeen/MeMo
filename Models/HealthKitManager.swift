@@ -21,25 +21,24 @@ final class HealthKitManager: ObservableObject {
     // 今日の歩数
     @Published private(set) var todaySteps: Int = 0
 
-    // ✅ 今日のアクティブ消費kcal（参考表示用に残す）
+    // NOTE:
+    // 仕様変更により消費カロリーは使わないが、
+    // 既存コード互換のため公開プロパティは残す。
     @Published private(set) var todayActiveEnergyKcal: Int = 0
-
-    // ✅ 今日の安静時消費kcal（追加）
     @Published private(set) var todayBasalEnergyKcal: Int = 0
 
-    // ✅ 通貨として使う：今日の合計kcal（アクティブ + 安静時）
+    // NOTE:
+    // 既存の totalKcal 参照箇所を壊しにくくするため残す。
+    // 実体は「今日の歩数」を入れて扱う。
     @Published private(set) var todayTotalEnergyKcal: Int = 0
 
     @Published private(set) var errorMessage: String?
 
     private let store = HKHealthStore()
 
-    // ✅ 同日内で「一時的に0が返る」ケースの保護（アプリ再起動で0に見える問題の緩和）
+    // ✅ 同日内で「一時的に0が返る」ケースの保護
     private var lastGoodDayKey: String = ""
     private var lastGoodSteps: Int = 0
-    private var lastGoodActiveKcal: Int = 0
-    private var lastGoodBasalKcal: Int = 0
-    private var lastGoodTotalKcal: Int = 0
 
     // ✅ 追加：歩数更新監視
     private var stepObserverQuery: HKObserverQuery?
@@ -48,10 +47,9 @@ final class HealthKitManager: ObservableObject {
 
     private var readTypes: Set<HKObjectType> {
         var types: Set<HKObjectType> = []
-        if let steps = HKObjectType.quantityType(forIdentifier: .stepCount) { types.insert(steps) }
-        if let active = HKObjectType.quantityType(forIdentifier: .activeEnergyBurned) { types.insert(active) }
-        // ✅ 安静時消費エネルギー（Basal Energy）
-        if let basal = HKObjectType.quantityType(forIdentifier: .basalEnergyBurned) { types.insert(basal) }
+        if let steps = HKObjectType.quantityType(forIdentifier: .stepCount) {
+            types.insert(steps)
+        }
         return types
     }
 
@@ -75,7 +73,7 @@ final class HealthKitManager: ObservableObject {
         }
     }
 
-    /// ✅ 追加：Widget 用に今日の歩数を即時更新
+    /// ✅ Widget 用に今日の歩数を即時更新
     func refreshTodayStepsForWidget(now: Date = Date()) async {
         guard authState == .authorized else { return }
         guard !isRefreshingTodaySteps else { return }
@@ -86,7 +84,7 @@ final class HealthKitManager: ObservableObject {
         _ = await fetchTodayStepTotal(now: now)
     }
 
-    /// ✅ 追加：歩数の変更監視を開始
+    /// ✅ 歩数の変更監視を開始
     func startStepUpdatesIfNeeded() async {
         guard authState == .authorized else { return }
         guard !isStepObservationStarted else { return }
@@ -120,7 +118,7 @@ final class HealthKitManager: ObservableObject {
         }
     }
 
-    /// ✅ 追加：HKHealthStore のコールバックAPIを async 化
+    /// ✅ HKHealthStore のコールバックAPIを async 化
     private func enableBackgroundDelivery(for type: HKQuantityType) async throws {
         try await withCheckedThrowingContinuation { (cont: CheckedContinuation<Void, Error>) in
             store.enableBackgroundDelivery(for: type, frequency: .immediate) { success, error in
@@ -142,71 +140,61 @@ final class HealthKitManager: ObservableObject {
         }
     }
 
-    /// ✅ 差分同期：start（前回同期）〜 now の「通貨kcal（Active + Basal）」差分を返す
-    /// - Returns: (deltaKcal, newLastSyncedAt)
-    func syncAndGetDeltaKcal(lastSyncedAt: Date?) async -> (deltaKcal: Int, newLastSyncedAt: Date?) {
+    /// ✅ 新仕様：start（前回同期）〜 now の歩数差分を返す
+    /// - Returns: (deltaSteps, newLastSyncedAt)
+    func syncAndGetDeltaSteps(lastSyncedAt: Date?) async -> (deltaSteps: Int, newLastSyncedAt: Date?) {
         guard authState == .authorized else { return (0, lastSyncedAt) }
 
         do {
             let now = Date()
             let todayStart = Calendar.current.startOfDay(for: now)
 
-            // ✅ lastSyncedAt が昨日以前でも「今日の0:00」に丸める（前日分が混ざる事故防止）
+            // ✅ lastSyncedAt が昨日以前でも「今日の0:00」に丸める
             let rawStart = lastSyncedAt ?? todayStart
             let start = max(rawStart, todayStart)
 
-            // ✅ 日付が変わっていたら「良い値」保持をリセット
             let todayKey = Self.makeDayKey(now)
             if lastGoodDayKey != todayKey {
                 lastGoodDayKey = todayKey
                 lastGoodSteps = 0
-                lastGoodActiveKcal = 0
-                lastGoodBasalKcal = 0
-                lastGoodTotalKcal = 0
             }
 
-            async let steps = fetchSteps(from: todayStart, to: now)
+            async let todayStepsRaw = fetchSteps(from: todayStart, to: now)
+            async let deltaStepsRaw = fetchSteps(from: start, to: now)
 
-            // 今日合計（表示用）
-            async let activeToday = fetchActiveEnergyKcal(from: todayStart, to: now)
-            async let basalToday = fetchBasalEnergyKcal(from: todayStart, to: now)
+            let (todayFetched, deltaFetched) = try await (todayStepsRaw, deltaStepsRaw)
 
-            // 差分（通貨加算用）
-            async let activeDelta = fetchActiveEnergyKcal(from: start, to: now)
-            async let basalDelta = fetchBasalEnergyKcal(from: start, to: now)
+            // ✅ 同日内で一時的に0になった場合は、直近の良い値を優先
+            let protectedTodaySteps: Int =
+                (todayFetched == 0 && lastGoodSteps > 0) ? lastGoodSteps : max(0, todayFetched)
 
-            let (s, aToday, bToday, aDelta, bDelta) = try await (steps, activeToday, basalToday, activeDelta, basalDelta)
+            todaySteps = protectedTodaySteps
 
-            let totalToday = max(0, aToday) + max(0, bToday)
-            let totalDelta = max(0, aDelta) + max(0, bDelta)
+            // 互換プロパティ
+            todayActiveEnergyKcal = 0
+            todayBasalEnergyKcal = 0
+            todayTotalEnergyKcal = protectedTodaySteps
 
-            // ✅ 「同日内で一時的に0」になった場合は、直近の良い値を優先
-            let protectedSteps: Int = (s == 0 && lastGoodSteps > 0) ? lastGoodSteps : s
-
-            let protectedActive: Int = (aToday == 0 && lastGoodActiveKcal > 0) ? lastGoodActiveKcal : aToday
-            let protectedBasal: Int = (bToday == 0 && lastGoodBasalKcal > 0) ? lastGoodBasalKcal : bToday
-
-            let protectedTotal: Int = (totalToday == 0 && lastGoodTotalKcal > 0) ? lastGoodTotalKcal : totalToday
-
-            todaySteps = protectedSteps
-            todayActiveEnergyKcal = protectedActive
-            todayBasalEnergyKcal = protectedBasal
-            todayTotalEnergyKcal = protectedTotal
-
-            // ✅ 良い値の更新（0は採用しない）
-            if protectedSteps > 0 { lastGoodSteps = protectedSteps }
-            if protectedActive > 0 { lastGoodActiveKcal = protectedActive }
-            if protectedBasal > 0 { lastGoodBasalKcal = protectedBasal }
-            if protectedTotal > 0 { lastGoodTotalKcal = protectedTotal }
+            if protectedTodaySteps > 0 {
+                lastGoodSteps = protectedTodaySteps
+            }
 
             // ✅ 歩数だけでも Widget へ早めに反映
-            pushTodayStepsToWidgetIfNeeded(protectedSteps)
+            pushTodayStepsToWidgetIfNeeded(protectedTodaySteps)
 
-            return (max(0, totalDelta), now)
+            return (max(0, deltaFetched), now)
         } catch {
             errorMessage = "同期に失敗: \(error.localizedDescription)"
             return (0, lastSyncedAt)
         }
+    }
+
+    /// ✅ 互換用
+    /// 旧コードが残っていてもコンパイルを壊しにくくするため残す。
+    /// 実体は「歩数差分」を返す。
+    func syncAndGetDeltaKcal(lastSyncedAt: Date?) async -> (deltaKcal: Int, newLastSyncedAt: Date?) {
+        let result = await syncAndGetDeltaSteps(lastSyncedAt: lastSyncedAt)
+        return (deltaKcal: result.deltaSteps, newLastSyncedAt: result.newLastSyncedAt)
     }
 
     // MARK: - Fetchers
@@ -225,45 +213,11 @@ final class HealthKitManager: ObservableObject {
                 quantitySamplePredicate: pred,
                 options: .cumulativeSum
             ) { _, result, error in
-                if let error { cont.resume(throwing: error); return }
+                if let error {
+                    cont.resume(throwing: error)
+                    return
+                }
                 let sum = result?.sumQuantity()?.doubleValue(for: .count()) ?? 0
-                cont.resume(returning: Int(sum))
-            }
-            store.execute(q)
-        }
-    }
-
-    private func fetchActiveEnergyKcal(from: Date, to: Date) async throws -> Int {
-        guard let type = HKQuantityType.quantityType(forIdentifier: .activeEnergyBurned) else { return 0 }
-        let pred = predicate(from: from, to: to)
-
-        return try await withCheckedThrowingContinuation { cont in
-            let q = HKStatisticsQuery(
-                quantityType: type,
-                quantitySamplePredicate: pred,
-                options: .cumulativeSum
-            ) { _, result, error in
-                if let error { cont.resume(throwing: error); return }
-                let sum = result?.sumQuantity()?.doubleValue(for: .kilocalorie()) ?? 0
-                cont.resume(returning: Int(sum))
-            }
-            store.execute(q)
-        }
-    }
-
-    // ✅ 安静時消費エネルギー（Basal Energy）
-    private func fetchBasalEnergyKcal(from: Date, to: Date) async throws -> Int {
-        guard let type = HKQuantityType.quantityType(forIdentifier: .basalEnergyBurned) else { return 0 }
-        let pred = predicate(from: from, to: to)
-
-        return try await withCheckedThrowingContinuation { cont in
-            let q = HKStatisticsQuery(
-                quantityType: type,
-                quantitySamplePredicate: pred,
-                options: .cumulativeSum
-            ) { _, result, error in
-                if let error { cont.resume(throwing: error); return }
-                let sum = result?.sumQuantity()?.doubleValue(for: .kilocalorie()) ?? 0
                 cont.resume(returning: Int(sum))
             }
             store.execute(q)
@@ -296,6 +250,12 @@ final class HealthKitManager: ObservableObject {
         let protectedSteps = (fetched == 0 && lastGoodSteps > 0) ? lastGoodSteps : fetched
 
         todaySteps = protectedSteps
+
+        // 互換プロパティ
+        todayActiveEnergyKcal = 0
+        todayBasalEnergyKcal = 0
+        todayTotalEnergyKcal = protectedSteps
+
         if protectedSteps > 0 {
             lastGoodSteps = protectedSteps
         }

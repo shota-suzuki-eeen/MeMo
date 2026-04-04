@@ -33,7 +33,6 @@ struct ShopView: View {
 
             ScrollView {
                 VStack(spacing: 16) {
-
                     DailyShopCard(
                         items: viewModel.decodeShopItems(from: state) ?? [],
                         rewardResetsToday: state.shopRewardResetsToday,
@@ -54,7 +53,7 @@ struct ShopView: View {
                 .padding(.top, 6)
             }
             .safeAreaInset(edge: .top) {
-                ShopWalletHeader(walletKcal: viewModel.displayedWalletKcal)
+                ShopWalletHeader(walletSteps: viewModel.displayedWalletKcal)
                     .padding(.top, 8)
                     .padding(.bottom, 10)
                     .background(.ultraThinMaterial)
@@ -88,6 +87,7 @@ struct ShopView: View {
         .navigationTitle("ショップ")
         .navigationBarTitleDisplayMode(.inline)
         .task {
+            _ = state.normalizeFixedDailyStepGoal()
             viewModel.onAppear(state: state)
             save()
 
@@ -95,6 +95,7 @@ struct ShopView: View {
             // rewardFoodAd.load()
         }
         .onReceive(NotificationCenter.default.publisher(for: UIApplication.willEnterForegroundNotification)) { _ in
+            _ = state.normalizeFixedDailyStepGoal()
             viewModel.onAppear(state: state)
             save()
 
@@ -121,7 +122,7 @@ struct ShopView: View {
 
         bgmManager.playSE(.push)
 
-        guard state.walletKcal >= item.kcal else {
+        guard state.walletSteps >= item.priceSteps else {
             dismissInsufficientTask?.cancel()
             popup = .insufficient
 
@@ -197,7 +198,7 @@ private enum PurchasePopupState: Equatable {
 // MARK: - Fixed wallet header
 
 private struct ShopWalletHeader: View {
-    let walletKcal: Int
+    let walletSteps: Int
 
     var body: some View {
         HStack(spacing: 12) {
@@ -211,7 +212,7 @@ private struct ShopWalletHeader: View {
                     .fill(Color.black.opacity(0.85))
                     .frame(height: 34)
 
-                Text("\(walletKcal)")
+                Text("\(walletSteps)")
                     .font(.system(size: 20, weight: .bold))
                     .foregroundStyle(.white)
                     .monospacedDigit()
@@ -247,7 +248,7 @@ private struct PurchasePopupOverlay: View {
                 EmptyView()
 
             case .insufficient:
-                Text("所持Kcalが不足しています")
+                Text("所持歩数が不足しています")
                     .font(.system(size: 18, weight: .bold))
                     .foregroundStyle(.white)
                     .padding(.horizontal, 18)
@@ -265,6 +266,11 @@ private struct PurchasePopupOverlay: View {
                         .font(.system(size: 18, weight: .bold))
                         .multilineTextAlignment(.center)
                         .foregroundStyle(.white)
+
+                    Text("必要歩数: \(item.priceSteps)歩")
+                        .font(.system(size: 14, weight: .semibold))
+                        .foregroundStyle(.white.opacity(0.9))
+                        .monospacedDigit()
 
                     HStack(spacing: 12) {
                         Button("キャンセル") {
@@ -344,7 +350,7 @@ private struct DailyShopCard: View {
 
                             VStack(alignment: .leading, spacing: 4) {
                                 Text(item.name).font(.headline)
-                                Text("\(item.kcal) kcal")
+                                Text("\(item.priceSteps) 歩")
                                     .font(.subheadline)
                                     .foregroundStyle(.secondary)
                             }

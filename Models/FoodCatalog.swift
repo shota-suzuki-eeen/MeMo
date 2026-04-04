@@ -11,8 +11,17 @@ enum FoodCatalog {
     struct FoodItem: Identifiable, Hashable {
         let id: String          // 安定ID（保存用）
         let name: String
-        let priceKcal: Int      // 販売価格（=消費する所持kcal）
+
+        // NOTE:
+        // 既存コード互換のためプロパティ名は残す。
+        // 仕様上の意味は「販売価格（=消費する所持歩数）」。
+        let priceKcal: Int
+
         let assetName: String
+
+        var priceSteps: Int {
+            max(0, priceKcal)
+        }
     }
 
     static let all: [FoodItem] = [

@@ -7,28 +7,17 @@
 
 import SwiftUI
 import SwiftData
-import UIKit
 
 struct SettingsView: View {
     @Environment(\.modelContext) private var modelContext
     @EnvironmentObject private var bgmManager: BGMManager
     @Query private var appStates: [AppState]
 
-    @State private var goalText: String = ""
-    @State private var errorMessage: String?
-
-    // ✅ Home側と揃える：初回目標設定済みフラグ
-    @AppStorage("didSetDailyGoalOnce") private var didSetDailyGoalOnce: Bool = false
+    @State private var toastMessage: String?
+    @State private var showToast: Bool = false
 
     // ✅ 開発者モード
     @AppStorage("isDeveloperMode") private var isDeveloperMode: Bool = false
-
-    // ✅ 編集モード制御
-    @State private var isEditingGoal: Bool = false
-
-    // トースト
-    @State private var toastMessage: String?
-    @State private var showToast: Bool = false
 
     // ✅ 開発者モード解除/有効化用
     @State private var hiddenTapCount: Int = 0
@@ -37,20 +26,21 @@ struct SettingsView: View {
     @State private var developerPinText: String = ""
     @FocusState private var isDeveloperPinFocused: Bool
 
-    private let bgColor = Color(red: 0.35, green: 0.86, blue: 0.88)
     private let developerPinCode = "eeen"
     private let hiddenTapRequiredCount = 15
+
+    private var fixedDailyGoalSteps: Int {
+        AppState.fixedDailyStepGoal
+    }
 
     var body: some View {
         let state = ensureAppState()
 
         ZStack {
-            // ✅ 背景画像を見せたいのでベタ塗りはしない
             Color.clear.ignoresSafeArea()
 
             ScrollView {
                 VStack(alignment: .leading, spacing: 14) {
-                    // タイトル
                     HStack(spacing: 8) {
                         Spacer()
 
@@ -72,71 +62,35 @@ struct SettingsView: View {
                     }
                     .padding(.top, 8)
 
-                    // 目標設定カード
+                    // ✅ 目標表示カード（編集不可）
                     VStack(alignment: .leading, spacing: 10) {
-                        Text("目標消費カロリー（kcal）")
+                        Text("1日の目標歩数")
                             .font(.headline)
 
-                        Text("ここで設定した数値はHome画面の目標値と連動します。")
+                        Text("目標設定の変更機能は廃止されました。Home画面のメーターは毎日 10,000 歩を基準に表示されます。")
                             .font(.footnote)
                             .foregroundStyle(.secondary)
 
-                        // ✅ 表示モード（編集前）
-                        if !isEditingGoal {
-                            HStack(spacing: 10) {
-                                VStack(alignment: .leading, spacing: 4) {
-                                    Text("現在の目標")
-                                        .font(.footnote)
-                                        .foregroundStyle(.secondary)
+                        HStack(spacing: 10) {
+                            VStack(alignment: .leading, spacing: 4) {
+                                Text("現在の目標")
+                                    .font(.footnote)
+                                    .foregroundStyle(.secondary)
 
-                                    Text(state.dailyGoalKcal > 0 ? "\(state.dailyGoalKcal) kcal" : "未設定")
-                                        .font(.system(size: 18, weight: .bold))
-                                        .foregroundStyle(.primary)
-                                }
-
-                                Spacer()
-
-                                Button("編集") {
-                                    bgmManager.playSE(.push)
-                                    errorMessage = nil
-                                    goalText = state.dailyGoalKcal > 0 ? String(state.dailyGoalKcal) : ""
-                                    withAnimation(.easeInOut(duration: 0.15)) {
-                                        isEditingGoal = true
-                                    }
-                                    Haptics.rattle(duration: 0.08, style: .light)
-                                }
-                                .buttonStyle(.borderedProminent)
+                                Text("\(fixedDailyGoalSteps.formatted()) 歩")
+                                    .font(.system(size: 20, weight: .bold))
+                                    .foregroundStyle(.primary)
                             }
-                        } else {
-                            // ✅ 編集モード（編集ボタン押下後）
-                            HStack(spacing: 10) {
-                                TextField("例：300", text: $goalText)
-                                    .keyboardType(.numberPad)
-                                    .textFieldStyle(.roundedBorder)
 
-                                Button("保存") {
-                                    bgmManager.playSE(.push)
-                                    saveGoal(state: state)
-                                }
-                                .buttonStyle(.borderedProminent)
+                            Spacer()
 
-                                Button("キャンセル") {
-                                    bgmManager.playSE(.push)
-                                    errorMessage = nil
-                                    goalText = state.dailyGoalKcal > 0 ? String(state.dailyGoalKcal) : ""
-                                    withAnimation(.easeInOut(duration: 0.15)) {
-                                        isEditingGoal = false
-                                    }
-                                    Haptics.rattle(duration: 0.08, style: .light)
-                                }
-                                .buttonStyle(.bordered)
-                            }
-                        }
-
-                        if let errorMessage {
-                            Text(errorMessage)
-                                .font(.footnote)
-                                .foregroundStyle(.red)
+                            Text("固定")
+                                .font(.caption.bold())
+                                .foregroundStyle(.white)
+                                .padding(.horizontal, 10)
+                                .padding(.vertical, 6)
+                                .background(Color.blue)
+                                .clipShape(Capsule())
                         }
                     }
                     .padding(14)
@@ -151,7 +105,6 @@ struct SettingsView: View {
                 .contentShape(Rectangle())
             }
 
-            // Toast
             VStack {
                 Spacer()
                 if showToast, let toastMessage {
@@ -169,7 +122,6 @@ struct SettingsView: View {
                 }
             }
 
-            // ✅ 開発者モードPIN入力ポップアップ
             if showDeveloperPinPopup {
                 Color.black.opacity(0.35)
                     .ignoresSafeArea()
@@ -224,14 +176,12 @@ struct SettingsView: View {
                 }
             }
         }
-        // ✅ 設定画面内のどこをタップしてもカウント対象
         .contentShape(Rectangle())
         .simultaneousGesture(
             TapGesture().onEnded {
                 registerHiddenTap()
             }
         )
-        // ✅ 背景画像（＋暗幕）を後ろに描画
         .background(
             ZStack {
                 Image("setting_background")
@@ -246,40 +196,13 @@ struct SettingsView: View {
         .navigationBarTitleDisplayMode(.inline)
         .animation(.easeInOut(duration: 0.2), value: showDeveloperPinPopup)
         .onAppear {
-            isEditingGoal = false
-            goalText = state.dailyGoalKcal > 0 ? String(state.dailyGoalKcal) : ""
-
-            if state.dailyGoalKcal > 0, didSetDailyGoalOnce == false {
-                didSetDailyGoalOnce = true
+            if state.normalizeFixedDailyStepGoal() {
+                do {
+                    try modelContext.save()
+                } catch {
+                    toast("目標歩数の更新に失敗しました")
+                }
             }
-        }
-    }
-
-    // MARK: - Actions
-
-    private func saveGoal(state: AppState) {
-        errorMessage = nil
-
-        guard let v = Int(goalText), v > 0 else {
-            errorMessage = "1以上の数値を入力してください。"
-            Haptics.rattle(duration: 0.12, style: .light)
-            return
-        }
-
-        state.dailyGoalKcal = v
-
-        do {
-            try modelContext.save()
-
-            didSetDailyGoalOnce = true
-
-            Haptics.rattle(duration: 0.18, style: .light)
-            toast("目標を保存しました")
-            withAnimation(.easeInOut(duration: 0.15)) {
-                isEditingGoal = false
-            }
-        } catch {
-            errorMessage = "保存に失敗しました。"
         }
     }
 
@@ -338,16 +261,23 @@ struct SettingsView: View {
     // MARK: - AppState
 
     private func ensureAppState() -> AppState {
-        if let first = appStates.first { return first }
+        if let first = appStates.first {
+            return first
+        }
+
         let created = AppState(
             walletKcal: 0,
             pendingKcal: 0,
             lastSyncedAt: nil,
-            dailyGoalKcal: 0,
+            dailyGoalKcal: AppState.fixedDailyStepGoal,
             lastDayKey: AppState.makeDayKey(Date())
         )
         modelContext.insert(created)
-        do { try modelContext.save() } catch { }
+
+        do {
+            try modelContext.save()
+        } catch { }
+
         return created
     }
 
