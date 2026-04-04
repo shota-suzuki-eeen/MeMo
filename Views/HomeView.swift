@@ -43,6 +43,7 @@ struct HomeView: View {
     @State private var rewardOpacity: Double = 0.0
 
     @State private var showStepEnjoy: Bool = false
+    @State private var showGachaView: Bool = false
 
     // ✅ 追加：ワークタイマー準備画面
     @State private var showWorkTimerPreparation: Bool = false
@@ -709,7 +710,7 @@ struct HomeView: View {
                         },
                         onGatya: {
                             bgmManager.playSE(.push)
-                            toast("ガチャ機能は準備中です")
+                            showGachaView = true
                         },
                         onWork: {
                             showWorkTimerPreparation = true
@@ -801,6 +802,10 @@ struct HomeView: View {
         }
         .fullScreenCover(isPresented: $showWorkTimerPreparation) {
             WorkTimerPreparationView()
+        }
+        .fullScreenCover(isPresented: $showGachaView) {
+            GachaView()
+                .environmentObject(bgmManager)
         }
         .fullScreenCover(isPresented: $showStepEnjoy) {
             NavigationStack {
