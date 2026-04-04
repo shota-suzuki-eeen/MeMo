@@ -57,6 +57,9 @@ final class AppState {
     // ✅ トイレ中のpoop配置（同一イベント中のみ保持）
     var toiletPoopsData: Data?
 
+    // ✅ トイレpoopの時間増加基準時刻
+    var toiletPoopLastSpawnAt: Date?
+
     // ✅ 卵（ショップ）
     var eggOwned: Bool
     var eggHatchAt: Date?
@@ -125,6 +128,7 @@ final class AppState {
         toiletLastRaisedAt: Date? = nil,
         toiletNextSpawnAt: Date? = nil,
         toiletPoopsData: Data? = nil,
+        toiletPoopLastSpawnAt: Date? = nil,
 
         eggOwned: Bool = false,
         eggHatchAt: Date? = nil,
@@ -187,6 +191,7 @@ final class AppState {
         self.toiletLastRaisedAt = toiletLastRaisedAt
         self.toiletNextSpawnAt = toiletNextSpawnAt
         self.toiletPoopsData = toiletPoopsData
+        self.toiletPoopLastSpawnAt = toiletPoopLastSpawnAt
 
         self.eggOwned = eggOwned
         self.eggHatchAt = eggHatchAt
@@ -392,7 +397,6 @@ extension AppState {
     }
 }
 
-
 // MARK: - Toilet Poops
 extension AppState {
     struct ToiletPoopItem: Codable, Identifiable, Equatable {
@@ -502,6 +506,91 @@ extension AppState {
         items[index].cleanedProgress = 1
         items[index].isCleared = true
         setToiletPoops(items)
+        return true
+    }
+
+    private func clampedRatio(_ value: Double, min minValue: Double, max maxValue: Double) -> Double {
+        Swift.max(minValue, Swift.min(maxValue, value))
+    }
+
+    private func randomToiletPoopItem(existing: [ToiletPoopItem]) -> ToiletPoopItem {
+        let xRange: ClosedRange<Double> = 0.15...0.85
+        let yRange: ClosedRange<Double> = 0.18...0.82
+        let minDistance: Double = 0.16
+
+        for _ in 0..<50 {
+            let candidateX = Double.random(in: xRange)
+            let candidateY = Double.random(in: yRange)
+
+            let overlaps = existing.contains { item in
+                let dx = item.centerXRatio - candidateX
+                let dy = item.centerYRatio - candidateY
+                return sqrt(dx * dx + dy * dy) < minDistance
+            }
+
+            if !overlaps {
+                return ToiletPoopItem(
+                    centerXRatio: candidateX,
+                    centerYRatio: candidateY,
+                    rotationDegrees: Double.random(in: -30...30),
+                    isFlippedHorizontally: Bool.random()
+                )
+            }
+        }
+
+        return ToiletPoopItem(
+            centerXRatio: clampedRatio(Double.random(in: xRange), min: 0.1, max: 0.9),
+            centerYRatio: clampedRatio(Double.random(in: yRange), min: 0.1, max: 0.9),
+            rotationDegrees: Double.random(in: -30...30),
+            isFlippedHorizontally: Bool.random()
+        )
+    }
+
+    func generateToiletPoops(count: Int, existing: [ToiletPoopItem] = []) -> [ToiletPoopItem] {
+        let safeCount = max(0, count)
+        guard safeCount > 0 else { return [] }
+
+        var results: [ToiletPoopItem] = []
+        var occupied = existing.filter { !$0.isCleared }
+
+        for _ in 0..<safeCount {
+            let item = randomToiletPoopItem(existing: occupied + results)
+            results.append(item)
+        }
+
+        return results
+    }
+
+    @discardableResult
+    func updateToiletPoopsByTime(now: Date = Date()) -> Bool {
+        ensureDailyResetIfNeeded(now: now)
+
+        guard toiletFlagAt != nil else { return false }
+
+        var items = toiletPoops()
+        let activeCount = items.filter { !$0.isCleared }.count
+        guard activeCount < 5 else { return false }
+
+        guard let lastSpawnAt = toiletPoopLastSpawnAt else {
+            toiletPoopLastSpawnAt = now
+            return false
+        }
+
+        let interval: TimeInterval = 15 * 60
+        let elapsed = now.timeIntervalSince(lastSpawnAt)
+        guard elapsed >= interval else { return false }
+
+        let addableCount = min(Int(elapsed / interval), 5 - activeCount)
+        guard addableCount > 0 else { return false }
+
+        let newItems = generateToiletPoops(
+            count: addableCount,
+            existing: items.filter { !$0.isCleared }
+        )
+        items.append(contentsOf: newItems)
+        setToiletPoops(items)
+
+        toiletPoopLastSpawnAt = lastSpawnAt.addingTimeInterval(TimeInterval(addableCount) * interval)
         return true
     }
 }
@@ -889,8 +978,17 @@ extension AppState {
 
         toiletFlagAt = now
         toiletLastRaisedAt = now
-        toiletPoopsData = nil
+
+        let initialPoops = generateToiletPoops(count: 2)
+        setToiletPoops(initialPoops)
+        toiletPoopLastSpawnAt = now
+
         return true
+    }
+
+    @discardableResult
+    func raiseToiletFlagIfNeeded(now: Date = Date()) -> Bool {
+        raiseToiletFlag(now: now)
     }
 
     func resolveToilet(now: Date = Date()) -> (didResolve: Bool, isWithin1h: Bool) {
@@ -906,6 +1004,7 @@ extension AppState {
         toiletFlagAt = nil
         toiletNextSpawnAt = now.addingTimeInterval(randomCareInterval())
         toiletPoopsData = nil
+        toiletPoopLastSpawnAt = nil
         return (true, within)
     }
 }

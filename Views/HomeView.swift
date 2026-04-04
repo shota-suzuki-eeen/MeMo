@@ -81,8 +81,7 @@ struct HomeView: View {
     // ✅ トイレ中モジモジ（左右揺れ）
     @State private var isToiletWiggleOn: Bool = false
 
-    // ✅ トイレ掃除モード
-    @State private var isToiletCleaningMode: Bool = false
+    // ✅ トイレpoop擦り処理
     @State private var toiletPoopActivePoint: [String: CGPoint] = [:]
     @State private var homeContentSize: CGSize = .zero
 
@@ -393,9 +392,8 @@ struct HomeView: View {
         static let toiletPoopTopInset: CGFloat = 78
         static let toiletPoopBottomInset: CGFloat = 170
         static let toiletPoopMinSpacing: CGFloat = 6
-        static let toiletPoopScratchDistanceToClear: CGFloat = 320
+        static let toiletPoopScratchDistanceToClear: CGFloat = 640
         static let toiletPoopScratchRectInset: CGFloat = 10
-        static let toiletPoopWcExclusionPadding: CGFloat = 16
 
         static let toiletWiggleOffset: CGFloat = 3
         static let toiletWiggleDuration: Double = 0.12
@@ -537,7 +535,7 @@ struct HomeView: View {
                                             size: Layout.toiletPoopSize,
                                             hitSize: Layout.toiletPoopHitSize,
                                             opacity: toiletPoopOpacity(for: poop),
-                                            isCleaningMode: isToiletCleaningMode,
+                                            isScratchEnabled: state.hasToiletFlag,
                                             onScratchChanged: { value in
                                                 handleToiletPoopScratchChanged(poop, value: value)
                                             },
@@ -549,7 +547,7 @@ struct HomeView: View {
                                     }
                                 }
                                 .frame(maxWidth: .infinity, maxHeight: .infinity)
-                                .allowsHitTesting(isToiletCleaningMode)
+                                .allowsHitTesting(state.hasToiletFlag)
                                 .zIndex(Layout.zToiletPoops)
                             }
 
@@ -722,6 +720,7 @@ struct HomeView: View {
 
                         maybeSpawnToiletFlag(state: state, now: newDate)
                         maybeSpawnFoodFlag(state: state, now: newDate)
+                        syncToiletPoopsIfNeeded(containerSize: homeContentSize, now: newDate)
 
                         save()
                     }
@@ -733,6 +732,7 @@ struct HomeView: View {
 
                         maybeSpawnToiletFlag(state: state, now: now)
                         maybeSpawnFoodFlag(state: state, now: now)
+                        syncToiletPoopsIfNeeded(containerSize: homeContentSize, now: now)
 
                         save()
                     }
@@ -919,7 +919,6 @@ struct HomeView: View {
             foodSelectorDragOffset = .zero
             isFoodFeedingAnimationRunning = false
             stopFoodSelectorHorizontalRattleIfNeeded()
-            isToiletCleaningMode = false
             toiletPoopActivePoint.removeAll()
         }
         .onChange(of: state.walletKcal) { _, _ in
@@ -944,7 +943,6 @@ struct HomeView: View {
         }
         .onChange(of: state.toiletFlagAt) { _, _ in
             if state.hasToiletFlag {
-                isToiletCleaningMode = false
                 toiletPoopActivePoint.removeAll()
 
                 if showFoodSelector {
@@ -960,7 +958,6 @@ struct HomeView: View {
                 showCaptureModeDialog = false
                 syncToiletPoopsIfNeeded(containerSize: homeContentSize)
             } else {
-                isToiletCleaningMode = false
                 toiletPoopActivePoint.removeAll()
             }
 
@@ -990,11 +987,10 @@ struct HomeView: View {
         }
     }
 
-    private func syncToiletPoopsIfNeeded(containerSize: CGSize) {
+    private func syncToiletPoopsIfNeeded(containerSize: CGSize, now: Date = Date()) {
         guard containerSize.width > 1, containerSize.height > 1 else { return }
 
         if !state.hasToiletFlag {
-            isToiletCleaningMode = false
             toiletPoopActivePoint.removeAll()
 
             if !state.toiletPoops().isEmpty {
@@ -1004,16 +1000,26 @@ struct HomeView: View {
             return
         }
 
-        guard state.toiletPoops().isEmpty else { return }
+        var didChange = false
 
-        let generated = generateToiletPoops(in: containerSize)
-        guard !generated.isEmpty else { return }
+        if state.updateToiletPoopsByTime(now: now) {
+            didChange = true
+        }
 
-        state.setToiletPoops(generated)
-        save()
+        if state.toiletPoops().isEmpty {
+            let generated = generateToiletPoops(in: containerSize, count: 2)
+            if !generated.isEmpty {
+                state.setToiletPoops(generated)
+                didChange = true
+            }
+        }
+
+        if didChange {
+            save()
+        }
     }
 
-    private func generateToiletPoops(in containerSize: CGSize) -> [AppState.ToiletPoopItem] {
+    private func generateToiletPoops(in containerSize: CGSize, count: Int) -> [AppState.ToiletPoopItem] {
         let poopSize = Layout.toiletPoopSize
         let horizontalInset = Layout.toiletPoopHorizontalInset + poopSize * 0.5
         let topInset = Layout.toiletPoopTopInset + poopSize * 0.5
@@ -1026,15 +1032,8 @@ struct HomeView: View {
 
         guard maxX > minX, maxY > minY else { return [] }
 
-        let wcRect = CGRect(
-            x: containerSize.width - Layout.wcBubbleTrailing - Layout.floatingBubbleSize,
-            y: Layout.wcBubbleTop,
-            width: Layout.floatingBubbleSize,
-            height: Layout.floatingBubbleSize
-        ).insetBy(dx: -Layout.toiletPoopWcExclusionPadding, dy: -Layout.toiletPoopWcExclusionPadding)
-
         var items: [AppState.ToiletPoopItem] = []
-        let maxCount = 5
+        let maxCount = max(0, count)
         let maxAttempts = 600
 
         for _ in 0..<maxCount {
@@ -1055,10 +1054,6 @@ struct HomeView: View {
                     dx: -(Layout.toiletPoopMinSpacing * 0.5),
                     dy: -(Layout.toiletPoopMinSpacing * 0.5)
                 )
-
-                if poopRect.intersects(wcRect) {
-                    continue
-                }
 
                 let overlapsAnotherPoop = items.contains { existing in
                     let existingPoint = CGPoint(
@@ -1125,7 +1120,7 @@ struct HomeView: View {
     }
 
     private func handleToiletPoopScratchChanged(_ poop: AppState.ToiletPoopItem, value: DragGesture.Value) {
-        guard isToiletCleaningMode else { return }
+        guard state.hasToiletFlag else { return }
 
         let scratchRect = toiletPoopScratchRect()
         let point = value.location
@@ -1171,7 +1166,6 @@ struct HomeView: View {
         save()
 
         if !state.hasRemainingToiletPoops {
-            isToiletCleaningMode = false
             toiletPoopActivePoint.removeAll()
             resolveToilet(state: state)
         }
@@ -1401,7 +1395,7 @@ struct HomeView: View {
         let didRaise = state.raiseToiletFlag(now: now)
         if didRaise {
             save()
-            syncToiletPoopsIfNeeded(containerSize: homeContentSize)
+            syncToiletPoopsIfNeeded(containerSize: homeContentSize, now: now)
             toast("トイレ行きたい！")
             syncCharacterBaseFromState(force: true)
             updateToiletWiggle()
@@ -1902,26 +1896,24 @@ struct HomeView: View {
     }
 
     private func onTapToilet(state: AppState) {
-        if state.hasToiletFlag {
-            syncToiletPoopsIfNeeded(containerSize: homeContentSize)
-
-            guard !visibleToiletPoops.isEmpty else {
-                bgmManager.playSE(.wc)
-                resolveToilet(state: state)
-                syncCharacterBaseFromState(force: true)
-                updateToiletWiggle()
-                return
+        guard state.hasToiletFlag else {
+            Task { @MainActor in
+                Haptics.rattle(duration: 0.18, style: .light)
             }
-
-            bgmManager.playSE(.wc)
-            isToiletCleaningMode = true
-            toast("うんちをこすって掃除しよう！")
             return
         }
 
-        Task { @MainActor in
-            Haptics.rattle(duration: 0.18, style: .light)
+        syncToiletPoopsIfNeeded(containerSize: homeContentSize)
+
+        guard !visibleToiletPoops.isEmpty else {
+            resolveToilet(state: state)
+            syncCharacterBaseFromState(force: true)
+            updateToiletWiggle()
+            return
         }
+
+        bgmManager.playSE(.wc)
+        toast("うんちを直接こすって掃除しよう！")
     }
 
     private func onTapStep() {
@@ -1938,7 +1930,6 @@ struct HomeView: View {
         let r = state.resolveToilet(now: Date())
         guard r.didResolve else { return }
 
-        isToiletCleaningMode = false
         toiletPoopActivePoint.removeAll()
 
         addFriendshipWithAnimation(points: r.isWithin1h ? 20 : 10, state: state)
@@ -2341,7 +2332,7 @@ private struct ToiletPoopView: View {
     let size: CGFloat
     let hitSize: CGFloat
     let opacity: Double
-    let isCleaningMode: Bool
+    let isScratchEnabled: Bool
     let onScratchChanged: (DragGesture.Value) -> Void
     let onScratchEnded: () -> Void
 
@@ -2362,7 +2353,7 @@ private struct ToiletPoopView: View {
                         onScratchEnded()
                     }
             )
-            .allowsHitTesting(isCleaningMode)
+            .allowsHitTesting(isScratchEnabled)
     }
 }
 
