@@ -60,6 +60,7 @@ struct HomeView: View {
     @State private var selectedFoodID: String?
     @State private var foodSelectorDragOffset: CGSize = .zero
     @State private var isFoodFeedingAnimationRunning: Bool = false
+    @State private var pendingFoodFeedID: String?
     @State private var isFoodSelectorHorizontalRattling: Bool = false
 
     // =========================================================
@@ -566,6 +567,7 @@ struct HomeView: View {
                                         state.foodCount(foodId: foodID)
                                     },
                                     selectedFoodID: selectedFoodID,
+                                    pendingFoodID: pendingFoodFeedID,
                                     dragOffset: foodSelectorDragOffset,
                                     isFeedingAnimationRunning: isFoodFeedingAnimationRunning,
                                     onMoveSelection: { delta in
@@ -918,6 +920,7 @@ struct HomeView: View {
             showFoodSelector = false
             foodSelectorDragOffset = .zero
             isFoodFeedingAnimationRunning = false
+            pendingFoodFeedID = nil
             stopFoodSelectorHorizontalRattleIfNeeded()
             toiletPoopActivePoint.removeAll()
         }
@@ -1007,7 +1010,7 @@ struct HomeView: View {
         }
 
         if state.toiletPoops().isEmpty {
-            let generated = generateToiletPoops(in: containerSize, count: 2)
+            let generated = generateToiletPoops(in: containerSize, count: 1)
             if !generated.isEmpty {
                 state.setToiletPoops(generated)
                 didChange = true
@@ -1176,10 +1179,16 @@ struct HomeView: View {
 
         guard !foods.isEmpty else {
             selectedFoodID = nil
+            pendingFoodFeedID = nil
             showFoodSelector = false
             foodSelectorDragOffset = .zero
             isFoodFeedingAnimationRunning = false
             return
+        }
+
+        if let pendingFoodFeedID,
+           !foods.contains(where: { $0.id == pendingFoodFeedID }) {
+            self.pendingFoodFeedID = nil
         }
 
         if let selectedFoodID,
@@ -1188,11 +1197,13 @@ struct HomeView: View {
         }
 
         selectedFoodID = foods.first?.id
+        pendingFoodFeedID = nil
     }
 
     private func closeFoodSelector() {
         foodSelectorDragOffset = .zero
         isFoodFeedingAnimationRunning = false
+        pendingFoodFeedID = nil
         stopFoodSelectorHorizontalRattleIfNeeded()
 
         withAnimation(.spring(response: 0.28, dampingFraction: 0.88)) {
@@ -1212,6 +1223,7 @@ struct HomeView: View {
 
         foodSelectorDragOffset = .zero
         isFoodFeedingAnimationRunning = false
+        pendingFoodFeedID = nil
         stopFoodSelectorHorizontalRattleIfNeeded()
 
         withAnimation(.spring(response: 0.32, dampingFraction: 0.85)) {
@@ -1233,15 +1245,27 @@ struct HomeView: View {
         guard let currentID = selectedFoodID,
               let currentIndex = foods.firstIndex(where: { $0.id == currentID }) else {
             selectedFoodID = foods.first?.id
+            pendingFoodFeedID = nil
             return
         }
 
-        let nextIndex = (currentIndex + delta).positiveModulo(foods.count)
+        let direction = delta > 0 ? 1 : -1
+        let nextIndex = (currentIndex + direction).positiveModulo(foods.count)
+        let nextFoodID = foods[nextIndex].id
+
+        guard nextFoodID != currentID else {
+            withAnimation(.spring(response: 0.28, dampingFraction: 0.9)) {
+                foodSelectorDragOffset = .zero
+            }
+            return
+        }
 
         withAnimation(.spring(response: 0.34, dampingFraction: 0.82)) {
-            selectedFoodID = foods[nextIndex].id
+            selectedFoodID = nextFoodID
             foodSelectorDragOffset = .zero
         }
+
+        pendingFoodFeedID = nil
 
         Task { @MainActor in
             Haptics.tap(style: .soft)
@@ -1250,16 +1274,7 @@ struct HomeView: View {
 
     private func handleFoodSelectorDragChanged(_ value: DragGesture.Value) {
         foodSelectorDragOffset = value.translation
-
-        let horizontal = abs(value.translation.width)
-        let vertical = abs(value.translation.height)
-        let isHorizontalDrag = horizontal > 14 && horizontal > vertical * 1.1
-
-        if isHorizontalDrag {
-            startFoodSelectorHorizontalRattleIfNeeded()
-        } else {
-            stopFoodSelectorHorizontalRattleIfNeeded()
-        }
+        stopFoodSelectorHorizontalRattleIfNeeded()
     }
 
     private func handleFoodSelectorDragEnded(_ value: DragGesture.Value, state: AppState) {
@@ -1275,8 +1290,17 @@ struct HomeView: View {
             }
         }
 
-        if predictedVertical < -95, abs(predictedHorizontal) < 70, abs(horizontal) < 80 {
-            feedSelectedFood(state: state)
+        let isPrimaryFeedSwipe =
+            predictedVertical < -95 &&
+            abs(predictedHorizontal) < 70 &&
+            abs(horizontal) < 80
+
+        let isSecondaryFeedSwipe =
+            vertical < -85 &&
+            abs(horizontal) < 55
+
+        if isPrimaryFeedSwipe || isSecondaryFeedSwipe {
+            handleFoodFeedSwipe(state: state)
             return
         }
 
@@ -1284,26 +1308,22 @@ struct HomeView: View {
             ? predictedHorizontal
             : horizontal
 
-        let rawStepDelta = Int(round((-projectedHorizontal) / Layout.foodSelectorRollStepWidth))
-        let clampedStepDelta = min(3, max(-3, rawStepDelta))
+        let selectionThreshold = Layout.foodSelectorRollStepWidth * 0.42
 
-        if clampedStepDelta != 0 {
-            moveFoodSelection(clampedStepDelta)
+        if projectedHorizontal <= -selectionThreshold {
+            moveFoodSelection(1)
             return
         }
 
-        if vertical < -85, abs(horizontal) < 55 {
-            feedSelectedFood(state: state)
+        if projectedHorizontal >= selectionThreshold {
+            moveFoodSelection(-1)
+            return
         }
     }
 
     private func startFoodSelectorHorizontalRattleIfNeeded() {
         guard !isFoodSelectorHorizontalRattling else { return }
         isFoodSelectorHorizontalRattling = true
-
-        Task { @MainActor in
-            Haptics.startRattle(style: .soft, interval: 0.028, intensity: 0.72)
-        }
     }
 
     private func stopFoodSelectorHorizontalRattleIfNeeded() {
@@ -1312,6 +1332,34 @@ struct HomeView: View {
 
         Task { @MainActor in
             Haptics.stopRattle()
+        }
+    }
+
+    private func handleFoodFeedSwipe(state: AppState) {
+        guard !isToiletLocked else {
+            showToiletLockedMessage()
+            closeFoodSelector()
+            return
+        }
+
+        guard let selectedFood else {
+            toast("ご飯を持っていません")
+            Task { @MainActor in
+                Haptics.rattle(duration: 0.12, style: .light)
+            }
+            closeFoodSelector()
+            return
+        }
+
+        if pendingFoodFeedID == selectedFood.id {
+            feedSelectedFood(state: state)
+            return
+        }
+
+        pendingFoodFeedID = selectedFood.id
+
+        Task { @MainActor in
+            Haptics.tap(style: .soft)
         }
     }
 
@@ -1326,6 +1374,7 @@ struct HomeView: View {
 
         guard !isFoodFeedingAnimationRunning else { return }
         guard let selectedFood else {
+            pendingFoodFeedID = nil
             toast("ご飯を持っていません")
             Task { @MainActor in
                 Haptics.rattle(duration: 0.12, style: .light)
@@ -1334,6 +1383,7 @@ struct HomeView: View {
             return
         }
 
+        pendingFoodFeedID = nil
         isFoodFeedingAnimationRunning = true
 
         withAnimation(.spring(response: 0.24, dampingFraction: 0.78)) {
@@ -2718,6 +2768,7 @@ private struct FoodSelectionCarousel: View {
     let foods: [FoodCatalog.FoodItem]
     let countProvider: (String) -> Int
     let selectedFoodID: String?
+    let pendingFoodID: String?
     let dragOffset: CGSize
     let isFeedingAnimationRunning: Bool
     let onMoveSelection: (Int) -> Void
@@ -2799,20 +2850,28 @@ private struct FoodSelectionCarousel: View {
                     countText: countText(for: card.item.id),
                     relativePosition: relativePosition,
                     dragOffset: dragOffset,
-                    isFeedingAnimationRunning: isFeedingAnimationRunning
+                    isFeedingAnimationRunning: isFeedingAnimationRunning,
+                    isFocused: card.item.id == selectedFoodID,
+                    isPendingFeed: card.item.id == pendingFoodID
                 )
                 .zIndex(zIndex(for: relativePosition))
             }
 
             VStack(spacing: 6) {
                 if let focused = foods[safe: focusedIndex] {
+                    let isPendingFeed = pendingFoodID == focused.id
+
                     Text(focused.name)
                         .font(.system(size: 14, weight: .bold))
                         .foregroundStyle(.white)
 
-                    Text("左右にドラムロール / 上フリックであげる")
-                        .font(.system(size: 11, weight: .medium))
-                        .foregroundStyle(.white.opacity(0.8))
+                    Text(
+                        isPendingFeed
+                        ? "もう一度上フリックであげる"
+                        : "左右フリックで1つずつ選択 / 上フリックで仮決め"
+                    )
+                    .font(.system(size: 11, weight: .medium))
+                    .foregroundStyle(.white.opacity(0.8))
                 }
             }
             .offset(y: HomeView.Layout.foodSelectorInstructionOffsetY)
@@ -2824,7 +2883,7 @@ private struct FoodSelectionCarousel: View {
         )
         .accessibilityElement(children: .combine)
         .accessibilityLabel("ごはんセレクター")
-        .accessibilityHint("左右にドラムロールのように動かしてごはんを選び、上フリックであげます")
+        .accessibilityHint("左右フリックでごはんを1つずつ選び、上フリックで仮決めしてからもう一度上フリックであげます")
     }
 
     private func countText(for foodID: String) -> String {
@@ -2843,6 +2902,8 @@ private struct FoodCarouselCard: View {
     let relativePosition: Double
     let dragOffset: CGSize
     let isFeedingAnimationRunning: Bool
+    let isFocused: Bool
+    let isPendingFeed: Bool
 
     private var clampedPosition: Double {
         min(
@@ -2890,7 +2951,24 @@ private struct FoodCarouselCard: View {
     }
 
     private var backgroundOpacity: Double {
-        absPosition < 0.75 ? 0.24 : 0.18
+        if isPendingFeed && absPosition < 0.75 {
+            return 0.32
+        }
+        return absPosition < 0.75 ? 0.24 : 0.18
+    }
+
+    private var borderOpacity: Double {
+        if isPendingFeed && absPosition < 0.75 {
+            return 0.95
+        }
+        if isFocused && absPosition < 0.75 {
+            return 0.42
+        }
+        return 0.16
+    }
+
+    private var borderLineWidth: CGFloat {
+        isPendingFeed && absPosition < 0.75 ? 3 : 1
     }
 
     var body: some View {
@@ -2898,12 +2976,26 @@ private struct FoodCarouselCard: View {
             RoundedRectangle(cornerRadius: 26, style: .continuous)
                 .fill(Color.black.opacity(backgroundOpacity))
                 .frame(width: cardSize.width, height: cardSize.height)
+                .overlay(
+                    RoundedRectangle(cornerRadius: 26, style: .continuous)
+                        .stroke(Color.white.opacity(borderOpacity), lineWidth: borderLineWidth)
+                )
 
             Image(item.assetName)
                 .resizable()
                 .scaledToFit()
                 .frame(width: cardSize.width * 0.68, height: cardSize.height * 0.68)
                 .padding(10)
+
+            if isPendingFeed && absPosition < 0.75 {
+                Text("仮決め")
+                    .font(.system(size: 11, weight: .bold))
+                    .foregroundStyle(.black)
+                    .padding(.horizontal, 10)
+                    .padding(.vertical, 5)
+                    .background(Color.white, in: Capsule())
+                    .offset(y: -cardSize.height * 0.34)
+            }
 
             Text(countText)
                 .font(.system(size: 12, weight: .bold))
