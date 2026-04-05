@@ -43,12 +43,17 @@ final class AppState {
     var friendshipPoint: Int
     var friendshipCardCount: Int
 
-    // MARK: - ✅ Satisfaction
-    // 既存の他画面互換のため当面は残す
+    // MARK: - ✅ Fullness (backing store: satisfaction)
+    // NOTE:
+    // 既存 SwiftData 互換のためプロパティ名は satisfaction のまま維持するが、
+    // 実体は「満腹度」として扱う。
+    // 0...5 の5段階。30分ごとに1減少。
     var satisfactionLevel: Int
     var satisfactionLastUpdatedAt: Date?
 
-    // ✅ ごはん（NEW: フラグ制）
+    // ✅ ごはん（フラグ制）
+    // NOTE:
+    // 満腹度が MAX 未満のときのみ成立させる。
     var foodFlagAt: Date?
     var foodLastRaisedAt: Date?
     var foodNextSpawnAt: Date?
@@ -185,8 +190,9 @@ final class AppState {
         self.friendshipPoint = friendshipPoint
         self.friendshipCardCount = friendshipCardCount
 
-        self.satisfactionLevel = satisfactionLevel
-        self.satisfactionLastUpdatedAt = satisfactionLastUpdatedAt
+        let clampedSatisfaction = min(AppState.fullnessMaxLevel, max(0, satisfactionLevel))
+        self.satisfactionLevel = clampedSatisfaction
+        self.satisfactionLastUpdatedAt = clampedSatisfaction > 0 ? satisfactionLastUpdatedAt : nil
 
         self.foodFlagAt = foodFlagAt
         self.foodLastRaisedAt = foodLastRaisedAt
@@ -251,6 +257,10 @@ final class AppState {
 extension AppState {
     static let fixedDailyStepGoal: Int = 10_000
 
+    // ✅ 満腹度仕様
+    static let fullnessMaxLevel: Int = 5
+    static let fullnessDecayUnitSeconds: TimeInterval = 30 * 60
+
     /// 歩数通貨の所持数
     var walletSteps: Int {
         get { max(0, walletKcal) }
@@ -269,7 +279,7 @@ extension AppState {
         set { dailyGoalKcal = AppState.fixedDailyStepGoal }
     }
 
-    /// Home 右上メーター表示用の歩数キャッシュ
+    /// Home 左上メーター表示用の歩数キャッシュ
     var cachedTodayMeterSteps: Int {
         get { max(0, cachedTodayKcal) }
         set { cachedTodayKcal = max(0, newValue) }
@@ -291,7 +301,7 @@ extension AppState {
         let currentPetID: String
         let todaySteps: Int
 
-        // ✅ 追加：Widget側で未起動中の状態判定に使える時刻情報
+        // ✅ Widget側で未起動中の状態判定に使える時刻情報
         let toiletFlagAt: Date?
         let bathFlagAt: Date?
         let toiletNextSpawnAt: Date?
@@ -312,17 +322,14 @@ extension AppState {
         return trimmed.isEmpty ? "pet_000" : trimmed
     }
 
-    /// ✅ Widget に渡す currentPetID は常に安全な値に正規化
     var widgetCurrentPetID: String {
         normalizedCurrentPetID
     }
 
-    /// ✅ Widget に渡す歩数は負数を防ぎつつキャッシュ値を利用
     var widgetTodaySteps: Int {
         max(0, cachedTodaySteps)
     }
 
-    /// ✅ 呼び出し側がより新しい歩数を持っている場合に上書き可能
     func resolvedWidgetTodaySteps(_ overrideTodaySteps: Int? = nil) -> Int {
         max(0, overrideTodaySteps ?? cachedTodaySteps)
     }
@@ -353,7 +360,6 @@ extension AppState {
         return delta
     }
 
-    /// 互換用
     @discardableResult
     func drainPendingKcalToWallet() -> Int {
         drainPendingStepsToWallet()
@@ -380,8 +386,8 @@ extension AppState {
     }
 
     func firstOwnedFoodId(from ids: [String]) -> String? {
-        for id in ids {
-            if foodCount(foodId: id) > 0 { return id }
+        for id in ids where foodCount(foodId: id) > 0 {
+            return id
         }
         return nil
     }
@@ -675,12 +681,10 @@ extension AppState {
         let didUpdateStepsCache: Bool
         let didUpdateKcalCache: Bool
 
-        // 新仕様向けの読み替え
         var meterStepsToUse: Int { kcalToUse }
         var didUpdateMeterStepsCache: Bool { didUpdateKcalCache }
     }
 
-    /// 新仕様用
     func updateTodayStepCacheProtectingZero(
         fetchedSteps: Int,
         todayKey: String
@@ -692,7 +696,6 @@ extension AppState {
         )
     }
 
-    /// 互換用
     func updateTodayCacheProtectingZero(
         fetchedSteps: Int,
         fetchedKcal: Int,
@@ -780,14 +783,10 @@ extension AppState {
     }
 }
 
-// MARK: - ✅ Satisfaction
-// 既存の他画面互換のため残す（Homeでは未使用）
+// MARK: - ✅ Fullness (backing store: satisfaction)
 extension AppState {
-    private static let satisfactionDecayUnitSeconds: TimeInterval = 60 * 60
-    private static let satisfactionMax: Int = 3
-
-    private func clampSatisfaction(_ v: Int) -> Int {
-        min(AppState.satisfactionMax, max(0, v))
+    private func clampSatisfaction(_ value: Int) -> Int {
+        min(AppState.fullnessMaxLevel, max(0, value))
     }
 
     private func computedSatisfaction(now: Date = Date()) -> (level: Int, effectiveLastUpdatedAt: Date?) {
@@ -801,13 +800,10 @@ extension AppState {
             return (current, nil)
         }
 
-        let elapsed = now.timeIntervalSince(last)
-        if elapsed <= 0 {
-            return (current, last)
-        }
+        let elapsed = max(0, now.timeIntervalSince(last))
+        let steps = Int(floor(elapsed / AppState.fullnessDecayUnitSeconds))
 
-        let steps = Int(floor(elapsed / AppState.satisfactionDecayUnitSeconds))
-        if steps <= 0 {
+        guard steps > 0 else {
             return (current, last)
         }
 
@@ -816,24 +812,31 @@ extension AppState {
             return (0, nil)
         }
 
-        let advanced = TimeInterval(steps) * AppState.satisfactionDecayUnitSeconds
-        let effLast = last.addingTimeInterval(advanced)
-
-        return (after, effLast)
+        let advanced = TimeInterval(steps) * AppState.fullnessDecayUnitSeconds
+        let effectiveLast = last.addingTimeInterval(advanced)
+        return (after, effectiveLast)
     }
 
+    /// 現在の満腹度（0...5）
     func currentSatisfaction(now: Date = Date()) -> Int {
         computedSatisfaction(now: now).level
     }
 
+    /// 別名（意味を分かりやすくする用）
+    func currentFullness(now: Date = Date()) -> Int {
+        currentSatisfaction(now: now)
+    }
+
+    /// ご飯をあげられるか
     func canFeedNow(now: Date = Date()) -> (can: Bool, reason: String?) {
         let level = computedSatisfaction(now: now).level
-        if level >= AppState.satisfactionMax {
-            return (false, "満足度が最大のためご飯をあげられません")
+        if level >= AppState.fullnessMaxLevel {
+            return (false, "満腹度が最大のためご飯をあげられません")
         }
         return (true, nil)
     }
 
+    /// 次に1段階減るまでの残り秒数
     func satisfactionRemainingSecondsUntilNextDecay(now: Date = Date()) -> TimeInterval? {
         let computed = computedSatisfaction(now: now)
         let level = computed.level
@@ -846,11 +849,11 @@ extension AppState {
         } else if let last = satisfactionLastUpdatedAt {
             referenceDate = last
         } else {
-            return AppState.satisfactionDecayUnitSeconds
+            return AppState.fullnessDecayUnitSeconds
         }
 
         let elapsed = max(0, now.timeIntervalSince(referenceDate))
-        let remaining = AppState.satisfactionDecayUnitSeconds - elapsed
+        let remaining = AppState.fullnessDecayUnitSeconds - elapsed
         return max(0, remaining)
     }
 
@@ -861,6 +864,7 @@ extension AppState {
         satisfactionLevel = clampSatisfaction(satisfactionLevel)
 
         guard satisfactionLevel > 0 else {
+            satisfactionLevel = 0
             satisfactionLastUpdatedAt = nil
             return 0
         }
@@ -879,30 +883,26 @@ extension AppState {
             return 0
         }
 
-        if let eff = computed.effectiveLastUpdatedAt {
-            satisfactionLastUpdatedAt = eff
-        }
-
+        satisfactionLastUpdatedAt = computed.effectiveLastUpdatedAt
         return satisfactionLevel
     }
 
+    /// ご飯を1回あげて満腹度を+1する
+    /// 仕様: どのご飯でも現段階では同じ数値増加
     @discardableResult
     func feedOnce(now: Date = Date()) -> (didFeed: Bool, before: Int, after: Int, reason: String?) {
         _ = applySatisfactionDecayIfNeeded(now: now)
 
         let before = satisfactionLevel
-        guard before < AppState.satisfactionMax else {
-            return (false, before, before, "満足度が最大のためご飯をあげられません")
+        guard before < AppState.fullnessMaxLevel else {
+            return (false, before, before, "満腹度が最大のためご飯をあげられません")
         }
 
         let after = clampSatisfaction(before + 1)
         satisfactionLevel = after
 
-        if before == 0 {
-            satisfactionLastUpdatedAt = now
-        } else if satisfactionLastUpdatedAt == nil {
-            satisfactionLastUpdatedAt = now
-        }
+        // ✅ 給餌した時点から30分カウントを再スタート
+        satisfactionLastUpdatedAt = after > 0 ? now : nil
 
         return (true, before, after, nil)
     }
@@ -910,17 +910,12 @@ extension AppState {
     @discardableResult
     func decreaseSatisfaction(by amount: Int, now: Date = Date()) -> Int {
         _ = applySatisfactionDecayIfNeeded(now: now)
+
         let dec = max(0, amount)
         guard dec > 0 else { return satisfactionLevel }
 
         satisfactionLevel = max(0, satisfactionLevel - dec)
-
-        if satisfactionLevel == 0 {
-            satisfactionLastUpdatedAt = nil
-        } else if satisfactionLastUpdatedAt == nil {
-            satisfactionLastUpdatedAt = now
-        }
-
+        satisfactionLastUpdatedAt = satisfactionLevel > 0 ? now : nil
         return satisfactionLevel
     }
 }
@@ -938,6 +933,22 @@ extension AppState {
     // MARK: Food
 
     func ensureFoodNextSpawnScheduled(now: Date = Date()) {
+        _ = applySatisfactionDecayIfNeeded(now: now)
+
+        // ✅ 既存データや旧ロジックで foodFlag が残っていた場合、
+        //    満腹度MAXならフラグを成立させない
+        if foodFlagAt != nil, currentSatisfaction(now: now) >= AppState.fullnessMaxLevel {
+            foodFlagAt = nil
+
+            if let next = foodNextSpawnAt {
+                if next <= now {
+                    foodNextSpawnAt = now.addingTimeInterval(randomCareInterval())
+                }
+            } else {
+                foodNextSpawnAt = now.addingTimeInterval(randomCareInterval())
+            }
+        }
+
         if foodNextSpawnAt == nil {
             foodNextSpawnAt = now.addingTimeInterval(randomCareInterval())
         }
@@ -945,6 +956,7 @@ extension AppState {
 
     func canRaiseFoodFlag(now: Date = Date()) -> Bool {
         if foodFlagAt != nil { return false }
+        if currentSatisfaction(now: now) >= AppState.fullnessMaxLevel { return false }
 
         if let next = foodNextSpawnAt {
             return now >= next

@@ -34,6 +34,8 @@ struct HomeView: View {
 
     @State private var displayedFriendship: Double = 0
     @State private var displayedStepProgress: Double = 0
+    @State private var displayedFullnessLevel: Int = 0
+    @State private var animatedFullnessLevel: Double = 0
 
     @State private var isAnimatingGain: Bool = false
     @State private var isHomeVisible: Bool = false
@@ -84,6 +86,10 @@ struct HomeView: View {
     @State private var toiletPoopActivePoint: [String: CGPoint] = [:]
     @State private var homeContentSize: CGSize = .zero
 
+    private var fullnessMaxLevel: Int {
+        5
+    }
+
     private var currentBaseAssetName: String {
         PetMaster.assetName(for: state.normalizedCurrentPetID)
     }
@@ -119,6 +125,14 @@ struct HomeView: View {
 
     private var visibleToiletPoops: [AppState.ToiletPoopItem] {
         state.toiletPoops().filter { !$0.isCleared }
+    }
+
+    private var currentFullnessLevel: Int {
+        normalizedFullnessLevel(state.currentSatisfaction(now: Date()))
+    }
+
+    private var canShowFoodBubble: Bool {
+        currentFullnessLevel < fullnessMaxLevel
     }
 
     private var canShowWcAsset: Bool {
@@ -293,8 +307,6 @@ struct HomeView: View {
     private var captureMetricValues: (steps: Int, activeKcal: Int, totalKcal: Int) {
         let steps = max(todaySteps, hk.todaySteps)
 
-        // CameraCaptureView 側の互換のため引数名は残すが、
-        // 仕様上は歩数主軸に統一する。
         return (
             steps: steps,
             activeKcal: 0,
@@ -322,10 +334,10 @@ struct HomeView: View {
 
         static let friendshipTextFont: CGFloat = 11
 
-        static let stepRingTop: CGFloat = 36
-        static let stepRingTrailing: CGFloat = 18
-        static let stepRingSizeOuter: CGFloat = 135
-        static let stepRingSizeInner: CGFloat = 115
+        static let fullnessGaugeTop: CGFloat = 36
+        static let fullnessGaugeTrailing: CGFloat = 18
+        static let fullnessGaugeOuterSize: CGFloat = 135
+        static let fullnessGaugeInnerSize: CGFloat = 115
 
         static let characterTopOffset: CGFloat = 45
         static let characterMaxWidth: CGFloat = 210
@@ -382,11 +394,9 @@ struct HomeView: View {
         static let getTextOffsetX: CGFloat = 11
         static let getTextOffsetY: CGFloat = -160
 
-        static let stepCenterCurrentFont: CGFloat = 18
-        static let stepCenterGoalFont: CGFloat = 12
-        static let stepCenterDividerHeight: CGFloat = 1
-        static let stepCenterDividerWidthRatio: CGFloat = 0.62
-        static let stepCenterSpacing: CGFloat = 4
+        static let fullnessLabelOffsetY: CGFloat = 44
+        static let fullnessValueFont: CGFloat = 14
+        static let fullnessCaptionFont: CGFloat = 10
 
         static let zCharacter: Double = 50
         static let zBottomButtons: Double = 260
@@ -464,15 +474,14 @@ struct HomeView: View {
                                 .allowsHitTesting(false)
 
                             VStack(alignment: .leading, spacing: Layout.meterStackSpacing) {
-                                FriendshipMeter(
-                                    value: displayedFriendship,
-                                    maxValue: Double(AppState.friendshipMaxMeter),
-                                    currentTextValue: Int(displayedFriendship.rounded()),
-                                    maxTextValue: AppState.friendshipMaxMeter,
+                                StepProgressCapsule(
+                                    progress: displayedStepProgress,
+                                    currentSteps: displayedTodaySteps,
+                                    goalSteps: fixedDailyGoalSteps,
                                     barWidth: Layout.barWidth,
                                     height: Layout.capsuleHeight,
                                     iconSize: Layout.iconHeartSize,
-                                    redMinWidth: Layout.redMinWidth
+                                    minFillWidth: Layout.redMinWidth
                                 )
 
                                 WalletCapsule(
@@ -488,18 +497,18 @@ struct HomeView: View {
                             .padding(.leading, Layout.leftTopPaddingLeading)
                             .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
 
-                            StepRing(
-                                progress: displayedStepProgress,
-                                currentSteps: displayedTodaySteps,
-                                goalSteps: fixedDailyGoalSteps,
-                                outerSize: Layout.stepRingSizeOuter,
-                                innerSize: Layout.stepRingSizeInner
+                            FullnessStomachGauge(
+                                level: animatedFullnessLevel,
+                                displayLevel: displayedFullnessLevel,
+                                maxLevel: fullnessMaxLevel,
+                                outerSize: Layout.fullnessGaugeOuterSize,
+                                innerSize: Layout.fullnessGaugeInnerSize
                             )
-                            .padding(.top, Layout.stepRingTop)
-                            .padding(.trailing, Layout.stepRingTrailing)
+                            .padding(.top, Layout.fullnessGaugeTop)
+                            .padding(.trailing, Layout.fullnessGaugeTrailing)
                             .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topTrailing)
 
-                            if hasFoodFlag {
+                            if canShowFoodBubble {
                                 FloatingThoughtButton(
                                     imageName: "food_button",
                                     size: Layout.floatingBubbleSize,
@@ -643,6 +652,7 @@ struct HomeView: View {
                         .frame(maxWidth: .infinity, maxHeight: .infinity)
                         .onAppear {
                             homeContentSize = geo.size
+                            syncDisplayedFullness(animated: false)
                             syncToiletPoopsIfNeeded(containerSize: geo.size)
                         }
                         .onChange(of: geo.size) { _, newSize in
@@ -726,6 +736,7 @@ struct HomeView: View {
                     )
                     .onChange(of: timeline.date) { _, newDate in
                         state.ensureDailyResetIfNeeded(now: newDate)
+                        syncDisplayedFullness(now: newDate)
 
                         state.ensureToiletNextSpawnScheduled(now: newDate)
                         state.ensureFoodNextSpawnScheduled(now: newDate)
@@ -738,6 +749,7 @@ struct HomeView: View {
                     }
                     .onAppear {
                         state.ensureDailyResetIfNeeded(now: now)
+                        syncDisplayedFullness(now: now)
 
                         state.ensureToiletNextSpawnScheduled(now: now)
                         state.ensureFoodNextSpawnScheduled(now: now)
@@ -826,6 +838,8 @@ struct HomeView: View {
                 todaySteps: displayedTodaySteps,
                 goalSteps: fixedDailyGoalSteps
             )
+            displayedFullnessLevel = normalizedFullnessLevel(state.applySatisfactionDecayIfNeeded(now: Date()))
+            animatedFullnessLevel = Double(displayedFullnessLevel)
 
             handleDayRolloverIfNeeded(state: state)
             await runSync(state: state)
@@ -839,6 +853,7 @@ struct HomeView: View {
             syncToiletPoopsIfNeeded(containerSize: homeContentSize)
             loadTodayPhoto()
             syncFoodSelectorSelection()
+            syncDisplayedFullness()
 
             updateToiletWiggle()
             syncCharacterBaseFromState(force: true)
@@ -860,6 +875,7 @@ struct HomeView: View {
                 todaySteps: displayedTodaySteps,
                 goalSteps: fixedDailyGoalSteps
             )
+            syncDisplayedFullness()
 
             handleDayRolloverIfNeeded(state: state)
 
@@ -875,6 +891,7 @@ struct HomeView: View {
                 syncToiletPoopsIfNeeded(containerSize: homeContentSize)
                 loadTodayPhoto()
                 syncFoodSelectorSelection()
+                syncDisplayedFullness()
 
                 if isHomeVisible {
                     await reconcileWalletDisplayIfNeeded(state: state)
@@ -891,6 +908,7 @@ struct HomeView: View {
             _ = state.normalizeFixedDailyStepGoal()
             syncCharacterBaseFromState(force: true)
             startCharacterIdleLoopIfNeeded()
+            syncDisplayedFullness(animated: false)
 
             withAnimation(.easeOut(duration: 0.25)) {
                 displayedStepProgress = calcStepProgressRaw(
@@ -970,12 +988,21 @@ struct HomeView: View {
             updateWidgetSnapshot(forceReload: true)
         }
         .onChange(of: state.foodFlagAt) { _, _ in
-            if state.hasFoodFlag {
+            syncDisplayedFullness()
+
+            if currentFullnessLevel < fullnessMaxLevel {
                 syncFoodSelectorSelection()
             } else {
                 closeFoodSelector()
             }
+
             updateWidgetSnapshot(forceReload: true)
+        }
+        .onChange(of: state.satisfactionLevel) { _, _ in
+            syncDisplayedFullness()
+        }
+        .onChange(of: state.satisfactionLastUpdatedAt) { _, _ in
+            syncDisplayedFullness()
         }
         .onChange(of: state.toiletNextSpawnAt) { _, _ in
             updateWidgetSnapshot(forceReload: true)
@@ -988,6 +1015,30 @@ struct HomeView: View {
         }
         .onChange(of: state.lastDayKey) { _, _ in
             updateWidgetSnapshot(forceReload: true)
+        }
+    }
+
+    private func normalizedFullnessLevel(_ value: Int) -> Int {
+        min(fullnessMaxLevel, max(0, value))
+    }
+
+    private func syncDisplayedFullness(now: Date = Date(), animated: Bool = true) {
+        let newLevel = normalizedFullnessLevel(state.applySatisfactionDecayIfNeeded(now: now))
+        let targetAnimatedLevel = Double(newLevel)
+
+        displayedFullnessLevel = newLevel
+
+        if animated {
+            let duration = targetAnimatedLevel > animatedFullnessLevel ? 0.72 : 0.32
+            withAnimation(.easeInOut(duration: duration)) {
+                animatedFullnessLevel = targetAnimatedLevel
+            }
+        } else {
+            animatedFullnessLevel = targetAnimatedLevel
+        }
+
+        if newLevel >= fullnessMaxLevel, showFoodSelector {
+            closeFoodSelector()
         }
     }
 
@@ -1224,6 +1275,12 @@ struct HomeView: View {
             return
         }
 
+        let feedState = state.canFeedNow(now: Date())
+        guard feedState.can else {
+            toast(feedState.reason ?? "もう満腹みたい")
+            return
+        }
+
         syncFoodSelectorSelection()
 
         guard !ownedFoods.isEmpty else { return }
@@ -1445,6 +1502,13 @@ struct HomeView: View {
             return
         }
 
+        let feedState = state.canFeedNow(now: Date())
+        guard feedState.can else {
+            toast(feedState.reason ?? "もう満腹みたい")
+            closeFoodSelector()
+            return
+        }
+
         guard let selectedFood else {
             toast("ご飯を持っていません")
             Task { @MainActor in
@@ -1465,6 +1529,13 @@ struct HomeView: View {
     private func handleFoodSelectorTap(_ foodID: String) {
         guard !isToiletLocked else {
             showToiletLockedMessage()
+            closeFoodSelector()
+            return
+        }
+
+        let feedState = state.canFeedNow(now: Date())
+        guard feedState.can else {
+            toast(feedState.reason ?? "もう満腹みたい")
             closeFoodSelector()
             return
         }
@@ -1503,6 +1574,14 @@ struct HomeView: View {
             Task { @MainActor in
                 Haptics.rattle(duration: 0.12, style: .light)
             }
+            closeFoodSelector()
+            return
+        }
+
+        let feedState = state.canFeedNow(now: Date())
+        guard feedState.can else {
+            pendingFoodFeedID = nil
+            toast(feedState.reason ?? "もう満腹みたい")
             closeFoodSelector()
             return
         }
@@ -1581,6 +1660,17 @@ struct HomeView: View {
     }
 
     private func maybeSpawnFoodFlag(state: AppState, now: Date = Date()) {
+        syncDisplayedFullness(now: now)
+
+        let feedState = state.canFeedNow(now: now)
+        guard feedState.can else {
+            if state.hasFoodFlag {
+                _ = state.resolveFood(now: now)
+                save()
+            }
+            return
+        }
+
         let didRaise = state.raiseFoodFlagIfNeeded(now: now)
         if didRaise {
             save()
@@ -1781,9 +1871,17 @@ struct HomeView: View {
             return false
         }
 
-        guard state.hasFoodFlag else { return false }
         guard let food = FoodCatalog.byId(foodId) else {
             toast("ご飯が見つかりません")
+            return false
+        }
+
+        let now = Date()
+        let feedState = state.canFeedNow(now: now)
+        guard feedState.can else {
+            toast(feedState.reason ?? "今はごはんの時間じゃないよ")
+            syncDisplayedFullness(now: now)
+            syncFoodSelectorSelection()
             return false
         }
 
@@ -1801,11 +1899,15 @@ struct HomeView: View {
             return false
         }
 
-        guard state.resolveFood(now: Date()) else {
-            toast("今はごはんの時間じゃないよ")
+        let feedResult = state.feedOnce(now: now)
+        guard feedResult.didFeed else {
+            toast(feedResult.reason ?? "今はごはんをあげられません")
+            syncDisplayedFullness(now: now)
             syncFoodSelectorSelection()
             return false
         }
+
+        _ = state.resolveFood(now: now)
 
         let isSuperFavorite = isSuperFavoriteFood(foodId: food.id, petID: state.normalizedCurrentPetID)
         let gainedPoint = isSuperFavorite ? 20 : 10
@@ -1815,15 +1917,16 @@ struct HomeView: View {
         }
 
         save()
+        syncDisplayedFullness(now: now)
 
         addFriendshipWithAnimation(points: gainedPoint, state: state)
         playFeedSound(isSuperFavorite: isSuperFavorite)
 
         if isSuperFavorite {
-            toast("\(food.name)をあげた！ 大好物だ！ +\(gainedPoint)")
+            toast("\(food.name)をあげた！ 満腹度 \(normalizedFullnessLevel(feedResult.after))/\(fullnessMaxLevel) +\(gainedPoint)")
             playSuperFavoriteReactionIfPossible()
         } else {
-            toast("\(food.name)をあげた！ +\(gainedPoint)")
+            toast("\(food.name)をあげた！ 満腹度 \(normalizedFullnessLevel(feedResult.after))/\(fullnessMaxLevel) +\(gainedPoint)")
         }
 
         syncFoodSelectorSelection()
@@ -2044,10 +2147,9 @@ struct HomeView: View {
             return
         }
 
-        guard state.hasFoodFlag else {
-            Task { @MainActor in
-                Haptics.rattle(duration: 0.12, style: .light)
-            }
+        let feedState = state.canFeedNow(now: Date())
+        guard feedState.can else {
+            toast(feedState.reason ?? "もう満腹みたい")
             return
         }
 
@@ -2150,6 +2252,7 @@ struct HomeView: View {
 
             state.ensureDailyResetIfNeeded(now: now)
             state.lastSyncedAt = Calendar.current.startOfDay(for: now)
+            syncDisplayedFullness(now: now)
             save()
             loadTodayPhoto()
             return
@@ -2359,24 +2462,28 @@ private enum HomeWidgetBridge {
 
 // MARK: - UI Parts
 
-private struct FriendshipMeter: View {
-    let value: Double
-    let maxValue: Double
-    let currentTextValue: Int
-    let maxTextValue: Int
+private struct StepProgressCapsule: View {
+    let progress: Double
+    let currentSteps: Int
+    let goalSteps: Int
 
     let barWidth: CGFloat
     let height: CGFloat
     let iconSize: CGFloat
-    let redMinWidth: CGFloat
+    let minFillWidth: CGFloat
 
-    private var progress: CGFloat {
-        guard maxValue > 0 else { return 0 }
-        return CGFloat(min(1.0, value / maxValue))
+    private var clampedProgress: CGFloat {
+        CGFloat(min(1.0, max(0.0, progress)))
     }
 
-    private var rawWidth: CGFloat { barWidth * progress }
-    private var baseWidth: CGFloat { Swift.max(redMinWidth, rawWidth) }
+    private var rawWidth: CGFloat {
+        barWidth * clampedProgress
+    }
+
+    private var baseWidth: CGFloat {
+        Swift.max(minFillWidth, rawWidth)
+    }
+
     private var scaleX: CGFloat {
         guard baseWidth > 0 else { return 0 }
         return rawWidth / baseWidth
@@ -2384,10 +2491,14 @@ private struct FriendshipMeter: View {
 
     var body: some View {
         HStack(spacing: 10) {
-            Image("heart_Icon")
-                .resizable()
-                .scaledToFit()
+            Image(systemName: "shoeprints.fill")
+                .font(.system(size: iconSize * 0.72, weight: .bold))
+                .foregroundStyle(.white)
                 .frame(width: iconSize, height: iconSize)
+                .background(
+                    Circle()
+                        .fill(Color.black.opacity(0.82))
+                )
 
             ZStack(alignment: .leading) {
                 Capsule()
@@ -2396,12 +2507,21 @@ private struct FriendshipMeter: View {
 
                 if rawWidth > 0 {
                     Capsule()
-                        .fill(Color(red: 0.95, green: 0.12, blue: 0.12))
+                        .fill(
+                            LinearGradient(
+                                colors: [
+                                    Color(red: 0.23, green: 0.86, blue: 0.55),
+                                    Color(red: 0.26, green: 0.68, blue: 0.98)
+                                ],
+                                startPoint: .leading,
+                                endPoint: .trailing
+                            )
+                        )
                         .frame(width: baseWidth, height: height)
                         .scaleEffect(x: scaleX, y: 1, anchor: .leading)
                 }
 
-                Text("\(currentTextValue)/\(maxTextValue)")
+                Text("\(currentSteps)/\(goalSteps)")
                     .font(.system(size: HomeView.Layout.friendshipTextFont, weight: .bold))
                     .foregroundStyle(.white)
                     .monospacedDigit()
@@ -2439,79 +2559,279 @@ private struct WalletCapsule: View {
     }
 }
 
-private struct StepRing: View {
-    let progress: Double
-    let currentSteps: Int
-    let goalSteps: Int
-
+private struct FullnessStomachGauge: View {
+    let level: Double
+    let displayLevel: Int
+    let maxLevel: Int
     let outerSize: CGFloat
     let innerSize: CGFloat
 
-    private var goalText: String { "\(goalSteps)" }
-
-    private var lap1: CGFloat {
-        CGFloat(min(1.0, max(0.0, progress)))
+    private var clampedLevel: Double {
+        min(Double(maxLevel), max(0, level))
     }
 
-    private var lap2: CGFloat {
-        let v = progress - 1.0
-        return CGFloat(min(1.0, max(0.0, v)))
+    private var displayedClampedLevel: Int {
+        min(maxLevel, max(0, displayLevel))
+    }
+
+    private var colorLevel: Int {
+        min(maxLevel, max(0, Int(ceil(clampedLevel))))
+    }
+
+    private var fillFraction: CGFloat {
+        guard maxLevel > 0 else { return 0 }
+        return CGFloat(clampedLevel) / CGFloat(maxLevel)
+    }
+
+    private var liquidMainColor: Color {
+        switch colorLevel {
+        case 0: return Color(red: 0.18, green: 0.42, blue: 0.20).opacity(0.18)
+        case 1: return Color(red: 0.15, green: 0.49, blue: 0.17)
+        case 2: return Color(red: 0.13, green: 0.45, blue: 0.15)
+        case 3: return Color(red: 0.11, green: 0.40, blue: 0.13)
+        case 4: return Color(red: 0.10, green: 0.36, blue: 0.12)
+        default: return Color(red: 0.09, green: 0.32, blue: 0.11)
+        }
+    }
+
+    private var liquidDeepColor: Color {
+        switch colorLevel {
+        case 0: return Color(red: 0.08, green: 0.22, blue: 0.09).opacity(0.14)
+        case 1: return Color(red: 0.07, green: 0.26, blue: 0.08)
+        case 2: return Color(red: 0.06, green: 0.23, blue: 0.07)
+        case 3: return Color(red: 0.05, green: 0.20, blue: 0.06)
+        case 4: return Color(red: 0.04, green: 0.18, blue: 0.05)
+        default: return Color(red: 0.03, green: 0.16, blue: 0.05)
+        }
+    }
+
+    private var liquidHighlightColor: Color {
+        Color(red: 0.42, green: 0.76, blue: 0.46)
     }
 
     var body: some View {
-        ZStack {
-            Circle()
-                .fill(Color.black.opacity(0.9))
-                .frame(width: outerSize, height: outerSize)
+        TimelineView(.animation(minimumInterval: 1.0 / 30.0)) { timeline in
+            let t = timeline.date.timeIntervalSinceReferenceDate
+            let phase1 = CGFloat(t * 1.45)
+            let phase2 = CGFloat(t * 1.05 + 1.1)
+            let stomachWidth = innerSize * 0.88
+            let stomachHeight = innerSize * 0.88
+            let liquidDiameter = outerSize * 0.98
 
-            Circle()
-                .stroke(lineWidth: 14)
-                .opacity(0.18)
-                .foregroundStyle(.white)
-                .frame(width: innerSize, height: innerSize)
-
-            Circle()
-                .trim(from: 0, to: lap1)
-                .stroke(style: StrokeStyle(lineWidth: 14, lineCap: .round))
-                .foregroundStyle(.white)
-                .rotationEffect(.degrees(-90))
-                .frame(width: innerSize, height: innerSize)
-                .animation(.easeOut(duration: 0.55), value: lap1)
-
-            if lap2 > 0 {
+            ZStack {
                 Circle()
-                    .trim(from: 0, to: lap2)
-                    .stroke(style: StrokeStyle(lineWidth: 14, lineCap: .round))
-                    .foregroundStyle(.green)
-                    .rotationEffect(.degrees(-90))
-                    .frame(width: innerSize, height: innerSize)
-                    .animation(.easeOut(duration: 0.55), value: lap2)
-            }
-
-            VStack(spacing: HomeView.Layout.stepCenterSpacing) {
-                Text("\(currentSteps)")
-                    .font(.system(size: HomeView.Layout.stepCenterCurrentFont, weight: .bold))
-                    .foregroundStyle(.white)
-                    .monospacedDigit()
-                    .lineLimit(1)
-                    .minimumScaleFactor(0.7)
-
-                Rectangle()
-                    .fill(Color.white.opacity(0.75))
-                    .frame(
-                        width: innerSize * HomeView.Layout.stepCenterDividerWidthRatio,
-                        height: HomeView.Layout.stepCenterDividerHeight
+                    .fill(Color.black.opacity(0.78))
+                    .frame(width: outerSize, height: outerSize)
+                    .overlay(
+                        Circle()
+                            .fill(Color.black.opacity(0.18))
+                    )
+                    .overlay(
+                        Circle()
+                            .stroke(Color.white.opacity(0.10), lineWidth: 1)
                     )
 
-                Text("\(goalText)")
-                    .font(.system(size: HomeView.Layout.stepCenterGoalFont, weight: .semibold))
-                    .foregroundStyle(.white.opacity(0.92))
-                    .monospacedDigit()
-                    .lineLimit(1)
-                    .minimumScaleFactor(0.7)
+                ZStack {
+                    if fillFraction > 0.001 {
+                        ZStack {
+                            StomachLiquidWaveShape(
+                                fillFraction: fillFraction,
+                                phase: phase1,
+                                amplitude: 4.8
+                            )
+                            .fill(
+                                LinearGradient(
+                                    colors: [
+                                        liquidHighlightColor.opacity(0.90),
+                                        liquidMainColor.opacity(0.96),
+                                        liquidDeepColor.opacity(0.94)
+                                    ],
+                                    startPoint: .top,
+                                    endPoint: .bottom
+                                )
+                            )
+
+                            StomachLiquidWaveShape(
+                                fillFraction: max(0, fillFraction - 0.025),
+                                phase: phase2,
+                                amplitude: 7.0
+                            )
+                            .fill(Color.white.opacity(0.18))
+
+                            Canvas { context, size in
+                                let bubbleSpecs: [(CGFloat, CGFloat, CGFloat, Double)] = [
+                                    (0.32, 0.70, 3.2, 0.55),
+                                    (0.56, 0.61, 2.6, 0.75),
+                                    (0.68, 0.48, 4.0, 0.48),
+                                    (0.76, 0.66, 2.8, 0.68),
+                                    (0.43, 0.52, 2.4, 0.82),
+                                    (0.60, 0.77, 3.6, 0.60)
+                                ]
+
+                                let liquidTop = size.height * (1 - fillFraction)
+
+                                for spec in bubbleSpecs {
+                                    let x = spec.0 * size.width + CGFloat(sin(t * spec.3 + Double(spec.0) * 7.0)) * 2.2
+                                    let verticalTravel = CGFloat((t * (18.0 * spec.3)).truncatingRemainder(dividingBy: 22))
+                                    let yBase = spec.1 * size.height
+                                    let y = max(liquidTop + 8, yBase - verticalTravel)
+                                    let r = spec.2
+
+                                    let rect = CGRect(x: x - r, y: y - r, width: r * 2, height: r * 2)
+                                    context.fill(
+                                        Path(ellipseIn: rect),
+                                        with: .color(Color.white.opacity(0.34))
+                                    )
+                                    context.stroke(
+                                        Path(ellipseIn: rect.insetBy(dx: 0.8, dy: 0.8)),
+                                        with: .color(Color.white.opacity(0.52)),
+                                        lineWidth: 0.7
+                                    )
+                                }
+                            }
+                        }
+                        .frame(width: liquidDiameter, height: liquidDiameter)
+                        .clipShape(Circle())
+                    }
+
+                    Image("stomach")
+                        .resizable()
+                        .scaledToFit()
+                        .frame(width: stomachWidth, height: stomachHeight)
+                        .opacity(0.82)
+
+                    LinearGradient(
+                        colors: [
+                            Color.white.opacity(0.30),
+                            Color.white.opacity(0.10),
+                            Color(red: 0.80, green: 0.88, blue: 0.86).opacity(0.14),
+                            Color.white.opacity(0.20)
+                        ],
+                        startPoint: .topLeading,
+                        endPoint: .bottomTrailing
+                    )
+                    .frame(width: stomachWidth, height: stomachHeight)
+                    .blendMode(.screen)
+                    .mask(
+                        Image("stomach")
+                            .resizable()
+                            .scaledToFit()
+                            .frame(width: stomachWidth, height: stomachHeight)
+                    )
+
+                    RadialGradient(
+                        colors: [
+                            Color.white.opacity(0.22),
+                            Color.white.opacity(0.05),
+                            Color.clear
+                        ],
+                        center: .topLeading,
+                        startRadius: 1,
+                        endRadius: innerSize * 0.52
+                    )
+                    .frame(width: stomachWidth, height: stomachHeight)
+                    .blendMode(.screen)
+                    .mask(
+                        Image("stomach")
+                            .resizable()
+                            .scaledToFit()
+                            .frame(width: stomachWidth, height: stomachHeight)
+                    )
+
+                    Capsule()
+                        .fill(Color.white.opacity(0.82))
+                        .frame(width: innerSize * 0.11, height: innerSize * 0.42)
+                        .blur(radius: 1.1)
+                        .rotationEffect(.degrees(11))
+                        .offset(x: -innerSize * 0.08, y: -innerSize * 0.06)
+                        .mask(
+                            Image("stomach")
+                                .resizable()
+                                .scaledToFit()
+                                .frame(width: stomachWidth, height: stomachHeight)
+                        )
+
+                    RoundedRectangle(cornerRadius: 30, style: .continuous)
+                        .fill(Color.white.opacity(0.34))
+                        .frame(width: innerSize * 0.42, height: innerSize * 0.14)
+                        .blur(radius: 2.0)
+                        .rotationEffect(.degrees(10))
+                        .offset(x: innerSize * 0.10, y: -innerSize * 0.18)
+                        .mask(
+                            Image("stomach")
+                                .resizable()
+                                .scaledToFit()
+                                .frame(width: stomachWidth, height: stomachHeight)
+                        )
+
+                    Capsule()
+                        .fill(Color.white.opacity(0.28))
+                        .frame(width: innerSize * 0.52, height: innerSize * 0.07)
+                        .blur(radius: 1.4)
+                        .offset(x: 0, y: innerSize * 0.28)
+                        .mask(
+                            Image("stomach")
+                                .resizable()
+                                .scaledToFit()
+                                .frame(width: stomachWidth, height: stomachHeight)
+                        )
+                }
+                .frame(width: outerSize, height: outerSize)
+                .drawingGroup()
+
+                VStack(spacing: 2) {
+                    Text("満腹")
+                        .font(.system(size: HomeView.Layout.fullnessCaptionFont, weight: .semibold))
+                        .foregroundStyle(.white.opacity(0.84))
+
+                    Text("\(displayedClampedLevel)/\(maxLevel)")
+                        .font(.system(size: HomeView.Layout.fullnessValueFont, weight: .bold))
+                        .foregroundStyle(.white)
+                        .monospacedDigit()
+                }
+                .offset(y: HomeView.Layout.fullnessLabelOffsetY)
             }
-            .frame(width: innerSize * 0.9)
+            .shadow(color: .black.opacity(0.16), radius: 8, x: 0, y: 5)
         }
+    }
+}
+
+private struct StomachLiquidWaveShape: Shape {
+    var fillFraction: CGFloat
+    var phase: CGFloat
+    var amplitude: CGFloat
+
+    var animatableData: AnimatablePair<CGFloat, CGFloat> {
+        get { AnimatablePair(phase, fillFraction) }
+        set {
+            phase = newValue.first
+            fillFraction = newValue.second
+        }
+    }
+
+    func path(in rect: CGRect) -> Path {
+        var path = Path()
+
+        let fraction = max(0, min(1, fillFraction))
+        guard fraction > 0 else { return path }
+
+        let width = rect.width
+        let liquidBaseY = rect.maxY - rect.height * fraction
+
+        path.move(to: CGPoint(x: rect.minX, y: rect.maxY))
+        path.addLine(to: CGPoint(x: rect.minX, y: liquidBaseY))
+
+        for x in stride(from: CGFloat.zero, through: width, by: 2) {
+            let progress = x / width
+            let wave = sin((progress * .pi * 2 * 1.15) + phase) * amplitude
+            let y = liquidBaseY + wave
+            path.addLine(to: CGPoint(x: rect.minX + x, y: y))
+        }
+
+        path.addLine(to: CGPoint(x: rect.maxX, y: rect.maxY))
+        path.closeSubpath()
+
+        return path
     }
 }
 
