@@ -359,15 +359,13 @@ struct HomeView: View {
         static let bottomHorizontalPadding: CGFloat = 18
 
         // ✅ 下部ボタン背景
+        static let bottomButtonBackgroundAssetName: String = "clay_block"
+
         static let bottomButtonBackgroundSize: CGFloat = 76
         static let bottomButtonIconSize: CGFloat = 68
         static let bottomButtonCornerRadius: CGFloat = 22
-        static let bottomButtonBackgroundColor = Color.black.opacity(0.34)
-        static let bottomButtonStrokeColor = Color.white.opacity(0.16)
         static let bottomBarHorizontalPadding: CGFloat = 14
         static let bottomBarVerticalPadding: CGFloat = 12
-        static let bottomBarCornerRadius: CGFloat = 28
-        static let bottomBarBackgroundColor = Color.black.opacity(0.18)
 
         // ✅ 吹き出しボタン
         static let floatingBubbleSize: CGFloat = 90
@@ -2619,81 +2617,70 @@ private struct FullnessStomachGauge: View {
             let liquidDiameter = outerSize * 0.98
 
             ZStack {
-                Circle()
-                    .fill(Color.black.opacity(0.78))
-                    .frame(width: outerSize, height: outerSize)
-                    .overlay(
-                        Circle()
-                            .fill(Color.black.opacity(0.18))
-                    )
-                    .overlay(
-                        Circle()
-                            .stroke(Color.white.opacity(0.10), lineWidth: 1)
-                    )
 
-                ZStack {
-                    if fillFraction > 0.001 {
-                        ZStack {
-                            StomachLiquidWaveShape(
-                                fillFraction: fillFraction,
-                                phase: phase1,
-                                amplitude: 4.8
+                if fillFraction > 0.001 {
+                    ZStack {
+                        StomachLiquidWaveShape(
+                            fillFraction: fillFraction,
+                            phase: phase1,
+                            amplitude: 4.8
+                        )
+                        .fill(
+                            LinearGradient(
+                                colors: [
+                                    liquidHighlightColor.opacity(0.90),
+                                    liquidMainColor.opacity(0.96),
+                                    liquidDeepColor.opacity(0.94)
+                                ],
+                                startPoint: .top,
+                                endPoint: .bottom
                             )
-                            .fill(
-                                LinearGradient(
-                                    colors: [
-                                        liquidHighlightColor.opacity(0.90),
-                                        liquidMainColor.opacity(0.96),
-                                        liquidDeepColor.opacity(0.94)
-                                    ],
-                                    startPoint: .top,
-                                    endPoint: .bottom
+                        )
+
+                        StomachLiquidWaveShape(
+                            fillFraction: max(0, fillFraction - 0.025),
+                            phase: phase2,
+                            amplitude: 7.0
+                        )
+                        .fill(Color.white.opacity(0.18))
+
+                        Canvas { context, size in
+                            let bubbleSpecs: [(CGFloat, CGFloat, CGFloat, Double)] = [
+                                (0.32, 0.70, 3.2, 0.55),
+                                (0.56, 0.61, 2.6, 0.75),
+                                (0.68, 0.48, 4.0, 0.48),
+                                (0.76, 0.66, 2.8, 0.68),
+                                (0.43, 0.52, 2.4, 0.82),
+                                (0.60, 0.77, 3.6, 0.60)
+                            ]
+
+                            let liquidTop = size.height * (1 - fillFraction)
+
+                            for spec in bubbleSpecs {
+                                let x = spec.0 * size.width + CGFloat(sin(t * spec.3 + Double(spec.0) * 7.0)) * 2.2
+                                let verticalTravel = CGFloat((t * (18.0 * spec.3)).truncatingRemainder(dividingBy: 22))
+                                let yBase = spec.1 * size.height
+                                let y = max(liquidTop + 8, yBase - verticalTravel)
+                                let r = spec.2
+
+                                let rect = CGRect(x: x - r, y: y - r, width: r * 2, height: r * 2)
+                                context.fill(
+                                    Path(ellipseIn: rect),
+                                    with: .color(Color.white.opacity(0.34))
                                 )
-                            )
-
-                            StomachLiquidWaveShape(
-                                fillFraction: max(0, fillFraction - 0.025),
-                                phase: phase2,
-                                amplitude: 7.0
-                            )
-                            .fill(Color.white.opacity(0.18))
-
-                            Canvas { context, size in
-                                let bubbleSpecs: [(CGFloat, CGFloat, CGFloat, Double)] = [
-                                    (0.32, 0.70, 3.2, 0.55),
-                                    (0.56, 0.61, 2.6, 0.75),
-                                    (0.68, 0.48, 4.0, 0.48),
-                                    (0.76, 0.66, 2.8, 0.68),
-                                    (0.43, 0.52, 2.4, 0.82),
-                                    (0.60, 0.77, 3.6, 0.60)
-                                ]
-
-                                let liquidTop = size.height * (1 - fillFraction)
-
-                                for spec in bubbleSpecs {
-                                    let x = spec.0 * size.width + CGFloat(sin(t * spec.3 + Double(spec.0) * 7.0)) * 2.2
-                                    let verticalTravel = CGFloat((t * (18.0 * spec.3)).truncatingRemainder(dividingBy: 22))
-                                    let yBase = spec.1 * size.height
-                                    let y = max(liquidTop + 8, yBase - verticalTravel)
-                                    let r = spec.2
-
-                                    let rect = CGRect(x: x - r, y: y - r, width: r * 2, height: r * 2)
-                                    context.fill(
-                                        Path(ellipseIn: rect),
-                                        with: .color(Color.white.opacity(0.34))
-                                    )
-                                    context.stroke(
-                                        Path(ellipseIn: rect.insetBy(dx: 0.8, dy: 0.8)),
-                                        with: .color(Color.white.opacity(0.52)),
-                                        lineWidth: 0.7
-                                    )
-                                }
+                                context.stroke(
+                                    Path(ellipseIn: rect.insetBy(dx: 0.8, dy: 0.8)),
+                                    with: .color(Color.white.opacity(0.52)),
+                                    lineWidth: 0.7
+                                )
                             }
                         }
-                        .frame(width: liquidDiameter, height: liquidDiameter)
-                        .clipShape(Circle())
                     }
+                    .frame(width: liquidDiameter, height: liquidDiameter)
+                    .clipShape(Circle())
+                }
 
+                ZStack {
                     Image("stomach")
                         .resizable()
                         .scaledToFit()
@@ -2778,18 +2765,6 @@ private struct FullnessStomachGauge: View {
                 }
                 .frame(width: outerSize, height: outerSize)
                 .drawingGroup()
-
-                VStack(spacing: 2) {
-                    Text("満腹")
-                        .font(.system(size: HomeView.Layout.fullnessCaptionFont, weight: .semibold))
-                        .foregroundStyle(.white.opacity(0.84))
-
-                    Text("\(displayedClampedLevel)/\(maxLevel)")
-                        .font(.system(size: HomeView.Layout.fullnessValueFont, weight: .bold))
-                        .foregroundStyle(.white)
-                        .monospacedDigit()
-                }
-                .offset(y: HomeView.Layout.fullnessLabelOffsetY)
             }
             .shadow(color: .black.opacity(0.16), radius: 8, x: 0, y: 5)
         }
@@ -3158,20 +3133,6 @@ private struct BottomButtons: View {
         }
         .padding(.horizontal, HomeView.Layout.bottomBarHorizontalPadding)
         .padding(.vertical, HomeView.Layout.bottomBarVerticalPadding)
-        .background(
-            RoundedRectangle(
-                cornerRadius: HomeView.Layout.bottomBarCornerRadius,
-                style: .continuous
-            )
-            .fill(HomeView.Layout.bottomBarBackgroundColor)
-        )
-        .overlay(
-            RoundedRectangle(
-                cornerRadius: HomeView.Layout.bottomBarCornerRadius,
-                style: .continuous
-            )
-            .stroke(Color.white.opacity(0.10), lineWidth: 1)
-        )
         .padding(.horizontal, horizontalPadding)
     }
 }
@@ -3184,21 +3145,13 @@ private struct BottomActionButton: View {
     var body: some View {
         Button(action: action) {
             ZStack {
-                RoundedRectangle(
-                    cornerRadius: HomeView.Layout.bottomButtonCornerRadius,
-                    style: .continuous
-                )
-                .fill(HomeView.Layout.bottomButtonBackgroundColor)
-                .frame(
-                    width: HomeView.Layout.bottomButtonBackgroundSize,
-                    height: HomeView.Layout.bottomButtonBackgroundSize
-                )
-
-                RoundedRectangle(
-                    cornerRadius: HomeView.Layout.bottomButtonCornerRadius,
-                    style: .continuous
-                )
-                .stroke(HomeView.Layout.bottomButtonStrokeColor, lineWidth: 1)
+                Image(HomeView.Layout.bottomButtonBackgroundAssetName)
+                    .resizable()
+                    .scaledToFit()
+                    .frame(
+                        width: HomeView.Layout.bottomButtonBackgroundSize,
+                        height: HomeView.Layout.bottomButtonBackgroundSize
+                    )
 
                 Image(imageName)
                     .resizable()
