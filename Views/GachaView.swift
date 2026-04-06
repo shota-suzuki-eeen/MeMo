@@ -2,7 +2,7 @@
 //  GachaView.swift
 //  MeMo
 //
-//  Updated on 2026/04/05.
+//  Updated on 2026/04/06.
 //
 
 import SwiftUI
@@ -603,6 +603,11 @@ struct GachaView: View {
                 .frame(minHeight: UIScreen.main.bounds.height - safeTop - safeBottom)
                 .contentShape(Rectangle())
             }
+            .simultaneousGesture(
+                TapGesture().onEnded {
+                    revealOverlayReward = nil
+                }
+            )
         }
         .transition(.opacity)
         .zIndex(50)

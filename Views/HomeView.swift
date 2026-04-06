@@ -399,7 +399,7 @@ struct HomeView: View {
         static let zCharacter: Double = 50
         static let zBottomButtons: Double = 260
         static let zReward: Double = 300
-        static let zToiletPoops: Double = 980
+        static let zToiletPoops: Double = 2000
         static let zBanner: Double = 1000
 
         static let toiletPoopSize: CGFloat = 140
@@ -1053,99 +1053,11 @@ struct HomeView: View {
             return
         }
 
-        var didChange = false
-
-        if state.updateToiletPoopsByTime(now: now) {
-            didChange = true
-        }
-
-        if state.toiletPoops().isEmpty {
-            let generated = generateToiletPoops(in: containerSize, count: 1)
-            if !generated.isEmpty {
-                state.setToiletPoops(generated)
-                didChange = true
-            }
-        }
+        let didChange = state.updateToiletPoopsByTime(now: now)
 
         if didChange {
             save()
         }
-    }
-
-    private func generateToiletPoops(in containerSize: CGSize, count: Int) -> [AppState.ToiletPoopItem] {
-        let poopSize = Layout.toiletPoopSize
-        let horizontalInset = Layout.toiletPoopHorizontalInset + poopSize * 0.5
-        let topInset = Layout.toiletPoopTopInset + poopSize * 0.5
-        let bottomInset = Layout.toiletPoopBottomInset + poopSize * 0.5
-
-        let minX = horizontalInset
-        let maxX = max(minX, containerSize.width - horizontalInset)
-        let minY = topInset
-        let maxY = max(minY, containerSize.height - bottomInset)
-
-        guard maxX > minX, maxY > minY else { return [] }
-
-        var items: [AppState.ToiletPoopItem] = []
-        let maxCount = max(0, count)
-        let maxAttempts = 600
-
-        for _ in 0..<maxCount {
-            var created: AppState.ToiletPoopItem?
-
-            for _ in 0..<maxAttempts {
-                let point = CGPoint(
-                    x: CGFloat.random(in: minX...maxX),
-                    y: CGFloat.random(in: minY...maxY)
-                )
-
-                let poopRect = CGRect(
-                    x: point.x - poopSize * 0.5,
-                    y: point.y - poopSize * 0.5,
-                    width: poopSize,
-                    height: poopSize
-                ).insetBy(
-                    dx: -(Layout.toiletPoopMinSpacing * 0.5),
-                    dy: -(Layout.toiletPoopMinSpacing * 0.5)
-                )
-
-                let overlapsAnotherPoop = items.contains { existing in
-                    let existingPoint = CGPoint(
-                        x: existing.centerXRatio * containerSize.width,
-                        y: existing.centerYRatio * containerSize.height
-                    )
-
-                    let existingRect = CGRect(
-                        x: existingPoint.x - poopSize * 0.5,
-                        y: existingPoint.y - poopSize * 0.5,
-                        width: poopSize,
-                        height: poopSize
-                    ).insetBy(
-                        dx: -(Layout.toiletPoopMinSpacing * 0.5),
-                        dy: -(Layout.toiletPoopMinSpacing * 0.5)
-                    )
-
-                    return poopRect.intersects(existingRect)
-                }
-
-                if overlapsAnotherPoop {
-                    continue
-                }
-
-                created = AppState.ToiletPoopItem(
-                    centerXRatio: Double(point.x / max(containerSize.width, 1)),
-                    centerYRatio: Double(point.y / max(containerSize.height, 1)),
-                    rotationDegrees: Double.random(in: -32...32),
-                    isFlippedHorizontally: Bool.random()
-                )
-                break
-            }
-
-            if let created {
-                items.append(created)
-            }
-        }
-
-        return items
     }
 
     private func position(for poop: AppState.ToiletPoopItem, in containerSize: CGSize) -> CGPoint {
@@ -2457,6 +2369,7 @@ private enum HomeWidgetBridge {
         return previousSignature != signature
     }
 }
+
 
 // MARK: - UI Parts
 

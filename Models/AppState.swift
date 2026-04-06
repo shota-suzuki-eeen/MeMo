@@ -261,6 +261,11 @@ extension AppState {
     static let fullnessMaxLevel: Int = 5
     static let fullnessDecayUnitSeconds: TimeInterval = 30 * 60
 
+    // ✅ トイレpoop仕様
+    static let toiletPoopInitialCount: Int = 1
+    static let toiletPoopMaxCount: Int = 10
+    static let toiletPoopSpawnIntervalSeconds: TimeInterval = 15 * 60
+
     /// 歩数通貨の所持数
     var walletSteps: Int {
         get { max(0, walletKcal) }
@@ -624,32 +629,64 @@ extension AppState {
     func updateToiletPoopsByTime(now: Date = Date()) -> Bool {
         ensureDailyResetIfNeeded(now: now)
 
-        guard toiletFlagAt != nil else { return false }
+        guard let flagAt = toiletFlagAt else { return false }
+
+        let interval = AppState.toiletPoopSpawnIntervalSeconds
+        let initialCount = AppState.toiletPoopInitialCount
+        let maxCount = AppState.toiletPoopMaxCount
 
         var items = toiletPoops()
-        let activeCount = items.filter { !$0.isCleared }.count
-        guard activeCount < 5 else { return false }
+        let activeItems = items.filter { !$0.isCleared }
+        let activeCount = activeItems.count
 
-        guard let lastSpawnAt = toiletPoopLastSpawnAt else {
-            toiletPoopLastSpawnAt = now
+        if activeCount == 0 {
+            let elapsedSinceFlag = max(0, now.timeIntervalSince(flagAt))
+            let additionalCount = Int(elapsedSinceFlag / interval)
+            let totalCount = min(maxCount, initialCount + additionalCount)
+
+            guard totalCount > 0 else {
+                toiletPoopLastSpawnAt = flagAt
+                return false
+            }
+
+            let restoredItems = generateToiletPoops(count: totalCount)
+            setToiletPoops(restoredItems)
+
+            let restoredAdditionalCount = max(0, totalCount - initialCount)
+            toiletPoopLastSpawnAt = flagAt.addingTimeInterval(TimeInterval(restoredAdditionalCount) * interval)
+            return true
+        }
+
+        guard activeCount < maxCount else {
+            if toiletPoopLastSpawnAt == nil {
+                let inferredAdditionalCount = max(0, activeCount - initialCount)
+                toiletPoopLastSpawnAt = flagAt.addingTimeInterval(TimeInterval(inferredAdditionalCount) * interval)
+            }
             return false
         }
 
-        let interval: TimeInterval = 15 * 60
-        let elapsed = now.timeIntervalSince(lastSpawnAt)
+        let effectiveLastSpawnAt: Date = {
+            if let lastSpawnAt = toiletPoopLastSpawnAt {
+                return lastSpawnAt
+            }
+            let inferredAdditionalCount = max(0, activeCount - initialCount)
+            return flagAt.addingTimeInterval(TimeInterval(inferredAdditionalCount) * interval)
+        }()
+
+        if toiletPoopLastSpawnAt == nil {
+            toiletPoopLastSpawnAt = effectiveLastSpawnAt
+        }
+
+        let elapsed = now.timeIntervalSince(effectiveLastSpawnAt)
         guard elapsed >= interval else { return false }
 
-        let addableCount = min(Int(elapsed / interval), 5 - activeCount)
+        let addableCount = min(Int(elapsed / interval), maxCount - activeCount)
         guard addableCount > 0 else { return false }
 
-        let newItems = generateToiletPoops(
-            count: addableCount,
-            existing: items.filter { !$0.isCleared }
-        )
-        items.append(contentsOf: newItems)
+        items.append(contentsOf: generateToiletPoops(count: addableCount, existing: activeItems))
         setToiletPoops(items)
 
-        toiletPoopLastSpawnAt = lastSpawnAt.addingTimeInterval(TimeInterval(addableCount) * interval)
+        toiletPoopLastSpawnAt = effectiveLastSpawnAt.addingTimeInterval(TimeInterval(addableCount) * interval)
         return true
     }
 }
@@ -1070,7 +1107,7 @@ extension AppState {
         toiletFlagAt = now
         toiletLastRaisedAt = now
 
-        let initialPoops = generateToiletPoops(count: 2)
+        let initialPoops = generateToiletPoops(count: AppState.toiletPoopInitialCount)
         setToiletPoops(initialPoops)
         toiletPoopLastSpawnAt = now
 
