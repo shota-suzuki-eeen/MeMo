@@ -15,6 +15,7 @@ final class StepViewModel: ObservableObject {
     enum SessionState: Equatable {
         case idle
         case waitingForPermission
+        case countingDown
         case running
         case paused
         case finished
@@ -25,6 +26,12 @@ final class StepViewModel: ObservableObject {
         case saving
         case saved(Date)
         case failed(String)
+    }
+
+    enum StartPreparationResult: Equatable {
+        case startCountdown
+        case waitingForPermission
+        case blocked
     }
 
     @Published private(set) var sessionState: SessionState = .idle
@@ -45,7 +52,6 @@ final class StepViewModel: ObservableObject {
     private var cancellables: Set<AnyCancellable> = []
     private var timer: Timer?
     private var didConfigure = false
-    private var shouldAutoStartAfterAuthorization = false
 
     private var startedAt: Date?
     private var pausedAt: Date?
@@ -120,6 +126,8 @@ final class StepViewModel: ObservableObject {
             return "スタート"
         case .waitingForPermission:
             return "位置情報を確認中"
+        case .countingDown:
+            return "準備中"
         case .running:
             return "計測中"
         case .paused:
@@ -162,28 +170,46 @@ final class StepViewModel: ObservableObject {
 
     func handlePrimaryAction() {
         switch sessionState {
-        case .idle:
-            startButtonTapped()
         case .paused:
             resumeWorkout()
         case .finished:
             resetForNewWorkout()
-        case .waitingForPermission, .running:
+        case .idle, .waitingForPermission, .countingDown, .running:
             break
         }
     }
 
-    func startButtonTapped() {
+    func prepareWorkoutStart() -> StartPreparationResult {
         switch locationAuthorizationState {
         case .authorizedAlways, .authorizedWhenInUse:
-            startNewWorkout()
+            sessionState = .countingDown
+            return .startCountdown
         case .notDetermined:
-            shouldAutoStartAfterAuthorization = true
             sessionState = .waitingForPermission
             locationTrackingManager.requestAuthorization()
+            return .waitingForPermission
         case .denied, .restricted:
             sessionState = .idle
+            return .blocked
         }
+    }
+
+    func beginCountdown() {
+        guard locationAuthorizationState.isAuthorized else { return }
+        sessionState = .countingDown
+    }
+
+    func cancelCountdownIfNeeded() {
+        guard sessionState == .countingDown else { return }
+        sessionState = .idle
+    }
+
+    func beginWorkoutAfterCountdown() {
+        guard locationAuthorizationState.isAuthorized else {
+            sessionState = .idle
+            return
+        }
+        startNewWorkout()
     }
 
     func togglePause() {
@@ -250,7 +276,6 @@ final class StepViewModel: ObservableObject {
 
     func resetForNewWorkout() {
         stopTimer()
-        shouldAutoStartAfterAuthorization = false
         startedAt = nil
         pausedAt = nil
         accumulatedPausedTime = 0
@@ -286,12 +311,7 @@ final class StepViewModel: ObservableObject {
                 guard let self else { return }
                 self.locationAuthorizationState = newValue
 
-                if self.shouldAutoStartAfterAuthorization, newValue.isAuthorized {
-                    self.shouldAutoStartAfterAuthorization = false
-                    self.startNewWorkout()
-                } else if self.shouldAutoStartAfterAuthorization,
-                          newValue == .denied || newValue == .restricted {
-                    self.shouldAutoStartAfterAuthorization = false
+                if !newValue.isAuthorized, self.sessionState == .countingDown {
                     self.sessionState = .idle
                 }
             }
