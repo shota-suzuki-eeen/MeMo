@@ -7,105 +7,379 @@
 
 import Foundation
 import Combine
+import SwiftUI
+import SwiftData
 
 @MainActor
 final class StepViewModel: ObservableObject {
-    @Published var isLoading = false
-    @Published var isClaiming = false
-
-    @Published var deltaSteps: Int = 0
-    @Published var dayTotalSteps: Int = 0
-    @Published var weekTotalSteps: Int = 0
-    @Published var claimableCount: Int = 0
-
-    @Published var gainedFoodName: String?
-
-    func refresh(state: AppState, hk: HealthKitManager, save: () -> Void) async {
-        guard !isLoading else { return }
-        isLoading = true
-        defer { isLoading = false }
-
-        let now = Date()
-        applyDailyResetIfNeeded(state: state, now: now)
-
-        let start = state.stepEnjoyLastCheckedAt ?? now
-        let fetchedDelta = await hk.fetchStepCount(from: start, to: now)
-        let safeDelta = max(0, fetchedDelta)
-
-        state.stepEnjoyLastCheckedAt = now
-        state.stepEnjoyLastDeltaSteps = safeDelta
-        state.stepEnjoyTotalSteps += safeDelta
-
-        deltaSteps = safeDelta
-
-        let fetchedTodayTotal = await hk.fetchTodayStepTotal(now: now)
-        let resolvedTodayTotal = max(state.cachedTodaySteps, hk.todaySteps, fetchedTodayTotal)
-        dayTotalSteps = max(0, resolvedTodayTotal)
-
-        weekTotalSteps = await hk.fetchWeekStepTotal(now: now)
-
-        state.stepEnjoyDailyRewardStepBank = StepRewardPolicy.bank(
-            totalWalkedSteps: dayTotalSteps,
-            claimedToday: state.stepEnjoyDailyRewardCount
-        )
-
-        claimableCount = StepRewardPolicy.claimableCount(
-            bank: state.stepEnjoyDailyRewardStepBank,
-            claimedToday: state.stepEnjoyDailyRewardCount
-        )
-
-        save()
+    enum SessionState: Equatable {
+        case idle
+        case waitingForPermission
+        case running
+        case paused
+        case finished
     }
 
-    func claimNormalReward(state: AppState, save: () -> Void) {
-        claimReward(state: state, save: save)
+    enum SaveState: Equatable {
+        case idle
+        case saving
+        case saved(Date)
+        case failed(String)
     }
 
-    func claimAdReward(state: AppState, save: () -> Void) {
-        claimReward(state: state, save: save)
+    @Published private(set) var sessionState: SessionState = .idle
+    @Published private(set) var saveState: SaveState = .idle
+
+    @Published private(set) var elapsedSeconds: Int = 0
+    @Published private(set) var totalDistanceMeters: Double = 0
+    @Published private(set) var routePoints: [WorkoutRoutePoint] = []
+    @Published private(set) var locationAuthorizationState: LocationTrackingManager.AuthorizationState = .notDetermined
+    @Published private(set) var latestHorizontalAccuracy: Double?
+
+    @Published private(set) var saveMessage: String?
+    @Published private(set) var finishedSession: WorkoutSessionDraft?
+
+    private let locationTrackingManager: LocationTrackingManager
+    private let routeStore: WorkoutRouteStore
+
+    private var cancellables: Set<AnyCancellable> = []
+    private var timer: Timer?
+    private var didConfigure = false
+    private var shouldAutoStartAfterAuthorization = false
+
+    private var startedAt: Date?
+    private var pausedAt: Date?
+    private var accumulatedPausedTime: TimeInterval = 0
+
+    init(
+        locationTrackingManager: LocationTrackingManager,
+        routeStore: WorkoutRouteStore
+    ) {
+        self.locationTrackingManager = locationTrackingManager
+        self.routeStore = routeStore
+        bindLocationManager()
     }
 
-    // ✅ シンプル化（満足度削除）
-    private func claimReward(state: AppState, save: () -> Void) {
-        guard !isClaiming else { return }
-        isClaiming = true
-        defer { isClaiming = false }
-
-        let claimable = StepRewardPolicy.claimableCount(
-            bank: state.stepEnjoyDailyRewardStepBank,
-            claimedToday: state.stepEnjoyDailyRewardCount
+    convenience init() {
+        self.init(
+            locationTrackingManager: LocationTrackingManager(),
+            routeStore: WorkoutRouteStore()
         )
+    }
 
-        guard claimable >= 1 else { return }
+    deinit {
+        timer?.invalidate()
+    }
 
-        state.stepEnjoyDailyRewardCount += 1
-        state.stepEnjoyLastRewardAt = Date()
+    var isRunning: Bool {
+        sessionState == .running
+    }
 
-        state.stepEnjoyDailyRewardStepBank = StepRewardPolicy.bank(
-            totalWalkedSteps: dayTotalSteps,
-            claimedToday: state.stepEnjoyDailyRewardCount
-        )
+    var isPaused: Bool {
+        sessionState == .paused
+    }
 
-        if let reward = FoodCatalog.all.randomElement() {
-            _ = state.addFood(foodId: reward.id, count: 1)
-            gainedFoodName = reward.name
-        } else {
-            gainedFoodName = nil
+    var isFinished: Bool {
+        sessionState == .finished
+    }
+
+    var shouldShowPermissionGuide: Bool {
+        locationAuthorizationState == .denied || locationAuthorizationState == .restricted
+    }
+
+    var shouldPlayCharacterVideo: Bool {
+        sessionState == .running
+    }
+
+    var formattedElapsedTime: String {
+        let hours = elapsedSeconds / 3600
+        let minutes = (elapsedSeconds % 3600) / 60
+        let seconds = elapsedSeconds % 60
+
+        if hours > 0 {
+            return String(format: "%02d:%02d:%02d", hours, minutes, seconds)
         }
-
-        claimableCount = StepRewardPolicy.claimableCount(
-            bank: state.stepEnjoyDailyRewardStepBank,
-            claimedToday: state.stepEnjoyDailyRewardCount
-        )
-
-        save()
+        return String(format: "%02d:%02d", minutes, seconds)
     }
 
-    private func applyDailyResetIfNeeded(state: AppState, now: Date) {
-        if StepRewardPolicy.shouldResetDailyCycle(stored: state.stepEnjoyDailyCycleStart, now: now) {
-            state.stepEnjoyDailyCycleStart = StepRewardPolicy.normalizedCycleStart(for: now)
-            state.stepEnjoyDailyRewardCount = 0
-            state.stepEnjoyDailyRewardStepBank = 0
+    var formattedDistanceKilometers: String {
+        String(format: "%.2f km", max(0, totalDistanceMeters) / 1000.0)
+    }
+
+    var summaryDistanceText: String {
+        formattedDistanceKilometers
+    }
+
+    var summaryElapsedText: String {
+        formattedElapsedTime
+    }
+
+    var primaryActionTitle: String {
+        switch sessionState {
+        case .idle:
+            return "スタート"
+        case .waitingForPermission:
+            return "位置情報を確認中"
+        case .running:
+            return "計測中"
+        case .paused:
+            return "再開"
+        case .finished:
+            return "もう一度"
         }
+    }
+
+    var pauseButtonTitle: String {
+        sessionState == .paused ? "再開" : "停止"
+    }
+
+    var permissionMessage: String {
+        switch locationAuthorizationState {
+        case .notDetermined:
+            return "ステップ計測を始めるには、位置情報の許可が必要です。"
+        case .restricted:
+            return "この端末では位置情報が制限されています。設定をご確認ください。"
+        case .denied:
+            return "位置情報がオフのため、距離とルートを計測できません。設定アプリから許可してください。"
+        case .authorizedWhenInUse, .authorizedAlways:
+            return "位置情報の準備ができています。"
+        }
+    }
+
+    var accuracyMessage: String? {
+        guard let latestHorizontalAccuracy else { return nil }
+        if latestHorizontalAccuracy <= 20 {
+            return nil
+        }
+        return "測位精度が不安定です。屋外で少し待つと改善する場合があります。"
+    }
+
+    func configureIfNeeded() {
+        guard !didConfigure else { return }
+        didConfigure = true
+        locationTrackingManager.refreshAuthorizationState()
+    }
+
+    func handlePrimaryAction() {
+        switch sessionState {
+        case .idle:
+            startButtonTapped()
+        case .paused:
+            resumeWorkout()
+        case .finished:
+            resetForNewWorkout()
+        case .waitingForPermission, .running:
+            break
+        }
+    }
+
+    func startButtonTapped() {
+        switch locationAuthorizationState {
+        case .authorizedAlways, .authorizedWhenInUse:
+            startNewWorkout()
+        case .notDetermined:
+            shouldAutoStartAfterAuthorization = true
+            sessionState = .waitingForPermission
+            locationTrackingManager.requestAuthorization()
+        case .denied, .restricted:
+            sessionState = .idle
+        }
+    }
+
+    func togglePause() {
+        switch sessionState {
+        case .running:
+            pauseWorkout()
+        case .paused:
+            resumeWorkout()
+        default:
+            break
+        }
+    }
+
+    func finishWorkout() {
+        guard let startedAt else { return }
+
+        let endedAt = Date()
+        elapsedSeconds = calculateElapsedSeconds(referenceDate: endedAt)
+        stopTimer()
+        locationTrackingManager.pauseTracking()
+
+        finishedSession = WorkoutSessionDraft(
+            startedAt: startedAt,
+            endedAt: endedAt,
+            elapsedSeconds: elapsedSeconds,
+            totalDistanceMeters: totalDistanceMeters,
+            routePoints: routePoints
+        )
+
+        saveState = .idle
+        saveMessage = nil
+        sessionState = .finished
+    }
+
+    func saveFinishedWorkout(
+        modelContext: ModelContext,
+        characterID: String?
+    ) {
+        guard case .finished = sessionState,
+              let finishedSession else { return }
+
+        saveState = .saving
+        saveMessage = nil
+
+        do {
+            let draft = WorkoutSessionDraft(
+                id: finishedSession.id,
+                startedAt: finishedSession.startedAt,
+                endedAt: finishedSession.endedAt,
+                elapsedSeconds: finishedSession.elapsedSeconds,
+                totalDistanceMeters: finishedSession.totalDistanceMeters,
+                routePoints: finishedSession.routePoints,
+                memo: finishedSession.memo,
+                characterID: characterID
+            )
+            _ = try routeStore.save(draft: draft, in: modelContext)
+            saveState = .saved(Date())
+            saveMessage = "ルートを保存しました。"
+        } catch {
+            saveState = .failed("保存に失敗しました: \(error.localizedDescription)")
+            saveMessage = "保存に失敗しました。"
+        }
+    }
+
+    func resetForNewWorkout() {
+        stopTimer()
+        shouldAutoStartAfterAuthorization = false
+        startedAt = nil
+        pausedAt = nil
+        accumulatedPausedTime = 0
+        elapsedSeconds = 0
+        totalDistanceMeters = 0
+        routePoints = []
+        latestHorizontalAccuracy = nil
+        finishedSession = nil
+        saveState = .idle
+        saveMessage = nil
+        locationTrackingManager.reset()
+        sessionState = .idle
+    }
+
+    func handleScenePhase(_ phase: ScenePhase) {
+        switch phase {
+        case .active:
+            refreshElapsedTime()
+            if sessionState == .running {
+                startTimer()
+            }
+        case .background, .inactive:
+            refreshElapsedTime()
+            stopTimer()
+        @unknown default:
+            break
+        }
+    }
+
+    private func bindLocationManager() {
+        locationTrackingManager.$authorizationState
+            .sink { [weak self] newValue in
+                guard let self else { return }
+                self.locationAuthorizationState = newValue
+
+                if self.shouldAutoStartAfterAuthorization, newValue.isAuthorized {
+                    self.shouldAutoStartAfterAuthorization = false
+                    self.startNewWorkout()
+                } else if self.shouldAutoStartAfterAuthorization,
+                          newValue == .denied || newValue == .restricted {
+                    self.shouldAutoStartAfterAuthorization = false
+                    self.sessionState = .idle
+                }
+            }
+            .store(in: &cancellables)
+
+        locationTrackingManager.$totalDistanceMeters
+            .sink { [weak self] meters in
+                self?.totalDistanceMeters = max(0, meters)
+            }
+            .store(in: &cancellables)
+
+        locationTrackingManager.$routePoints
+            .sink { [weak self] points in
+                self?.routePoints = points
+            }
+            .store(in: &cancellables)
+
+        locationTrackingManager.$latestHorizontalAccuracy
+            .sink { [weak self] accuracy in
+                self?.latestHorizontalAccuracy = accuracy
+            }
+            .store(in: &cancellables)
+    }
+
+    private func startNewWorkout() {
+        resetForNewWorkout()
+        startedAt = Date()
+        sessionState = .running
+        locationTrackingManager.startTracking()
+        startTimer()
+        refreshElapsedTime()
+    }
+
+    private func pauseWorkout() {
+        guard sessionState == .running else { return }
+        pausedAt = Date()
+        refreshElapsedTime()
+        stopTimer()
+        locationTrackingManager.pauseTracking()
+        sessionState = .paused
+    }
+
+    private func resumeWorkout() {
+        guard sessionState == .paused else { return }
+
+        if let pausedAt {
+            accumulatedPausedTime += Date().timeIntervalSince(pausedAt)
+        }
+        self.pausedAt = nil
+
+        locationTrackingManager.resumeTracking()
+        sessionState = .running
+        refreshElapsedTime()
+        startTimer()
+    }
+
+    private func startTimer() {
+        stopTimer()
+        timer = Timer.scheduledTimer(withTimeInterval: 1, repeats: true) { [weak self] _ in
+            Task { @MainActor in
+                self?.refreshElapsedTime()
+            }
+        }
+        if let timer {
+            RunLoop.main.add(timer, forMode: .common)
+        }
+    }
+
+    private func stopTimer() {
+        timer?.invalidate()
+        timer = nil
+    }
+
+    private func refreshElapsedTime() {
+        elapsedSeconds = calculateElapsedSeconds(referenceDate: Date())
+    }
+
+    private func calculateElapsedSeconds(referenceDate: Date) -> Int {
+        guard let startedAt else { return 0 }
+
+        let effectiveReferenceDate: Date = {
+            if sessionState == .paused, let pausedAt {
+                return pausedAt
+            }
+            return referenceDate
+        }()
+
+        let activeInterval = effectiveReferenceDate.timeIntervalSince(startedAt) - accumulatedPausedTime
+        return max(0, Int(activeInterval.rounded(.down)))
     }
 }

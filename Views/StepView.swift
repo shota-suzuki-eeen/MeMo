@@ -6,11 +6,14 @@
 //
 
 import SwiftUI
+import SwiftData
+import UIKit
 
 struct StepView: View {
     @Environment(\.dismiss) private var dismiss
+    @Environment(\.modelContext) private var modelContext
+    @Environment(\.scenePhase) private var scenePhase
     @EnvironmentObject private var bgmManager: BGMManager
-    @AppStorage("isDeveloperMode") private var isDeveloperMode: Bool = false
 
     let state: AppState
     @ObservedObject var hk: HealthKitManager
@@ -18,510 +21,370 @@ struct StepView: View {
 
     @StateObject private var viewModel = StepViewModel()
 
-    // ✅ StepEnjoy 用リワード広告
-    // 一旦 AdMob 周りを止めるためコメントアウト
-    // @StateObject private var rewardedAd = RewardedAdManager(adUnitID: AdUnitID.rewardStepEnjoy)
-
-    // ✅ 歩行中だけ揺らす
-    @State private var isWalking = false
-    @State private var stopWalkingWorkItem: DispatchWorkItem?
-
-    // ✅ 表示用歩数（画面表示後にカウントアップ）
-    @State private var displayedDayTotalSteps: Int = 0
-
-    // ✅ 初回ロード多重防止
-    @State private var didAppearOnce: Bool = false
-
-    // ✅ 報酬ポップアップ
-    @State private var selectedRewardIndex: Int? = nil
-    @State private var showRewardPopup: Bool = false
-
-    private var currentPetAsset: String {
-        PetMaster.assetName(for: state.currentPetID)
-    }
-
-    private var rewardThreshold: Int {
-        StepRewardPolicy.rewardStepThreshold
-    }
-
-    private var rewardMaxCount: Int {
-        StepRewardPolicy.dailyRewardMaxCount
-    }
-
-    /// ✅ CameraCaptureView 側と揃えるための「今日の合計歩数」
-    /// - hk.todaySteps を優先
-    /// - 未反映/0 のときは state のキャッシュも保険で使う
-    private var unifiedTodayTotalSteps: Int {
-        max(hk.todaySteps, state.cachedTodaySteps)
-    }
-
-    /// ✅ 表示用進捗
-    /// - 「今日歩いた実歩数」を正として扱う
-    private var progressStepsForMeter: Int {
-        StepRewardPolicy.cappedProgressSteps(from: displayedDayTotalSteps)
-    }
-
-    var body: some View {
-        GeometryReader { geo in
-            let w = geo.size.width
-            let h = geo.size.height
-            let safeH = max(1, h)
-
-            let headerH: CGFloat = 56
-            let totalStepsH: CGFloat = 64
-            let verticalGaps: CGFloat = 12 + 12
-
-            let minCardsH: CGFloat = max(210, min(270, safeH * 0.30))
-
-            let remainingForCharacter = safeH - (headerH + totalStepsH + minCardsH + verticalGaps)
-            let characterBoxH = max(170, min(340, remainingForCharacter))
-
-            let imageSize = min(w * 0.76, characterBoxH * 1.05)
-
-            ZStack {
-                VStack(spacing: 10) {
-                    header
-                        .frame(height: headerH)
-
-                    VStack(spacing: 12) {
-                        // ✅ 1. 歩数
-                        stepCountView
-                            .frame(height: totalStepsH)
-
-                        // ✅ 2. 報酬
-                        rewardCardCompact
-                            .padding(.horizontal, 18)
-                            .frame(minHeight: minCardsH)
-
-                        // ✅ 3. キャラ画像
-                        Image(currentPetAsset)
-                            .resizable()
-                            .scaledToFit()
-                            .frame(width: imageSize, height: imageSize)
-                            .offset(y: isWalking ? -6 : 0)
-                            .animation(
-                                isWalking
-                                ? .easeInOut(duration: 0.18).repeatForever(autoreverses: true)
-                                : .default,
-                                value: isWalking
-                            )
-                            .frame(height: characterBoxH)
-                            .frame(maxWidth: .infinity, alignment: .center)
-                    }
-                    .padding(.top, 24)
-
-                    Color.clear.frame(height: 2)
-                }
-                .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
-                .safeAreaPadding(.top, 6)
-                .safeAreaPadding(.bottom, 8)
-
-                if showRewardPopup, let rewardIndex = selectedRewardIndex {
-                    RewardClaimPopup(
-                        rewardIndex: rewardIndex,
-                        onClose: {
-                            bgmManager.playSE(.push)
-                            withAnimation(.easeInOut(duration: 0.18)) {
-                                showRewardPopup = false
-                                selectedRewardIndex = nil
-                            }
-                        },
-                        onNormalReward: {
-                            bgmManager.playSE(.push)
-                            viewModel.claimNormalReward(state: state, save: onSave)
-                            Haptics.notify(.success)
-
-                            withAnimation(.easeInOut(duration: 0.18)) {
-                                showRewardPopup = false
-                                selectedRewardIndex = nil
-                            }
-                        },
-                        onAdReward: {
-                            bgmManager.playSE(.push)
-
-                            // ✅ AdMob を一旦無効化
-                            // 開発者モード時のみ広告報酬の処理を通す
-                            guard isDeveloperMode else { return }
-
-                            viewModel.claimAdReward(state: state, save: onSave)
-                            Haptics.notify(.success)
-
-                            withAnimation(.easeInOut(duration: 0.18)) {
-                                showRewardPopup = false
-                                selectedRewardIndex = nil
-                            }
-                        },
-                        // ✅ AdMob無効中のため、開発者モード時のみ押せる
-                        isAdReady: isDeveloperMode,
-                        isDeveloperMode: isDeveloperMode
-                    )
-                    .transition(.opacity)
-                    .zIndex(999)
-                }
-            }
-            .frame(width: w, height: h, alignment: .top)
-        }
-        .background(
-            ZStack {
-                Image("Step_background")
-                    .resizable()
-                    .scaledToFill()
-                    .ignoresSafeArea()
-
-                Color.black.opacity(0.18)
-                    .ignoresSafeArea()
-            }
-        )
-        .task {
-            guard !didAppearOnce else { return }
-            didAppearOnce = true
-
-            // ✅ AdMob の先読みは一旦停止
-            // rewardedAd.load()
-
-            await refreshOnAppear()
-        }
-        .onDisappear {
-            stopWalkingWorkItem?.cancel()
-            stopWalkingWorkItem = nil
-            stopWalkingImmediately()
-        }
-    }
-
-    // MARK: - Header
-
-    private var header: some View {
-        HStack {
-            Spacer()
-
-            Button("とじる") {
-                bgmManager.playSE(.push)
-                dismiss()
-            }
-            .buttonStyle(.borderedProminent)
-            .controlSize(.regular)
-        }
-        .padding(.horizontal, 18)
-    }
-
-    // MARK: - Step Count
-
-    private var stepCountView: some View {
-        Text("\(displayedDayTotalSteps)歩")
-            .font(.system(size: 38, weight: .heavy, design: .rounded))
-            .foregroundStyle(.white)
-            .monospacedDigit()
-            .lineLimit(1)
-            .minimumScaleFactor(0.72)
-            .padding(.horizontal, 20)
-            .padding(.vertical, 10)
-            .background(.black.opacity(0.8), in: RoundedRectangle(cornerRadius: 14))
-            .padding(.horizontal, 18)
-    }
-
-    // MARK: - Reward Card
-
-    private var rewardCardCompact: some View {
-        VStack(alignment: .leading, spacing: 12) {
-            HStack {
-                Text("報酬")
-                    .font(.system(size: 15, weight: .bold))
-                    .foregroundStyle(.white.opacity(0.95))
-
-                Spacer(minLength: 8)
-
-                Text("本日の獲得数 \(state.stepEnjoyDailyRewardCount)/\(rewardMaxCount)")
-                    .font(.system(size: 13, weight: .semibold))
-                    .foregroundStyle(.white.opacity(0.92))
-                    .monospacedDigit()
-            }
-
-            rewardMeterSection
-
-            if state.stepEnjoyDailyRewardCount >= rewardMaxCount {
-                Text("今日はこれ以上獲得できません")
-                    .font(.system(size: 13, weight: .semibold))
-                    .foregroundStyle(.orange)
-            } else {
-                let remaining = StepRewardPolicy.nextRewardRemainingSteps(
-                    totalWalkedSteps: displayedDayTotalSteps,
-                    claimedToday: state.stepEnjoyDailyRewardCount
-                )
-
-                Text("次のプレゼントまであと \(remaining) 歩")
-                    .font(.system(size: 13, weight: .semibold))
-                    .foregroundStyle(.white.opacity(0.92))
-                    .monospacedDigit()
-            }
-
-            if let foodName = viewModel.gainedFoodName {
-                Text("🎁 \(foodName) を獲得！")
-                    .font(.system(size: 13, weight: .bold))
-                    .foregroundStyle(.white)
-                    .lineLimit(1)
-                    .minimumScaleFactor(0.75)
-                    .padding(.vertical, 6)
-                    .padding(.horizontal, 8)
-                    .frame(maxWidth: .infinity, alignment: .center)
-                    .background(Color.white.opacity(0.18), in: RoundedRectangle(cornerRadius: 10))
-            }
-        }
-        .padding(12)
-        .background(.black.opacity(0.8), in: RoundedRectangle(cornerRadius: 14))
-    }
-
-    private var rewardMeterSection: some View {
-        GeometryReader { geo in
-            let fullWidth = max(1, geo.size.width)
-            let progressRatio = min(
-                1.0,
-                max(0.0, CGFloat(progressStepsForMeter) / CGFloat(StepRewardPolicy.dailyRewardStepCap))
-            )
-            let fillWidth = fullWidth * progressRatio
-
-            ZStack(alignment: .leading) {
-                Capsule()
-                    .fill(Color.white.opacity(0.22))
-                    .frame(height: 14)
-
-                Capsule()
-                    .fill(
-                        LinearGradient(
-                            colors: [
-                                Color.yellow.opacity(0.95),
-                                Color.orange.opacity(0.92)
-                            ],
-                            startPoint: .leading,
-                            endPoint: .trailing
-                        )
-                    )
-                    .frame(width: max(14, fillWidth), height: 14)
-
-                ForEach(1...rewardMaxCount, id: \.self) { index in
-                    let x = fullWidth * CGFloat(index) / CGFloat(rewardMaxCount)
-
-                    rewardMarkerButton(index: index)
-                        .position(x: min(max(16, x), fullWidth - 16), y: 7)
-                }
-            }
-        }
-        .frame(height: 32)
-        .padding(.top, 2)
-    }
-
-    @ViewBuilder
-    private func rewardMarkerButton(index: Int) -> some View {
-        let claimedCount = state.stepEnjoyDailyRewardCount
-        let claimable = viewModel.claimableCount
-
-        let isAlreadyClaimed = index <= claimedCount
-        let isAvailableNow = index > claimedCount && index <= (claimedCount + claimable)
-
-        Button {
-            guard isAvailableNow else { return }
-            bgmManager.playSE(.push)
-            selectedRewardIndex = index
-            withAnimation(.easeInOut(duration: 0.18)) {
-                showRewardPopup = true
-            }
-            Haptics.tap(style: .light)
-        } label: {
-            ZStack {
-                Circle()
-                    .fill(markerFillColor(isAlreadyClaimed: isAlreadyClaimed, isAvailableNow: isAvailableNow))
-                    .frame(width: 28, height: 28)
-
-                Image(systemName: markerSymbolName(isAlreadyClaimed: isAlreadyClaimed))
-                    .font(.system(size: 12, weight: .bold))
-                    .foregroundStyle(markerForegroundColor(isAlreadyClaimed: isAlreadyClaimed, isAvailableNow: isAvailableNow))
-            }
-            .overlay {
-                Circle()
-                    .stroke(Color.white.opacity(isAvailableNow ? 0.95 : 0.28), lineWidth: isAvailableNow ? 2 : 1)
-            }
-            .shadow(color: isAvailableNow ? .yellow.opacity(0.45) : .clear, radius: 6)
-        }
-        .buttonStyle(.plain)
-        .disabled(!isAvailableNow)
-    }
-
-    private func markerSymbolName(isAlreadyClaimed: Bool) -> String {
-        isAlreadyClaimed ? "checkmark" : "gift.fill"
-    }
-
-    private func markerFillColor(isAlreadyClaimed: Bool, isAvailableNow: Bool) -> Color {
-        if isAlreadyClaimed { return Color.green.opacity(0.95) }
-        if isAvailableNow { return Color.yellow.opacity(0.98) }
-        return Color.white.opacity(0.24)
-    }
-
-    private func markerForegroundColor(isAlreadyClaimed: Bool, isAvailableNow: Bool) -> Color {
-        if isAlreadyClaimed { return .white }
-        if isAvailableNow { return .black }
-        return .white.opacity(0.7)
-    }
-
-    // MARK: - Actions
-
-    private func refreshOnAppear() async {
-        viewModel.gainedFoodName = nil
-
-        let fetchedBeforeTotal = max(0, await hk.fetchTodayStepTotal(now: Date()))
-        let beforeTotal = max(unifiedTodayTotalSteps, fetchedBeforeTotal)
-        displayedDayTotalSteps = beforeTotal
-
-        await viewModel.refresh(state: state, hk: hk, save: onSave)
-
-        let delta = max(0, viewModel.deltaSteps)
-
-        // ✅ StepEnjoy側も CameraCaptureView 側も「今日の合計歩数」でそろえる
-        let fetchedFinalTotal = max(0, await hk.fetchTodayStepTotal(now: Date()))
-        let finalTotal = max(unifiedTodayTotalSteps, viewModel.dayTotalSteps, fetchedFinalTotal)
-
-        let startValue = max(0, finalTotal - delta)
-        displayedDayTotalSteps = startValue
-
-        if delta > 0 {
-            startWalking(duration: 1.2)
-            await animateStepCount(from: startValue, to: finalTotal, duration: 1.2)
-        } else {
-            displayedDayTotalSteps = finalTotal
-            stopWalkingImmediately()
-        }
-    }
-
-    private func animateStepCount(from: Int, to: Int, duration: Double) async {
-        let safeFrom = max(0, from)
-        let safeTo = max(safeFrom, to)
-
-        guard safeTo > safeFrom else {
-            await MainActor.run {
-                displayedDayTotalSteps = safeTo
-            }
-            return
-        }
-
-        let diff = safeTo - safeFrom
-        let frames = max(12, min(48, diff))
-        let stepDuration = duration / Double(frames)
-
-        for i in 0...frames {
-            let progress = Double(i) / Double(frames)
-            let eased = 1.0 - pow(1.0 - progress, 3.0)
-            let current = safeFrom + Int(Double(diff) * eased)
-
-            await MainActor.run {
-                displayedDayTotalSteps = min(safeTo, current)
-            }
-
-            if i != 0 && i != frames && i % 6 == 0 {
-                await MainActor.run {
-                    Haptics.tap(style: .light)
-                }
-            }
-
-            try? await Task.sleep(nanoseconds: UInt64(stepDuration * 1_000_000_000))
-        }
-
-        await MainActor.run {
-            displayedDayTotalSteps = safeTo
-        }
-    }
-
-    private func startWalking(duration: TimeInterval) {
-        stopWalkingWorkItem?.cancel()
-
-        isWalking = true
-
-        let item = DispatchWorkItem {
-            stopWalkingImmediately()
-        }
-        stopWalkingWorkItem = item
-        DispatchQueue.main.asyncAfter(deadline: .now() + duration, execute: item)
-    }
-
-    private func stopWalkingImmediately() {
-        var t = Transaction()
-        t.animation = nil
-        withTransaction(t) {
-            isWalking = false
-        }
-    }
-}
-
-// MARK: - Reward Popup
-
-private struct RewardClaimPopup: View {
-    let rewardIndex: Int
-    let onClose: () -> Void
-    let onNormalReward: () -> Void
-    let onAdReward: () -> Void
-    let isAdReady: Bool
-    let isDeveloperMode: Bool
+    private let runningMovieAssetName = "running_movie"
 
     var body: some View {
         ZStack {
-            Color.black.opacity(0.42)
-                .ignoresSafeArea()
-                .onTapGesture { onClose() }
+            backgroundView
 
-            VStack(alignment: .leading, spacing: 14) {
-                HStack {
-                    Text("プレゼント \(rewardIndex)")
-                        .font(.system(size: 19, weight: .bold))
-                        .foregroundStyle(.primary)
+            VStack(spacing: 20) {
+                headerView
 
-                    Spacer()
+                Spacer(minLength: 0)
 
-                    Button(action: onClose) {
-                        Image(systemName: "xmark")
-                            .font(.system(size: 14, weight: .bold))
-                            .foregroundStyle(.primary)
-                            .padding(8)
-                            .background(.thinMaterial, in: Circle())
-                    }
-                    .buttonStyle(.plain)
-                }
+                contentView
 
-                Text("ランダムでたべものが1つ手に入ります。")
-                    .font(.system(size: 14, weight: .semibold))
-                    .foregroundStyle(.primary)
+                Spacer(minLength: 12)
 
-                Text("広告報酬を選ぶと、ランダムでたべものを獲得しつつ、さらに満足度を1つ減らしてお腹をすかせることができます。")
-                    .font(.system(size: 13, weight: .regular))
-                    .foregroundStyle(.secondary)
-                    .fixedSize(horizontal: false, vertical: true)
-
-                VStack(spacing: 10) {
-                    Button(action: onNormalReward) {
-                        Text("通常報酬")
-                            .font(.system(size: 15, weight: .bold))
-                            .frame(maxWidth: .infinity)
-                            .padding(.vertical, 12)
-                    }
-                    .buttonStyle(.borderedProminent)
-
-                    Button(action: onAdReward) {
-                        HStack(spacing: 8) {
-                            Image(systemName: isDeveloperMode ? "hammer.fill" : "play.rectangle.fill")
-                            Text(
-                                isDeveloperMode
-                                ? "開発者モード報酬"
-                                : (isAdReady ? "広告報酬" : "広告機能は停止中")
-                            )
-                        }
-                        .font(.system(size: 15, weight: .bold))
-                        .frame(maxWidth: .infinity)
-                        .padding(.vertical, 12)
-                    }
-                    .buttonStyle(.bordered)
-                    .disabled(!isAdReady)
-                }
+                CharacterVideoPlayerView(
+                    assetName: runningMovieAssetName,
+                    isPlaying: viewModel.shouldPlayCharacterVideo,
+                    waitingTitle: "READY",
+                    runningTitle: "RUNNING"
+                )
+                .frame(height: 230)
+                .padding(.horizontal, 20)
+                .padding(.bottom, 18)
             }
-            .padding(18)
-            .background(.ultraThinMaterial, in: RoundedRectangle(cornerRadius: 18))
+        }
+        .navigationBarHidden(true)
+        .task {
+            viewModel.configureIfNeeded()
+            _ = hk.todaySteps
+        }
+        .onChange(of: scenePhase) { _, newValue in
+            viewModel.handleScenePhase(newValue)
+        }
+    }
+
+    private var backgroundView: some View {
+        ZStack {
+            Image("Step_background")
+                .resizable()
+                .scaledToFill()
+                .ignoresSafeArea()
+
+            LinearGradient(
+                colors: [
+                    Color.black.opacity(0.20),
+                    Color.black.opacity(0.36)
+                ],
+                startPoint: .top,
+                endPoint: .bottom
+            )
+            .ignoresSafeArea()
+        }
+    }
+
+    private var headerView: some View {
+        HStack {
+            Button {
+                bgmManager.playSE(.push)
+                dismiss()
+            } label: {
+                Image(systemName: "chevron.backward")
+                    .font(.system(size: 18, weight: .bold))
+                    .foregroundStyle(.white)
+                    .frame(width: 44, height: 44)
+                    .background(Color.black.opacity(0.32), in: Circle())
+            }
+            .buttonStyle(.plain)
+
+            Spacer()
+
+            Text("ステップ")
+                .font(.system(size: 22, weight: .heavy, design: .rounded))
+                .foregroundStyle(.white)
+
+            Spacer()
+
+            Color.clear
+                .frame(width: 44, height: 44)
+        }
+        .padding(.horizontal, 20)
+        .padding(.top, 10)
+    }
+
+    @ViewBuilder
+    private var contentView: some View {
+        switch viewModel.sessionState {
+        case .idle, .waitingForPermission:
+            idleContentView
+        case .running, .paused:
+            activeContentView
+        case .finished:
+            finishedContentView
+        }
+    }
+
+    private var idleContentView: some View {
+        VStack(spacing: 26) {
+            VStack(spacing: 10) {
+                Text("Nike Run 風のワークアウト開始画面")
+                    .font(.system(size: 14, weight: .semibold))
+                    .foregroundStyle(.white.opacity(0.82))
+
+                Text("STEP WORKOUT")
+                    .font(.system(size: 34, weight: .black, design: .rounded))
+                    .foregroundStyle(.white)
+                    .tracking(1.4)
+
+                Text("経過時間と距離だけを、シンプルに計測します")
+                    .font(.system(size: 15, weight: .medium))
+                    .foregroundStyle(.white.opacity(0.86))
+            }
+            .multilineTextAlignment(.center)
             .padding(.horizontal, 24)
-            .shadow(radius: 18)
+
+            VStack(spacing: 14) {
+                Button {
+                    bgmManager.playSE(.push)
+                    viewModel.handlePrimaryAction()
+                } label: {
+                    Text(viewModel.primaryActionTitle)
+                        .font(.system(size: 28, weight: .heavy, design: .rounded))
+                        .foregroundStyle(.white)
+                        .frame(maxWidth: .infinity)
+                        .frame(height: 96)
+                        .background(
+                            RoundedRectangle(cornerRadius: 30, style: .continuous)
+                                .fill(
+                                    LinearGradient(
+                                        colors: [
+                                            Color.orange.opacity(0.96),
+                                            Color(red: 0.98, green: 0.42, blue: 0.16)
+                                        ],
+                                        startPoint: .topLeading,
+                                        endPoint: .bottomTrailing
+                                    )
+                                )
+                        )
+                        .shadow(color: .orange.opacity(0.32), radius: 22, x: 0, y: 12)
+                }
+                .buttonStyle(.plain)
+                .disabled(viewModel.sessionState == .waitingForPermission)
+
+                Text(viewModel.permissionMessage)
+                    .font(.system(size: 14, weight: .medium))
+                    .foregroundStyle(.white.opacity(0.82))
+                    .multilineTextAlignment(.center)
+                    .padding(.horizontal, 16)
+            }
+            .padding(.horizontal, 28)
+
+            if viewModel.shouldShowPermissionGuide {
+                permissionGuideCard
+                    .padding(.horizontal, 20)
+            }
+        }
+    }
+
+    private var permissionGuideCard: some View {
+        VStack(alignment: .leading, spacing: 12) {
+            Text("位置情報の許可が必要です")
+                .font(.system(size: 18, weight: .bold))
+                .foregroundStyle(.white)
+
+            Text("距離表示とルート保存のため、位置情報を利用します。設定アプリで「位置情報」を許可してください。")
+                .font(.system(size: 14, weight: .medium))
+                .foregroundStyle(.white.opacity(0.86))
+                .fixedSize(horizontal: false, vertical: true)
+
+            Button {
+                bgmManager.playSE(.push)
+                guard let url = URL(string: UIApplication.openSettingsURLString) else { return }
+                UIApplication.shared.open(url)
+            } label: {
+                Text("設定を開く")
+                    .font(.system(size: 15, weight: .bold))
+                    .foregroundStyle(.black)
+                    .frame(maxWidth: .infinity)
+                    .frame(height: 46)
+                    .background(Color.white, in: RoundedRectangle(cornerRadius: 14, style: .continuous))
+            }
+            .buttonStyle(.plain)
+        }
+        .padding(18)
+        .background(Color.white.opacity(0.12), in: RoundedRectangle(cornerRadius: 22, style: .continuous))
+    }
+
+    private var activeContentView: some View {
+        VStack(spacing: 20) {
+            VStack(spacing: 8) {
+                Text("経過時間")
+                    .font(.system(size: 14, weight: .semibold))
+                    .foregroundStyle(.white.opacity(0.78))
+
+                Text(viewModel.formattedElapsedTime)
+                    .font(.system(size: 54, weight: .black, design: .rounded))
+                    .foregroundStyle(.white)
+                    .monospacedDigit()
+                    .minimumScaleFactor(0.7)
+                    .lineLimit(1)
+
+                Text(viewModel.formattedDistanceKilometers)
+                    .font(.system(size: 28, weight: .bold, design: .rounded))
+                    .foregroundStyle(.white.opacity(0.95))
+                    .monospacedDigit()
+            }
+            .padding(.top, 4)
+
+            WorkoutRouteMapView(points: viewModel.routePoints)
+                .frame(height: 250)
+                .clipShape(RoundedRectangle(cornerRadius: 26, style: .continuous))
+                .overlay(
+                    RoundedRectangle(cornerRadius: 26, style: .continuous)
+                        .stroke(Color.white.opacity(0.12), lineWidth: 1)
+                )
+                .padding(.horizontal, 20)
+
+            if let accuracyMessage = viewModel.accuracyMessage {
+                Text(accuracyMessage)
+                    .font(.system(size: 13, weight: .semibold))
+                    .foregroundStyle(.white.opacity(0.86))
+                    .multilineTextAlignment(.center)
+                    .padding(.horizontal, 28)
+            }
+
+            HStack(spacing: 14) {
+                Button {
+                    bgmManager.playSE(.push)
+                    viewModel.togglePause()
+                } label: {
+                    Text(viewModel.pauseButtonTitle)
+                        .font(.system(size: 18, weight: .bold))
+                        .foregroundStyle(.white)
+                        .frame(maxWidth: .infinity)
+                        .frame(height: 56)
+                        .background(Color.white.opacity(0.14), in: RoundedRectangle(cornerRadius: 18, style: .continuous))
+                }
+                .buttonStyle(.plain)
+
+                Button {
+                    bgmManager.playSE(.push)
+                    viewModel.finishWorkout()
+                } label: {
+                    Text("終了")
+                        .font(.system(size: 18, weight: .bold))
+                        .foregroundStyle(.black)
+                        .frame(maxWidth: .infinity)
+                        .frame(height: 56)
+                        .background(Color.white, in: RoundedRectangle(cornerRadius: 18, style: .continuous))
+                }
+                .buttonStyle(.plain)
+            }
+            .padding(.horizontal, 20)
+        }
+    }
+
+    private var finishedContentView: some View {
+        VStack(spacing: 18) {
+            VStack(spacing: 8) {
+                Text("WORKOUT SUMMARY")
+                    .font(.system(size: 14, weight: .heavy, design: .rounded))
+                    .foregroundStyle(.white.opacity(0.8))
+                    .tracking(1.2)
+
+                Text(viewModel.summaryElapsedText)
+                    .font(.system(size: 44, weight: .black, design: .rounded))
+                    .foregroundStyle(.white)
+                    .monospacedDigit()
+
+                Text(viewModel.summaryDistanceText)
+                    .font(.system(size: 26, weight: .bold, design: .rounded))
+                    .foregroundStyle(.white.opacity(0.96))
+                    .monospacedDigit()
+            }
+
+            WorkoutRouteMapView(points: viewModel.finishedSession?.routePoints ?? viewModel.routePoints)
+                .frame(height: 250)
+                .clipShape(RoundedRectangle(cornerRadius: 26, style: .continuous))
+                .overlay(
+                    RoundedRectangle(cornerRadius: 26, style: .continuous)
+                        .stroke(Color.white.opacity(0.12), lineWidth: 1)
+                )
+                .padding(.horizontal, 20)
+
+            if let saveMessage = viewModel.saveMessage {
+                Text(saveMessage)
+                    .font(.system(size: 14, weight: .semibold))
+                    .foregroundStyle(.white.opacity(0.9))
+                    .padding(.horizontal, 16)
+                    .padding(.vertical, 10)
+                    .background(Color.white.opacity(0.12), in: Capsule())
+            }
+
+            HStack(spacing: 14) {
+                Button {
+                    bgmManager.playSE(.push)
+                    viewModel.saveFinishedWorkout(
+                        modelContext: modelContext,
+                        characterID: state.normalizedCurrentPetID
+                    )
+                    onSave()
+                } label: {
+                    Text(saveButtonTitle)
+                        .font(.system(size: 17, weight: .bold))
+                        .foregroundStyle(saveButtonForegroundColor)
+                        .frame(maxWidth: .infinity)
+                        .frame(height: 54)
+                        .background(saveButtonBackground)
+                }
+                .buttonStyle(.plain)
+                .disabled(!canTapSaveButton)
+
+                Button {
+                    bgmManager.playSE(.push)
+                    viewModel.handlePrimaryAction()
+                } label: {
+                    Text("もう一度")
+                        .font(.system(size: 17, weight: .bold))
+                        .foregroundStyle(.white)
+                        .frame(maxWidth: .infinity)
+                        .frame(height: 54)
+                        .background(Color.white.opacity(0.14), in: RoundedRectangle(cornerRadius: 18, style: .continuous))
+                }
+                .buttonStyle(.plain)
+            }
+            .padding(.horizontal, 20)
+        }
+    }
+
+    private var canTapSaveButton: Bool {
+        if case .saving = viewModel.saveState { return false }
+        if case .saved = viewModel.saveState { return false }
+        return true
+    }
+
+    private var saveButtonTitle: String {
+        switch viewModel.saveState {
+        case .idle, .failed:
+            return "ルートを保存"
+        case .saving:
+            return "保存中..."
+        case .saved:
+            return "保存済み"
+        }
+    }
+
+    private var saveButtonForegroundColor: Color {
+        switch viewModel.saveState {
+        case .saved:
+            return .white
+        default:
+            return .black
+        }
+    }
+
+    @ViewBuilder
+    private var saveButtonBackground: some View {
+        switch viewModel.saveState {
+        case .saved:
+            RoundedRectangle(cornerRadius: 18, style: .continuous)
+                .fill(Color.green.opacity(0.82))
+        default:
+            RoundedRectangle(cornerRadius: 18, style: .continuous)
+                .fill(Color.white)
         }
     }
 }

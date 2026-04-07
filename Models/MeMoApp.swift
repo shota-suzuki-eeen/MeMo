@@ -33,6 +33,10 @@ struct MeMoApp: App {
                     bgmManager.startIfNeeded()
                 }
         }
-        .modelContainer(for: [AppState.self, TodayPhotoEntry.self])
+        .modelContainer(for: [
+            AppState.self,
+            TodayPhotoEntry.self,
+            WorkoutSessionRecord.self
+        ])
     }
 }
