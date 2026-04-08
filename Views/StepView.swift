@@ -29,26 +29,51 @@ struct StepView: View {
     @State private var countdownBlur: CGFloat = 18
     @State private var countdownTask: Task<Void, Never>?
 
+    @State private var selectedScreen: DisplayScreen = .run
+
+    private enum DisplayScreen {
+        case run
+        case activity
+    }
+
     private enum Layout {
         static let startButtonSize: CGFloat = 212
-        static let idleBottomPadding: CGFloat = 108
+        static let idleBottomPadding: CGFloat = 192
         static let sectionHorizontalPadding: CGFloat = 20
         static let bottomCardCornerRadius: CGFloat = 30
         static let closeButtonSize: CGFloat = 40
+
+        static let switcherBottomPadding: CGFloat = 42
+        static let switcherSpacing: CGFloat = 34
+        static let switcherHorizontalPadding: CGFloat = 26
+        static let switcherVerticalPadding: CGFloat = 18
+
+        static let activityCardBottomPadding: CGFloat = 176
+        static let activityCardCornerRadius: CGFloat = 30
     }
 
     var body: some View {
         ZStack {
-            StepBackdropMapView(
+            surfaceBackground
+                .ignoresSafeArea()
+
+            StepFocusedMapBackground(
                 points: backdropRoutePoints,
-                followsUserLocation: shouldFollowUserLocation
+                followsUserLocation: shouldFollowUserLocation,
+                isCondensed: isPrimarySwitcherScreen
             )
             .ignoresSafeArea()
 
-            backgroundOverlay
-                .ignoresSafeArea()
-
             contentView
+
+            if shouldShowScreenSwitcher {
+                VStack {
+                    Spacer()
+                    screenSwitcher
+                        .padding(.bottom, Layout.switcherBottomPadding)
+                }
+                .transition(.move(edge: .bottom).combined(with: .opacity))
+            }
 
             dismissButton
 
@@ -76,26 +101,45 @@ struct StepView: View {
 
     private var shouldFollowUserLocation: Bool {
         switch viewModel.sessionState {
-        case .idle, .waitingForPermission, .countingDown:
+        case .idle, .waitingForPermission, .countingDown, .running, .paused:
             return true
-        case .running, .paused:
-            return viewModel.routePoints.isEmpty
         case .finished:
             return false
         }
     }
 
-    @ViewBuilder
-    private var backgroundOverlay: some View {
+    private var isPrimarySwitcherScreen: Bool {
         switch viewModel.sessionState {
         case .idle, .waitingForPermission, .countingDown:
-            Color.white.opacity(0.70)
+            return true
+        case .running, .paused, .finished:
+            return false
+        }
+    }
+
+    private var shouldShowScreenSwitcher: Bool {
+        isPrimarySwitcherScreen && countdownNumber == nil
+    }
+
+    @ViewBuilder
+    private var surfaceBackground: some View {
+        switch viewModel.sessionState {
+        case .idle, .waitingForPermission, .countingDown:
+            LinearGradient(
+                colors: [
+                    Color(red: 0.98, green: 0.98, blue: 0.99),
+                    Color(red: 0.95, green: 0.96, blue: 0.98),
+                    Color(red: 0.93, green: 0.94, blue: 0.97)
+                ],
+                startPoint: .top,
+                endPoint: .bottom
+            )
         case .running, .paused:
             LinearGradient(
                 colors: [
-                    Color.white.opacity(0.16),
-                    Color.black.opacity(0.18),
-                    Color.black.opacity(0.26)
+                    Color(red: 0.91, green: 0.93, blue: 0.96),
+                    Color(red: 0.86, green: 0.88, blue: 0.92),
+                    Color(red: 0.80, green: 0.83, blue: 0.89)
                 ],
                 startPoint: .top,
                 endPoint: .bottom
@@ -103,9 +147,9 @@ struct StepView: View {
         case .finished:
             LinearGradient(
                 colors: [
-                    Color.white.opacity(0.14),
-                    Color.black.opacity(0.12),
-                    Color.black.opacity(0.32)
+                    Color(red: 0.87, green: 0.90, blue: 0.94),
+                    Color(red: 0.79, green: 0.83, blue: 0.89),
+                    Color(red: 0.70, green: 0.74, blue: 0.82)
                 ],
                 startPoint: .top,
                 endPoint: .bottom
@@ -141,12 +185,52 @@ struct StepView: View {
     private var contentView: some View {
         switch viewModel.sessionState {
         case .idle, .waitingForPermission, .countingDown:
-            idleContentView
+            switch selectedScreen {
+            case .run:
+                idleContentView
+            case .activity:
+                activityPlaceholderContentView
+            }
         case .running, .paused:
             activeContentView
         case .finished:
             finishedContentView
         }
+    }
+
+    private var screenSwitcher: some View {
+        HStack(alignment: .top, spacing: Layout.switcherSpacing) {
+            StepScreenSwitchButton(
+                title: "ラン",
+                systemImage: "figure.run",
+                isSelected: selectedScreen == .run
+            ) {
+                bgmManager.playSE(.push)
+                withAnimation(.spring(response: 0.28, dampingFraction: 0.86)) {
+                    selectedScreen = .run
+                }
+            }
+
+            StepScreenSwitchButton(
+                title: "アクティビティ",
+                systemImage: "chart.bar.xaxis",
+                isSelected: selectedScreen == .activity
+            ) {
+                bgmManager.playSE(.push)
+                withAnimation(.spring(response: 0.28, dampingFraction: 0.86)) {
+                    selectedScreen = .activity
+                }
+            }
+        }
+        .padding(.horizontal, Layout.switcherHorizontalPadding)
+        .padding(.vertical, Layout.switcherVerticalPadding)
+        .background(.ultraThinMaterial, in: Capsule())
+        .overlay(
+            Capsule()
+                .stroke(Color.white.opacity(0.32), lineWidth: 1)
+        )
+        .shadow(color: .black.opacity(0.08), radius: 14, x: 0, y: 8)
+        .padding(.horizontal, 20)
     }
 
     private var idleContentView: some View {
@@ -181,6 +265,17 @@ struct StepView: View {
                 .padding(.horizontal, 24)
         }
         .padding(.bottom, Layout.idleBottomPadding)
+        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .bottom)
+    }
+
+    private var activityPlaceholderContentView: some View {
+        VStack {
+            Spacer(minLength: 0)
+
+            StepActivityPlaceholderCard()
+                .padding(.horizontal, 20)
+                .padding(.bottom, Layout.activityCardBottomPadding)
+        }
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .bottom)
     }
 
@@ -425,6 +520,7 @@ struct StepView: View {
     }
 
     private func handleStartButtonTapped() {
+        selectedScreen = .run
         bgmManager.playSE(.push)
 
         switch viewModel.prepareWorkoutStart() {
@@ -517,6 +613,69 @@ struct StepView: View {
     }
 }
 
+private struct StepScreenSwitchButton: View {
+    let title: String
+    let systemImage: String
+    let isSelected: Bool
+    let action: () -> Void
+
+    var body: some View {
+        Button(action: action) {
+            VStack(spacing: 8) {
+                Image(systemName: systemImage)
+                    .font(.system(size: 22, weight: .bold))
+                    .foregroundStyle(isSelected ? Color.black : Color.primary.opacity(0.82))
+                    .frame(width: 60, height: 60)
+                    .background(Color.white.opacity(isSelected ? 1.0 : 0.92), in: Circle())
+                    .overlay(
+                        Circle()
+                            .stroke(Color.black.opacity(isSelected ? 0.12 : 0.05), lineWidth: 1)
+                    )
+                    .shadow(color: .black.opacity(isSelected ? 0.14 : 0.06), radius: 8, x: 0, y: 5)
+
+                Text(title)
+                    .font(.system(size: 13, weight: .semibold))
+                    .foregroundStyle(.primary.opacity(isSelected ? 0.96 : 0.72))
+                    .lineLimit(1)
+            }
+            .frame(minWidth: 100)
+        }
+        .buttonStyle(.plain)
+    }
+}
+
+private struct StepActivityPlaceholderCard: View {
+    var body: some View {
+        VStack(spacing: 18) {
+            Image(systemName: "chart.bar.xaxis")
+                .font(.system(size: 34, weight: .bold))
+                .foregroundStyle(.white)
+                .frame(width: 76, height: 76)
+                .background(Color.black.opacity(0.62), in: Circle())
+
+            VStack(spacing: 8) {
+                Text("アクティビティ")
+                    .font(.system(size: 22, weight: .bold))
+                    .foregroundStyle(.primary)
+
+                Text("この画面はダミー表示です。\n後続の実装でアクティビティ一覧や履歴を配置できます。")
+                    .font(.system(size: 14, weight: .medium))
+                    .foregroundStyle(.primary.opacity(0.72))
+                    .multilineTextAlignment(.center)
+            }
+        }
+        .frame(maxWidth: .infinity)
+        .padding(.vertical, 30)
+        .padding(.horizontal, 24)
+        .background(.ultraThinMaterial, in: RoundedRectangle(cornerRadius: 30, style: .continuous))
+        .overlay(
+            RoundedRectangle(cornerRadius: 30, style: .continuous)
+                .stroke(Color.white.opacity(0.24), lineWidth: 1)
+        )
+        .shadow(color: .black.opacity(0.10), radius: 18, x: 0, y: 8)
+    }
+}
+
 private struct StepMetricTile: View {
     let title: String
     let value: String
@@ -542,6 +701,98 @@ private struct StepMetricTile: View {
     }
 }
 
+private struct StepFocusedMapBackground: View {
+    let points: [WorkoutRoutePoint]
+    let followsUserLocation: Bool
+    let isCondensed: Bool
+
+    var body: some View {
+        GeometryReader { geometry in
+            let size = geometry.size
+            let width = size.width * 1.18
+            let height = size.height * (isCondensed ? 0.64 : 0.80)
+            let topOffset = isCondensed ? -12.0 : -42.0
+            let cornerRadius = isCondensed ? 46.0 : 54.0
+
+            StepBackdropMapView(
+                points: points,
+                followsUserLocation: followsUserLocation
+            )
+            .frame(width: width, height: height)
+            .clipShape(RoundedRectangle(cornerRadius: cornerRadius, style: .continuous))
+            .mask {
+                StepFocusedMapMask()
+                    .frame(width: width, height: height)
+            }
+            .overlay {
+                RoundedRectangle(cornerRadius: cornerRadius, style: .continuous)
+                    .stroke(Color.white.opacity(0.14), lineWidth: 1)
+                    .blur(radius: 6)
+                    .opacity(0.55)
+            }
+            .overlay {
+                StepFocusedMapVignette()
+                    .frame(width: width, height: height)
+                    .allowsHitTesting(false)
+            }
+            .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
+            .offset(y: topOffset)
+        }
+        .allowsHitTesting(false)
+    }
+}
+
+private struct StepFocusedMapMask: View {
+    var body: some View {
+        ZStack {
+            LinearGradient(
+                colors: [
+                    Color.clear,
+                    Color.white.opacity(0.22),
+                    Color.white.opacity(0.36),
+                    Color.white.opacity(0.22),
+                    Color.clear
+                ],
+                startPoint: .top,
+                endPoint: .bottom
+            )
+
+            RadialGradient(
+                colors: [
+                    Color.white,
+                    Color.white,
+                    Color.white.opacity(0.96),
+                    Color.white.opacity(0.72),
+                    Color.white.opacity(0.28),
+                    Color.clear
+                ],
+                center: .center,
+                startRadius: 4,
+                endRadius: 420
+            )
+            .scaleEffect(x: 1.12, y: 0.80)
+        }
+        .compositingGroup()
+    }
+}
+
+private struct StepFocusedMapVignette: View {
+    var body: some View {
+        RadialGradient(
+            colors: [
+                Color.clear,
+                Color.clear,
+                Color.white.opacity(0.07),
+                Color.white.opacity(0.20)
+            ],
+            center: .center,
+            startRadius: 10,
+            endRadius: 420
+        )
+        .blendMode(.screen)
+    }
+}
+
 private struct StepBackdropMapView: UIViewRepresentable {
     let points: [WorkoutRoutePoint]
     let followsUserLocation: Bool
@@ -564,6 +815,8 @@ private struct StepBackdropMapView: UIViewRepresentable {
         mapView.pointOfInterestFilter = .includingAll
         mapView.isRotateEnabled = false
         mapView.isPitchEnabled = false
+        mapView.isZoomEnabled = false
+        mapView.isScrollEnabled = false
         mapView.showsUserLocation = true
         mapView.setRegion(defaultRegion, animated: false)
         return mapView
@@ -576,21 +829,19 @@ private struct StepBackdropMapView: UIViewRepresentable {
         mapView.removeAnnotations(removableAnnotations)
         mapView.removeOverlays(mapView.overlays)
 
-        guard !points.isEmpty else {
-            if followsUserLocation {
-                if mapView.userTrackingMode != .follow {
-                    mapView.setUserTrackingMode(.follow, animated: false)
-                }
-            } else {
-                if mapView.userTrackingMode != .none {
-                    mapView.setUserTrackingMode(.none, animated: false)
-                }
+        if followsUserLocation {
+            if mapView.userTrackingMode != .follow {
+                mapView.setUserTrackingMode(.follow, animated: false)
             }
-            return
+        } else if mapView.userTrackingMode != .none {
+            mapView.setUserTrackingMode(.none, animated: false)
         }
 
-        if mapView.userTrackingMode != .none {
-            mapView.setUserTrackingMode(.none, animated: false)
+        guard !points.isEmpty else {
+            if !followsUserLocation {
+                mapView.setRegion(defaultRegion, animated: false)
+            }
+            return
         }
 
         let coordinates = points.map(\.coordinate)
@@ -599,7 +850,10 @@ private struct StepBackdropMapView: UIViewRepresentable {
             let annotation = MKPointAnnotation()
             annotation.coordinate = coordinate
             mapView.addAnnotation(annotation)
-            mapView.setCenter(coordinate, animated: false)
+
+            if !followsUserLocation {
+                mapView.setCenter(coordinate, animated: false)
+            }
             return
         }
 
@@ -620,6 +874,8 @@ private struct StepBackdropMapView: UIViewRepresentable {
             mapView.addAnnotation(end)
         }
 
+        guard !followsUserLocation else { return }
+
         let edgePadding = UIEdgeInsets(top: 120, left: 40, bottom: 220, right: 40)
         mapView.setVisibleMapRect(polyline.boundingMapRect, edgePadding: edgePadding, animated: false)
     }
@@ -629,7 +885,6 @@ private extension StepBackdropMapView {
     final class Coordinator: NSObject, MKMapViewDelegate {
         var followsUserLocation: Bool = true
         private let defaultRegion: MKCoordinateRegion
-        private var didCenterOnUserLocation = false
 
         init(defaultRegion: MKCoordinateRegion) {
             self.defaultRegion = defaultRegion
@@ -637,19 +892,17 @@ private extension StepBackdropMapView {
 
         func mapView(_ mapView: MKMapView, didUpdate userLocation: MKUserLocation) {
             guard followsUserLocation else { return }
-            guard !didCenterOnUserLocation else { return }
             guard let location = userLocation.location else { return }
 
             let region = MKCoordinateRegion(
                 center: location.coordinate,
-                span: MKCoordinateSpan(latitudeDelta: 0.008, longitudeDelta: 0.008)
+                span: MKCoordinateSpan(latitudeDelta: 0.0065, longitudeDelta: 0.0065)
             )
             mapView.setRegion(region, animated: false)
-            didCenterOnUserLocation = true
         }
 
         func mapView(_ mapView: MKMapView, didFailToLocateUserWithError error: Error) {
-            guard !didCenterOnUserLocation else { return }
+            guard !followsUserLocation else { return }
             mapView.setRegion(defaultRegion, animated: false)
         }
 
