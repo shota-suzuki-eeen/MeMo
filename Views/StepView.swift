@@ -9,12 +9,16 @@ import SwiftUI
 import SwiftData
 import UIKit
 import MapKit
+import Charts
 
 struct StepView: View {
     @Environment(\.dismiss) private var dismiss
     @Environment(\.modelContext) private var modelContext
     @Environment(\.scenePhase) private var scenePhase
     @EnvironmentObject private var bgmManager: BGMManager
+
+    @Query(sort: \WorkoutSessionRecord.startedAt, order: .reverse)
+    private var workoutRecords: [WorkoutSessionRecord]
 
     let state: AppState
     @ObservedObject var hk: HealthKitManager
@@ -48,8 +52,7 @@ struct StepView: View {
         static let switcherHorizontalPadding: CGFloat = 26
         static let switcherVerticalPadding: CGFloat = 18
 
-        static let activityCardBottomPadding: CGFloat = 176
-        static let activityCardCornerRadius: CGFloat = 30
+        static let activityBottomPadding: CGFloat = 180
     }
 
     var body: some View {
@@ -57,12 +60,15 @@ struct StepView: View {
             surfaceBackground
                 .ignoresSafeArea()
 
-            StepFocusedMapBackground(
-                points: backdropRoutePoints,
-                followsUserLocation: shouldFollowUserLocation,
-                isCondensed: isPrimarySwitcherScreen
-            )
-            .ignoresSafeArea()
+            if shouldShowFocusedMapBackground {
+                StepFocusedMapBackground(
+                    points: backdropRoutePoints,
+                    followsUserLocation: shouldFollowUserLocation,
+                    isCondensed: isPrimarySwitcherScreen
+                )
+                .ignoresSafeArea()
+                .transition(.opacity)
+            }
 
             contentView
 
@@ -75,7 +81,7 @@ struct StepView: View {
                 .transition(.move(edge: .bottom).combined(with: .opacity))
             }
 
-            dismissButton
+            topBar
 
             countdownOverlay
         }
@@ -121,19 +127,33 @@ struct StepView: View {
         isPrimarySwitcherScreen && countdownNumber == nil
     }
 
+    private var shouldShowFocusedMapBackground: Bool {
+        switch viewModel.sessionState {
+        case .idle, .waitingForPermission, .countingDown:
+            return selectedScreen == .run
+        case .running, .paused, .finished:
+            return true
+        }
+    }
+
     @ViewBuilder
     private var surfaceBackground: some View {
         switch viewModel.sessionState {
         case .idle, .waitingForPermission, .countingDown:
-            LinearGradient(
-                colors: [
-                    Color(red: 0.98, green: 0.98, blue: 0.99),
-                    Color(red: 0.95, green: 0.96, blue: 0.98),
-                    Color(red: 0.93, green: 0.94, blue: 0.97)
-                ],
-                startPoint: .top,
-                endPoint: .bottom
-            )
+            switch selectedScreen {
+            case .run:
+                LinearGradient(
+                    colors: [
+                        Color(red: 0.98, green: 0.98, blue: 0.99),
+                        Color(red: 0.95, green: 0.96, blue: 0.98),
+                        Color(red: 0.93, green: 0.94, blue: 0.97)
+                    ],
+                    startPoint: .top,
+                    endPoint: .bottom
+                )
+            case .activity:
+                Color(red: 0.96, green: 0.96, blue: 0.97)
+            }
         case .running, .paused:
             LinearGradient(
                 colors: [
@@ -157,10 +177,26 @@ struct StepView: View {
         }
     }
 
-    private var dismissButton: some View {
+    private var topBar: some View {
         VStack {
-            HStack {
+            HStack(spacing: 12) {
                 Spacer()
+
+                if shouldShowQuickRunButton {
+                    Button {
+                        bgmManager.playSE(.push)
+                        withAnimation(.spring(response: 0.28, dampingFraction: 0.86)) {
+                            selectedScreen = .run
+                        }
+                    } label: {
+                        Image(systemName: "plus")
+                            .font(.system(size: 18, weight: .bold))
+                            .foregroundStyle(.primary)
+                            .frame(width: Layout.closeButtonSize, height: Layout.closeButtonSize)
+                            .background(.ultraThinMaterial, in: Circle())
+                    }
+                    .buttonStyle(.plain)
+                }
 
                 Button {
                     bgmManager.playSE(.push)
@@ -181,6 +217,15 @@ struct StepView: View {
         }
     }
 
+    private var shouldShowQuickRunButton: Bool {
+        switch viewModel.sessionState {
+        case .idle, .waitingForPermission, .countingDown:
+            return selectedScreen == .activity
+        case .running, .paused, .finished:
+            return false
+        }
+    }
+
     @ViewBuilder
     private var contentView: some View {
         switch viewModel.sessionState {
@@ -189,7 +234,7 @@ struct StepView: View {
             case .run:
                 idleContentView
             case .activity:
-                activityPlaceholderContentView
+                activityContentView
             }
         case .running, .paused:
             activeContentView
@@ -268,15 +313,16 @@ struct StepView: View {
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .bottom)
     }
 
-    private var activityPlaceholderContentView: some View {
-        VStack {
-            Spacer(minLength: 0)
-
-            StepActivityPlaceholderCard()
-                .padding(.horizontal, 20)
-                .padding(.bottom, Layout.activityCardBottomPadding)
+    private var activityContentView: some View {
+        StepActivityDashboardView(
+            records: workoutRecords,
+            bottomInset: Layout.activityBottomPadding
+        ) {
+            bgmManager.playSE(.push)
+            withAnimation(.spring(response: 0.28, dampingFraction: 0.86)) {
+                selectedScreen = .run
+            }
         }
-        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .bottom)
     }
 
     @ViewBuilder
@@ -613,6 +659,670 @@ struct StepView: View {
     }
 }
 
+private struct StepActivityDashboardView: View {
+    let records: [WorkoutSessionRecord]
+    let bottomInset: CGFloat
+    let onTapRun: () -> Void
+
+    @State private var selectedRange: StepActivityRange = .week
+
+    private var summary: StepActivitySummary {
+        StepActivitySummary(records: records, range: selectedRange, now: Date())
+    }
+
+    private var recentRecords: [WorkoutSessionRecord] {
+        Array(records.prefix(12))
+    }
+
+    var body: some View {
+        ScrollView(showsIndicators: false) {
+            VStack(alignment: .leading, spacing: 28) {
+                Text("アクティビティ")
+                    .font(.system(size: 32, weight: .heavy))
+                    .foregroundStyle(.black)
+                    .padding(.top, 86)
+
+                StepActivityRangePicker(selectedRange: $selectedRange)
+
+                VStack(alignment: .leading, spacing: 8) {
+                    Text(summary.periodTitle)
+                        .font(.system(size: 20, weight: .bold))
+                        .foregroundStyle(.black)
+
+                    Text(summary.distanceText)
+                        .font(.system(size: 78, weight: .black, design: .rounded))
+                        .foregroundStyle(.black)
+                        .minimumScaleFactor(0.68)
+                        .lineLimit(1)
+
+                    Text("KM")
+                        .font(.system(size: 18, weight: .medium))
+                        .foregroundStyle(.secondary)
+                }
+
+                HStack(alignment: .top, spacing: 18) {
+                    StepActivityMetricColumn(title: "ラン", value: summary.runCountText)
+                    StepActivityMetricColumn(title: "平均ペース", value: summary.paceText)
+                    StepActivityMetricColumn(title: "時間", value: summary.durationText)
+                }
+
+                StepActivityChartCard(summary: summary)
+
+                VStack(alignment: .leading, spacing: 18) {
+                    Text("最近のアクティビティ")
+                        .font(.system(size: 22, weight: .bold))
+                        .foregroundStyle(.black)
+
+                    if recentRecords.isEmpty {
+                        StepActivityEmptyStateCard(onTapRun: onTapRun)
+                    } else {
+                        LazyVStack(spacing: 16) {
+                            ForEach(recentRecords, id: \.id) { record in
+                                StepRecentActivityCard(record: record)
+                            }
+                        }
+                    }
+                }
+            }
+            .padding(.horizontal, 24)
+            .padding(.bottom, bottomInset)
+        }
+    }
+}
+
+private struct StepActivityRangePicker: View {
+    @Binding var selectedRange: StepActivityRange
+
+    var body: some View {
+        HStack(spacing: 0) {
+            ForEach(StepActivityRange.allCases) { range in
+                Button {
+                    withAnimation(.spring(response: 0.28, dampingFraction: 0.86)) {
+                        selectedRange = range
+                    }
+                } label: {
+                    Text(range.title)
+                        .font(.system(size: 17, weight: selectedRange == range ? .bold : .medium))
+                        .foregroundStyle(selectedRange == range ? .black : .secondary)
+                        .frame(maxWidth: .infinity)
+                        .frame(height: 48)
+                        .background(
+                            Capsule()
+                                .fill(selectedRange == range ? Color(red: 0.96, green: 0.84, blue: 0.12) : .clear)
+                        )
+                }
+                .buttonStyle(.plain)
+            }
+        }
+        .padding(4)
+        .background(
+            Capsule()
+                .fill(Color.white.opacity(0.92))
+        )
+        .overlay(
+            Capsule()
+                .stroke(Color.black.opacity(0.08), lineWidth: 1)
+        )
+    }
+}
+
+private struct StepActivityMetricColumn: View {
+    let title: String
+    let value: String
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 4) {
+            Text(value)
+                .font(.system(size: 28, weight: .bold, design: .rounded))
+                .foregroundStyle(.black)
+                .minimumScaleFactor(0.72)
+                .lineLimit(1)
+
+            Text(title)
+                .font(.system(size: 13, weight: .medium))
+                .foregroundStyle(.secondary)
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
+    }
+}
+
+private struct StepActivityChartCard: View {
+    let summary: StepActivitySummary
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 14) {
+            Chart {
+                ForEach(summary.chartEntries) { entry in
+                    BarMark(
+                        x: .value("期間", entry.axisValue),
+                        y: .value("距離", entry.distanceKilometers)
+                    )
+                    .clipShape(RoundedRectangle(cornerRadius: 6, style: .continuous))
+                    .foregroundStyle(Color(red: 0.96, green: 0.84, blue: 0.12))
+                }
+
+                if let referenceValue = summary.referenceLineValue {
+                    RuleMark(y: .value("平均", referenceValue))
+                        .foregroundStyle(Color.gray.opacity(0.55))
+                        .lineStyle(StrokeStyle(lineWidth: 1, dash: [5, 5]))
+                        .annotation(position: .trailing, alignment: .center) {
+                            Text(summary.referenceLineText)
+                                .font(.system(size: 12, weight: .medium))
+                                .foregroundStyle(.secondary)
+                        }
+                }
+            }
+            .chartYScale(domain: 0 ... summary.chartUpperBound)
+            .chartXAxis {
+                AxisMarks(values: summary.axisMarkValues) { value in
+                    AxisValueLabel(centered: true) {
+                        if let label = value.as(String.self) {
+                            Text(label)
+                                .font(.system(size: 12, weight: .medium))
+                                .foregroundStyle(.secondary)
+                        }
+                    }
+                }
+            }
+            .chartYAxis {
+                AxisMarks(position: .trailing) { value in
+                    AxisGridLine(stroke: StrokeStyle(lineWidth: 1))
+                        .foregroundStyle(Color.black.opacity(0.08))
+                    AxisValueLabel {
+                        if let doubleValue = value.as(Double.self) {
+                            Text(summary.yAxisText(for: doubleValue))
+                                .font(.system(size: 11, weight: .medium))
+                                .foregroundStyle(.secondary)
+                        }
+                    }
+                }
+            }
+            .frame(height: 228)
+
+            if summary.hasNoActivityInRange {
+                Text("この期間の記録はまだありません")
+                    .font(.system(size: 13, weight: .medium))
+                    .foregroundStyle(.secondary)
+            }
+        }
+        .padding(.top, 6)
+    }
+}
+
+private struct StepActivityEmptyStateCard: View {
+    let onTapRun: () -> Void
+
+    var body: some View {
+        VStack(spacing: 14) {
+            Image(systemName: "figure.run.circle")
+                .font(.system(size: 42, weight: .medium))
+                .foregroundStyle(.secondary)
+
+            Text("まだアクティビティがありません")
+                .font(.system(size: 18, weight: .bold))
+                .foregroundStyle(.black)
+
+            Text("最初のランを始めると、ここに記録が表示されます。")
+                .font(.system(size: 14, weight: .medium))
+                .foregroundStyle(.secondary)
+                .multilineTextAlignment(.center)
+
+            Button(action: onTapRun) {
+                Text("ラン画面へ")
+                    .font(.system(size: 16, weight: .bold))
+                    .foregroundStyle(.black)
+                    .frame(maxWidth: .infinity)
+                    .frame(height: 52)
+                    .background(
+                        RoundedRectangle(cornerRadius: 18, style: .continuous)
+                            .fill(Color(red: 0.96, green: 0.84, blue: 0.12))
+                    )
+            }
+            .buttonStyle(.plain)
+        }
+        .padding(24)
+        .frame(maxWidth: .infinity)
+        .background(
+            RoundedRectangle(cornerRadius: 24, style: .continuous)
+                .fill(Color.white.opacity(0.92))
+        )
+    }
+}
+
+private struct StepRecentActivityCard: View {
+    let record: WorkoutSessionRecord
+
+    private var distanceText: String {
+        String(format: "%.2f", record.distanceKilometers)
+    }
+
+    private var paceText: String {
+        StepActivityFormatter.paceText(elapsedSeconds: record.elapsedSeconds, distanceKilometers: record.distanceKilometers)
+    }
+
+    private var durationText: String {
+        StepActivityFormatter.durationText(seconds: record.elapsedSeconds)
+    }
+
+    private var headlineText: String {
+        StepActivityFormatter.relativeDateText(for: record.startedAt)
+    }
+
+    private var subtitleText: String {
+        "\(StepActivityFormatter.weekdayText(for: record.startedAt)) ラン"
+    }
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 16) {
+            HStack(alignment: .top, spacing: 14) {
+                Group {
+                    if record.routePoints.isEmpty {
+                        RoundedRectangle(cornerRadius: 16, style: .continuous)
+                            .fill(Color.black.opacity(0.04))
+                            .overlay {
+                                Image(systemName: "map")
+                                    .font(.system(size: 26, weight: .medium))
+                                    .foregroundStyle(.secondary)
+                            }
+                    } else {
+                        WorkoutRouteMapView(points: record.routePoints)
+                    }
+                }
+                .frame(width: 84, height: 84)
+                .clipShape(RoundedRectangle(cornerRadius: 16, style: .continuous))
+
+                VStack(alignment: .leading, spacing: 4) {
+                    Text(headlineText)
+                        .font(.system(size: 22, weight: .bold))
+                        .foregroundStyle(.black)
+
+                    Text(subtitleText)
+                        .font(.system(size: 15, weight: .medium))
+                        .foregroundStyle(.secondary)
+                }
+
+                Spacer(minLength: 0)
+            }
+
+            HStack(alignment: .top, spacing: 18) {
+                StepRecentMetricColumn(value: distanceText, unit: "km")
+                StepRecentMetricColumn(value: paceText, unit: "平均ペース")
+                StepRecentMetricColumn(value: durationText, unit: "時間")
+            }
+
+            if let memo = record.memo, !memo.isEmpty {
+                Text(memo)
+                    .font(.system(size: 13, weight: .medium))
+                    .foregroundStyle(.secondary)
+                    .lineLimit(2)
+            }
+        }
+        .padding(20)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .background(
+            RoundedRectangle(cornerRadius: 26, style: .continuous)
+                .fill(Color.white.opacity(0.88))
+        )
+    }
+}
+
+private struct StepRecentMetricColumn: View {
+    let value: String
+    let unit: String
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 4) {
+            Text(value)
+                .font(.system(size: 22, weight: .bold, design: .rounded))
+                .foregroundStyle(.black)
+                .minimumScaleFactor(0.72)
+                .lineLimit(1)
+
+            Text(unit)
+                .font(.system(size: 13, weight: .medium))
+                .foregroundStyle(.secondary)
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
+    }
+}
+
+private enum StepActivityRange: String, CaseIterable, Identifiable {
+    case week
+    case month
+    case year
+    case all
+
+    var id: String { rawValue }
+
+    var title: String {
+        switch self {
+        case .week:
+            return "週"
+        case .month:
+            return "月"
+        case .year:
+            return "年"
+        case .all:
+            return "すべて"
+        }
+    }
+}
+
+private struct StepActivitySummary {
+    let range: StepActivityRange
+    let periodTitle: String
+    let totalDistanceKilometers: Double
+    let totalElapsedSeconds: Int
+    let runCount: Int
+    let chartEntries: [StepActivityChartEntry]
+    let referenceLineValue: Double?
+    let chartUpperBound: Double
+
+    private let activeRecords: [WorkoutSessionRecord]
+
+    init(records: [WorkoutSessionRecord], range: StepActivityRange, now: Date) {
+        let calendar = Calendar.memoActivity
+        let filteredRecords = StepActivitySummary.records(in: range, from: records, calendar: calendar, now: now)
+        self.range = range
+        self.activeRecords = filteredRecords
+        self.periodTitle = StepActivitySummary.periodTitle(for: range, allRecords: records, calendar: calendar, now: now)
+        self.totalDistanceKilometers = filteredRecords.reduce(0) { $0 + $1.distanceKilometers }
+        self.totalElapsedSeconds = filteredRecords.reduce(0) { $0 + max(0, $1.elapsedSeconds) }
+        self.runCount = filteredRecords.count
+        self.chartEntries = StepActivitySummary.chartEntries(for: range, records: filteredRecords, allRecords: records, calendar: calendar, now: now)
+
+        let nonZeroEntries = chartEntries.filter { $0.distanceKilometers > 0 }
+        if nonZeroEntries.isEmpty {
+            self.referenceLineValue = nil
+        } else {
+            self.referenceLineValue = nonZeroEntries.reduce(0) { $0 + $1.distanceKilometers } / Double(nonZeroEntries.count)
+        }
+
+        self.chartUpperBound = StepActivitySummary.chartUpperBound(for: chartEntries, referenceLineValue: referenceLineValue)
+    }
+
+    var distanceText: String {
+        String(format: "%.1f", totalDistanceKilometers)
+    }
+
+    var runCountText: String {
+        String(runCount)
+    }
+
+    var paceText: String {
+        StepActivityFormatter.paceText(elapsedSeconds: totalElapsedSeconds, distanceKilometers: totalDistanceKilometers)
+    }
+
+    var durationText: String {
+        StepActivityFormatter.durationText(seconds: totalElapsedSeconds)
+    }
+
+    var axisMarkValues: [String] {
+        chartEntries.filter(\.showsAxisLabel).map(\.axisValue)
+    }
+
+    var hasNoActivityInRange: Bool {
+        activeRecords.isEmpty
+    }
+
+    var referenceLineText: String {
+        guard let referenceLineValue else { return "" }
+        return String(format: "%.1f", referenceLineValue)
+    }
+
+    func yAxisText(for value: Double) -> String {
+        if value == 0 {
+            return "0km"
+        }
+
+        if value < 10 {
+            return String(format: "%.0f", value)
+        }
+
+        return String(format: "%.0f", value)
+    }
+
+    private static func records(
+        in range: StepActivityRange,
+        from records: [WorkoutSessionRecord],
+        calendar: Calendar,
+        now: Date
+    ) -> [WorkoutSessionRecord] {
+        switch range {
+        case .week:
+            let start = calendar.startOfWeek(for: now)
+            let end = calendar.date(byAdding: .day, value: 7, to: start) ?? now
+            return records.filter { $0.startedAt >= start && $0.startedAt < end }
+        case .month:
+            guard let interval = calendar.dateInterval(of: .month, for: now) else { return [] }
+            return records.filter { interval.contains($0.startedAt) }
+        case .year:
+            guard let interval = calendar.dateInterval(of: .year, for: now) else { return [] }
+            return records.filter { interval.contains($0.startedAt) }
+        case .all:
+            return records
+        }
+    }
+
+    private static func chartEntries(
+        for range: StepActivityRange,
+        records: [WorkoutSessionRecord],
+        allRecords: [WorkoutSessionRecord],
+        calendar: Calendar,
+        now: Date
+    ) -> [StepActivityChartEntry] {
+        switch range {
+        case .week:
+            let start = calendar.startOfWeek(for: now)
+            let weekdaySymbols = ["月", "火", "水", "木", "金", "土", "日"]
+
+            return (0..<7).compactMap { offset in
+                guard let day = calendar.date(byAdding: .day, value: offset, to: start) else { return nil }
+                let distance = records
+                    .filter { calendar.isDate($0.startedAt, inSameDayAs: day) }
+                    .reduce(0) { $0 + $1.distanceKilometers }
+
+                return StepActivityChartEntry(
+                    axisValue: weekdaySymbols[offset],
+                    distanceKilometers: distance,
+                    showsAxisLabel: true
+                )
+            }
+
+        case .month:
+            guard let monthInterval = calendar.dateInterval(of: .month, for: now),
+                  let dayRange = calendar.range(of: .day, in: .month, for: now) else {
+                return []
+            }
+
+            let highlightedDays = Set(Self.monthAxisDays(lastDay: dayRange.count))
+
+            return dayRange.compactMap { day in
+                guard let date = calendar.date(byAdding: .day, value: day - 1, to: monthInterval.start) else { return nil }
+                let distance = records
+                    .filter { calendar.isDate($0.startedAt, inSameDayAs: date) }
+                    .reduce(0) { $0 + $1.distanceKilometers }
+
+                return StepActivityChartEntry(
+                    axisValue: "\(day)",
+                    distanceKilometers: distance,
+                    showsAxisLabel: highlightedDays.contains(day)
+                )
+            }
+
+        case .year:
+            let currentYear = calendar.component(.year, from: now)
+
+            return (1...12).map { month in
+                let distance = records
+                    .filter {
+                        calendar.component(.year, from: $0.startedAt) == currentYear &&
+                        calendar.component(.month, from: $0.startedAt) == month
+                    }
+                    .reduce(0) { $0 + $1.distanceKilometers }
+
+                return StepActivityChartEntry(
+                    axisValue: "\(month)",
+                    distanceKilometers: distance,
+                    showsAxisLabel: true
+                )
+            }
+
+        case .all:
+            let currentYear = calendar.component(.year, from: now)
+            let firstYear = allRecords
+                .map { calendar.component(.year, from: $0.startedAt) }
+                .min() ?? currentYear
+
+            return (firstYear...max(firstYear, currentYear)).map { year in
+                let distance = records
+                    .filter { calendar.component(.year, from: $0.startedAt) == year }
+                    .reduce(0) { $0 + $1.distanceKilometers }
+
+                return StepActivityChartEntry(
+                    axisValue: "\(year)",
+                    distanceKilometers: distance,
+                    showsAxisLabel: true
+                )
+            }
+        }
+    }
+
+    private static func monthAxisDays(lastDay: Int) -> [Int] {
+        let candidates = [1, 5, 12, 19, 26, lastDay]
+        var result: [Int] = []
+
+        for candidate in candidates where candidate >= 1 && candidate <= lastDay {
+            if !result.contains(candidate) {
+                result.append(candidate)
+            }
+        }
+
+        return result
+    }
+
+    private static func periodTitle(
+        for range: StepActivityRange,
+        allRecords: [WorkoutSessionRecord],
+        calendar: Calendar,
+        now: Date
+    ) -> String {
+        switch range {
+        case .week:
+            return "今週"
+        case .month:
+            return StepActivityFormatter.monthText(for: now)
+        case .year:
+            return StepActivityFormatter.yearText(for: now)
+        case .all:
+            let currentYear = calendar.component(.year, from: now)
+            let firstYear = allRecords
+                .map { calendar.component(.year, from: $0.startedAt) }
+                .min() ?? currentYear
+
+            if firstYear == currentYear {
+                return "\(currentYear)年"
+            }
+            return "\(firstYear)年〜\(currentYear)年"
+        }
+    }
+
+    private static func chartUpperBound(
+        for entries: [StepActivityChartEntry],
+        referenceLineValue: Double?
+    ) -> Double {
+        let maxValue = max(entries.map(\.distanceKilometers).max() ?? 0, referenceLineValue ?? 0)
+        guard maxValue > 0 else { return 2 }
+
+        let step: Double
+        switch maxValue {
+        case ...4:
+            step = 1
+        case ...10:
+            step = 2
+        case ...20:
+            step = 4
+        case ...40:
+            step = 8
+        default:
+            step = 10
+        }
+
+        return ceil(maxValue / step) * step
+    }
+}
+
+private struct StepActivityChartEntry: Identifiable {
+    let id = UUID()
+    let axisValue: String
+    let distanceKilometers: Double
+    let showsAxisLabel: Bool
+}
+
+private enum StepActivityFormatter {
+    private static let calendar = Calendar.memoActivity
+
+    static func durationText(seconds: Int) -> String {
+        let safeSeconds = max(0, seconds)
+        let hours = safeSeconds / 3600
+        let minutes = (safeSeconds % 3600) / 60
+        let secs = safeSeconds % 60
+
+        if hours > 0 {
+            return String(format: "%d:%02d:%02d", hours, minutes, secs)
+        }
+        return String(format: "%02d:%02d", minutes, secs)
+    }
+
+    static func paceText(elapsedSeconds: Int, distanceKilometers: Double) -> String {
+        guard distanceKilometers > 0 else { return "--'--''" }
+        let secondsPerKilometer = max(0, Int((Double(elapsedSeconds) / distanceKilometers).rounded()))
+        let minutes = secondsPerKilometer / 60
+        let seconds = secondsPerKilometer % 60
+        return String(format: "%d'%02d''", minutes, seconds)
+    }
+
+    static func relativeDateText(for date: Date) -> String {
+        if calendar.isDateInToday(date) {
+            return "今日"
+        }
+
+        if calendar.isDateInYesterday(date) {
+            return "昨日"
+        }
+
+        let formatter = DateFormatter()
+        formatter.calendar = calendar
+        formatter.locale = Locale(identifier: "ja_JP")
+        formatter.dateFormat = "M月d日"
+        return formatter.string(from: date)
+    }
+
+    static func weekdayText(for date: Date) -> String {
+        let formatter = DateFormatter()
+        formatter.calendar = calendar
+        formatter.locale = Locale(identifier: "ja_JP")
+        formatter.dateFormat = "EEEE"
+        return formatter.string(from: date)
+    }
+
+    static func monthText(for date: Date) -> String {
+        let formatter = DateFormatter()
+        formatter.calendar = calendar
+        formatter.locale = Locale(identifier: "ja_JP")
+        formatter.dateFormat = "yyyy年M月"
+        return formatter.string(from: date)
+    }
+
+    static func yearText(for date: Date) -> String {
+        let formatter = DateFormatter()
+        formatter.calendar = calendar
+        formatter.locale = Locale(identifier: "ja_JP")
+        formatter.dateFormat = "yyyy年"
+        return formatter.string(from: date)
+    }
+}
+
 private struct StepScreenSwitchButton: View {
     let title: String
     let systemImage: String
@@ -641,38 +1351,6 @@ private struct StepScreenSwitchButton: View {
             .frame(minWidth: 100)
         }
         .buttonStyle(.plain)
-    }
-}
-
-private struct StepActivityPlaceholderCard: View {
-    var body: some View {
-        VStack(spacing: 18) {
-            Image(systemName: "chart.bar.xaxis")
-                .font(.system(size: 34, weight: .bold))
-                .foregroundStyle(.white)
-                .frame(width: 76, height: 76)
-                .background(Color.black.opacity(0.62), in: Circle())
-
-            VStack(spacing: 8) {
-                Text("アクティビティ")
-                    .font(.system(size: 22, weight: .bold))
-                    .foregroundStyle(.primary)
-
-                Text("この画面はダミー表示です。\n後続の実装でアクティビティ一覧や履歴を配置できます。")
-                    .font(.system(size: 14, weight: .medium))
-                    .foregroundStyle(.primary.opacity(0.72))
-                    .multilineTextAlignment(.center)
-            }
-        }
-        .frame(maxWidth: .infinity)
-        .padding(.vertical, 30)
-        .padding(.horizontal, 24)
-        .background(.ultraThinMaterial, in: RoundedRectangle(cornerRadius: 30, style: .continuous))
-        .overlay(
-            RoundedRectangle(cornerRadius: 30, style: .continuous)
-                .stroke(Color.white.opacity(0.24), lineWidth: 1)
-        )
-        .shadow(color: .black.opacity(0.10), radius: 18, x: 0, y: 8)
     }
 }
 
@@ -941,5 +1619,19 @@ private extension StepBackdropMapView {
 
             return view
         }
+    }
+}
+
+private extension Calendar {
+    static var memoActivity: Calendar {
+        var calendar = Calendar(identifier: .gregorian)
+        calendar.locale = Locale(identifier: "ja_JP")
+        calendar.firstWeekday = 2
+        return calendar
+    }
+
+    func startOfWeek(for date: Date) -> Date {
+        let components = dateComponents([.yearForWeekOfYear, .weekOfYear], from: date)
+        return self.date(from: components) ?? startOfDay(for: date)
     }
 }
