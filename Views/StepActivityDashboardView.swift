@@ -724,6 +724,10 @@ private struct MemoStepActivityChartCard: View {
         primaryTextColor.opacity(0.28)
     }
 
+    private var referenceLineLabelBackground: Color {
+        Color.black.opacity(0.22)
+    }
+
     var body: some View {
         VStack(alignment: .leading, spacing: 14) {
             Chart {
@@ -742,8 +746,15 @@ private struct MemoStepActivityChartCard: View {
                         .lineStyle(StrokeStyle(lineWidth: 1, dash: [5, 5]))
                         .annotation(position: .trailing, alignment: .center) {
                             Text(summary.referenceLineText)
-                                .font(.system(size: 12, weight: .medium))
-                                .foregroundStyle(secondaryTextColor)
+                                .font(.system(size: 11, weight: .semibold, design: .rounded))
+                                .foregroundStyle(primaryTextColor)
+                                .padding(.horizontal, 8)
+                                .padding(.vertical, 4)
+                                .background(
+                                    Capsule()
+                                        .fill(referenceLineLabelBackground)
+                                )
+                                .offset(x: -18)
                         }
                 }
             }
@@ -760,9 +771,10 @@ private struct MemoStepActivityChartCard: View {
                 }
             }
             .chartYAxis {
-                AxisMarks(position: .trailing) { value in
+                AxisMarks(position: .trailing, values: summary.yAxisMarkValues) { value in
                     AxisGridLine(stroke: StrokeStyle(lineWidth: 1))
                         .foregroundStyle(axisGridColor)
+
                     AxisValueLabel {
                         if let doubleValue = value.as(Double.self) {
                             Text(summary.yAxisText(for: doubleValue))
@@ -1166,6 +1178,7 @@ private struct MemoStepActivitySummary {
     let chartEntries: [MemoStepActivityChartEntry]
     let referenceLineValue: Double?
     let chartUpperBound: Double
+    let yAxisStep: Double
 
     private let activeRecords: [WorkoutSessionRecord]
 
@@ -1192,10 +1205,12 @@ private struct MemoStepActivitySummary {
             self.referenceLineValue = nonZeroEntries.reduce(0) { $0 + $1.distanceKilometers } / Double(nonZeroEntries.count)
         }
 
-        self.chartUpperBound = MemoStepActivitySummary.chartUpperBound(
+        let chartScale = MemoStepActivitySummary.chartScale(
             for: chartEntries,
             referenceLineValue: referenceLineValue
         )
+        self.chartUpperBound = chartScale.upperBound
+        self.yAxisStep = chartScale.step
     }
 
     var distanceText: String {
@@ -1221,6 +1236,20 @@ private struct MemoStepActivitySummary {
         chartEntries.filter(\.showsAxisLabel).map(\.axisValue)
     }
 
+    var yAxisMarkValues: [Double] {
+        guard chartUpperBound > 0, yAxisStep > 0 else { return [0] }
+
+        var values = stride(from: 0.0, through: chartUpperBound, by: yAxisStep).map { value in
+            (value * 10).rounded() / 10
+        }
+
+        if values.last != chartUpperBound {
+            values.append(chartUpperBound)
+        }
+
+        return values
+    }
+
     var hasNoActivityInRange: Bool {
         activeRecords.isEmpty
     }
@@ -1231,8 +1260,15 @@ private struct MemoStepActivitySummary {
     }
 
     func yAxisText(for value: Double) -> String {
-        if value == 0 { return "0km" }
-        return String(format: "%.0f", value)
+        if value == 0 {
+            return "0km"
+        }
+
+        if value.truncatingRemainder(dividingBy: 1) == 0 {
+            return String(format: "%.0f", value)
+        }
+
+        return String(format: "%.1f", value)
     }
 
     static func allPeriodTitle(records: [WorkoutSessionRecord], now: Date) -> String {
@@ -1355,12 +1391,15 @@ private struct MemoStepActivitySummary {
         return result
     }
 
-    private static func chartUpperBound(
+    private static func chartScale(
         for entries: [MemoStepActivityChartEntry],
         referenceLineValue: Double?
-    ) -> Double {
+    ) -> (upperBound: Double, step: Double) {
         let maxValue = max(entries.map(\.distanceKilometers).max() ?? 0, referenceLineValue ?? 0)
-        guard maxValue > 0 else { return 2 }
+
+        guard maxValue > 0 else {
+            return (upperBound: 2, step: 1)
+        }
 
         let step: Double
         switch maxValue {
@@ -1376,7 +1415,10 @@ private struct MemoStepActivitySummary {
             step = 10
         }
 
-        return ceil(maxValue / step) * step
+        return (
+            upperBound: ceil(maxValue / step) * step,
+            step: step
+        )
     }
 }
 
