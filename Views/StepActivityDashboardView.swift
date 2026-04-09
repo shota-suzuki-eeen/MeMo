@@ -19,13 +19,13 @@ struct MemoStepActivityDashboardView: View {
     let bottomInset: CGFloat
     let characterAssetName: String
     let plainBackgroundAssetName: String
+    @Binding var isPickerPresented: Bool
     let onTapRun: () -> Void
 
     @State private var selectedRange: MemoStepActivityRange = .week
     @State private var selectedWeekOptionID: String?
     @State private var selectedMonthOptionID: String?
     @State private var selectedYearOptionID: String?
-    @State private var isPickerPresented = false
     @State private var pickerSelectionID = ""
 
     @State private var selectedRecordForDetail: WorkoutSessionRecord?

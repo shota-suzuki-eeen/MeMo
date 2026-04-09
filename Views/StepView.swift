@@ -35,6 +35,7 @@ struct StepView: View {
     @State private var countdownTask: Task<Void, Never>?
 
     @State private var selectedScreen: DisplayScreen = .run
+    @State private var isActivityPickerPresented = false
 
     private enum DisplayScreen {
         case run
@@ -125,7 +126,9 @@ struct StepView: View {
     }
 
     private var shouldShowScreenSwitcher: Bool {
-        isPrimarySwitcherScreen && countdownNumber == nil
+        isPrimarySwitcherScreen &&
+        countdownNumber == nil &&
+        !(selectedScreen == .activity && isActivityPickerPresented)
     }
 
     private var shouldShowFocusedMapBackground: Bool {
@@ -239,6 +242,7 @@ struct StepView: View {
                 isSelected: selectedScreen == .run
             ) {
                 bgmManager.playSE(.push)
+                isActivityPickerPresented = false
                 withAnimation(.spring(response: 0.28, dampingFraction: 0.86)) {
                     selectedScreen = .run
                 }
@@ -306,9 +310,11 @@ struct StepView: View {
             records: workoutRecords,
             bottomInset: Layout.activityBottomPadding,
             characterAssetName: PetMaster.assetName(for: state.normalizedCurrentPetID),
-            plainBackgroundAssetName: "Home_background"
+            plainBackgroundAssetName: "Home_background",
+            isPickerPresented: $isActivityPickerPresented
         ) {
             bgmManager.playSE(.push)
+            isActivityPickerPresented = false
             withAnimation(.spring(response: 0.28, dampingFraction: 0.86)) {
                 selectedScreen = .run
             }
@@ -557,6 +563,7 @@ struct StepView: View {
 
     private func handleStartButtonTapped() {
         selectedScreen = .run
+        isActivityPickerPresented = false
         bgmManager.playSE(.push)
 
         switch viewModel.prepareWorkoutStart() {
@@ -654,13 +661,13 @@ private struct StepActivityDashboardView: View {
 
     let records: [WorkoutSessionRecord]
     let bottomInset: CGFloat
+    @Binding var isPickerPresented: Bool
     let onTapRun: () -> Void
 
     @State private var selectedRange: StepActivityRange = .week
     @State private var selectedWeekOptionID: String?
     @State private var selectedMonthOptionID: String?
     @State private var selectedYearOptionID: String?
-    @State private var isPickerPresented = false
     @State private var pickerSelectionID = ""
 
     private var summary: StepActivitySummary {
@@ -889,6 +896,9 @@ private struct StepActivityDashboardView: View {
             }
         }
         .animation(.spring(response: 0.28, dampingFraction: 0.88), value: isPickerPresented)
+        .onDisappear {
+            isPickerPresented = false
+        }
     }
 
     private func resolvedOption(
