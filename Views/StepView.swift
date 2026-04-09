@@ -302,9 +302,11 @@ struct StepView: View {
     }
 
     private var activityContentView: some View {
-        StepActivityDashboardView(
+        MemoStepActivityDashboardView(
             records: workoutRecords,
-            bottomInset: Layout.activityBottomPadding
+            bottomInset: Layout.activityBottomPadding,
+            characterAssetName: PetMaster.assetName(for: state.normalizedCurrentPetID),
+            plainBackgroundAssetName: "Home_background"
         ) {
             bgmManager.playSE(.push)
             withAnimation(.spring(response: 0.28, dampingFraction: 0.86)) {
