@@ -2,7 +2,7 @@
 //  ShopViewModel.swift
 //  MeMo
 //
-//  Created by shota suzuki on 2026/03/20.
+//  Updated for gacha food integration.
 //
 
 import Foundation
@@ -26,9 +26,6 @@ struct ShopFoodItem: Codable, Identifiable, Equatable {
 
 @MainActor
 final class ShopViewModel: ObservableObject {
-    // NOTE:
-    // 既存の ShopView 側との互換のため名前は維持する。
-    // 実際の意味は「所持歩数通貨」。
     @Published var displayedWalletKcal: Int = 0
 
     @Published var toastMessage: String?
@@ -51,9 +48,6 @@ final class ShopViewModel: ObservableObject {
         return try? JSONDecoder().decode([ShopFoodItem].self, from: data)
     }
 
-    // ✅ 追加：所持数（インベントリ数）を取得するヘルパー
-    // - 「在庫（=当日購入可否）」とは別概念なので、stock は触らない
-    // - 表示側が「所持数」を出したいときに呼ぶ
     func ownedCount(for itemID: String, state: AppState) -> Int {
         state.foodCount(foodId: itemID)
     }
@@ -99,7 +93,6 @@ final class ShopViewModel: ObservableObject {
         toast("\(items[idx].name) を購入しました（-\(priceSteps)歩）")
     }
 
-    /// ✅ Reward_food（広告視聴完了後）に呼ばれる想定
     func rewardResetShopByAd(state: AppState, maxPerDay: Int) {
         handleDayRolloverIfNeeded(state: state)
         ensureDailyShopIfNeeded(state: state)
@@ -116,8 +109,6 @@ final class ShopViewModel: ObservableObject {
         Haptics.tap(style: .light)
         toast("ショップをリセットしました")
     }
-
-    // --- 以降は既存のまま（現状の機能を壊さない） ---
 
     func buyEgg(state: AppState) {
         handleDayRolloverIfNeeded(state: state)
@@ -220,7 +211,7 @@ final class ShopViewModel: ObservableObject {
     }
 
     private func drawDailySix() -> [ShopFoodItem] {
-        let picked = Array(FoodCatalog.all.shuffled().prefix(6))
+        let picked = Array(FoodCatalog.shopEligibleItems.shuffled().prefix(6))
         return picked.map {
             .init(
                 id: $0.id,

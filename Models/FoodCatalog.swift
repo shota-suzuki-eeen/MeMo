@@ -2,22 +2,23 @@
 //  FoodCatalog.swift
 //  MeMo
 //
-//  Created by shota suzuki on 2026/03/20.
+//  Updated for gacha food integration.
 //
 
 import Foundation
 
 enum FoodCatalog {
     struct FoodItem: Identifiable, Hashable {
-        let id: String          // 安定ID（保存用）
+        let id: String
         let name: String
 
         // NOTE:
-        // 既存コード互換のためプロパティ名は残す。
+        // 既存コード互換のためプロパティ名は維持する。
         // 仕様上の意味は「販売価格（=消費する所持歩数）」。
         let priceKcal: Int
 
         let assetName: String
+        let isShopEligible: Bool
 
         var priceSteps: Int {
             max(0, priceKcal)
@@ -25,26 +26,41 @@ enum FoodCatalog {
     }
 
     static let all: [FoodItem] = [
-        .init(id: "onigiri",     name: "おにぎり",       priceKcal: 190, assetName: "food_onigiri"),
-        .init(id: "gyuudon",     name: "牛丼",           priceKcal: 650, assetName: "food_gyuudon"),
-        .init(id: "karaage",     name: "唐揚げ",         priceKcal: 450, assetName: "food_karaage"),
-        .init(id: "sandowitch",  name: "サンドウィッチ", priceKcal: 380, assetName: "food_sandowitch"),
-        .init(id: "nabe",        name: "お鍋",           priceKcal: 500, assetName: "food_nabe"),
-        .init(id: "barger",      name: "ハンバーガー",   priceKcal: 490, assetName: "food_barger"),
-        .init(id: "ra-men",      name: "ラーメン",       priceKcal: 480, assetName: "food_ra-men"),
-        .init(id: "sute-ki",     name: "ステーキ",       priceKcal: 550, assetName: "food_sute-ki"),
-        .init(id: "pizza",       name: "ピザ",           priceKcal: 640, assetName: "food_pizza"),
-        .init(id: "cake",        name: "ケーキ",         priceKcal: 480, assetName: "food_cake"),
-        .init(id: "poteti",      name: "ポテトチップス", priceKcal: 325, assetName: "food_poteti"),
-        .init(id: "icecream",    name: "ソフトクリーム", priceKcal: 250, assetName: "food_icecream"),
-        .init(id: "coffee",      name: "コーヒー",       priceKcal: 8,   assetName: "food_coffee"),
-        .init(id: "coke",        name: "コーラ",         priceKcal: 160, assetName: "food_coke"),
-        .init(id: "carry",       name: "カレーライス",   priceKcal: 750, assetName: "food_carry"),
-        .init(id: "sarad",       name: "サラダ",         priceKcal: 150, assetName: "food_sarad"),
-        .init(id: "yo-guruto",   name: "ヨーグルト",     priceKcal: 56,  assetName: "food_yo-guruto"),
-        .init(id: "pan",         name: "パン",           priceKcal: 150, assetName: "food_pan"),
-        .init(id: "beer",        name: "ビール",         priceKcal: 135, assetName: "food_beer"),
+        // N（ショップ対象）
+        .init(id: "barger",      name: "ハンバーガー",   priceKcal: 490, assetName: "food_barger",      isShopEligible: true),
+        .init(id: "beer",        name: "ビール",         priceKcal: 135, assetName: "food_beer",        isShopEligible: true),
+        .init(id: "cake",        name: "いちごケーキ",   priceKcal: 480, assetName: "food_cake",        isShopEligible: true),
+        .init(id: "carry",       name: "カレー",         priceKcal: 750, assetName: "food_carry",       isShopEligible: true),
+        .init(id: "coffee",      name: "コーヒー",       priceKcal:   8, assetName: "food_coffee",      isShopEligible: true),
+        .init(id: "coke",        name: "コーラ",         priceKcal: 160, assetName: "food_coke",        isShopEligible: true),
+        .init(id: "gyuudon",     name: "牛丼",           priceKcal: 650, assetName: "food_gyuudon",     isShopEligible: true),
+        .init(id: "icecream",    name: "ソフトクリーム", priceKcal: 250, assetName: "food_icecream",    isShopEligible: true),
+        .init(id: "karaage",     name: "唐揚げ",         priceKcal: 450, assetName: "food_karaage",     isShopEligible: true),
+        .init(id: "nabe",        name: "お鍋",           priceKcal: 500, assetName: "food_nabe",        isShopEligible: true),
+        .init(id: "onigiri",     name: "おにぎり",       priceKcal: 190, assetName: "food_onigiri",     isShopEligible: true),
+        .init(id: "pan",         name: "パン",           priceKcal: 150, assetName: "food_pan",         isShopEligible: true),
+        .init(id: "pizza",       name: "ピザ",           priceKcal: 640, assetName: "food_pizza",       isShopEligible: true),
+        .init(id: "poteti",      name: "ポテトチップス", priceKcal: 325, assetName: "food_poteti",      isShopEligible: true),
+        .init(id: "ra-men",      name: "ラーメン",       priceKcal: 480, assetName: "food_ra-men",      isShopEligible: true),
+        .init(id: "sandowitch",  name: "サンドウィッチ", priceKcal: 380, assetName: "food_sandowitch",  isShopEligible: true),
+        .init(id: "sarad",       name: "サラダ",         priceKcal: 150, assetName: "food_sarad",       isShopEligible: true),
+        .init(id: "sute-ki",     name: "ステーキ",       priceKcal: 550, assetName: "food_sute-ki",     isShopEligible: true),
+        .init(id: "yo-guruto",   name: "ヨーグルト",     priceKcal:  56, assetName: "food_yo-guruto",   isShopEligible: true),
+
+        // R（ガチャ専用）
+        .init(id: "matsuzakaBeef", name: "松坂牛",             priceKcal: 0, assetName: "food_matsuzakaBeef", isShopEligible: false),
+        .init(id: "spinyLobster",  name: "伊勢海老",           priceKcal: 0, assetName: "food_spinyLobster",  isShopEligible: false),
+        .init(id: "shineMuscat",   name: "シャインマスカット", priceKcal: 0, assetName: "food_shineMuscat",   isShopEligible: false),
+        .init(id: "eel",           name: "鰻",                 priceKcal: 0, assetName: "food_eel",           isShopEligible: false),
+        .init(id: "snowCrab",      name: "ズワイガニ",         priceKcal: 0, assetName: "food_snowCrab",      isShopEligible: false),
+        .init(id: "otoro",         name: "大トロ",             priceKcal: 0, assetName: "food_otoro",         isShopEligible: false),
+        .init(id: "cantaloupe",    name: "マスクメロン",       priceKcal: 0, assetName: "food_cantaloupe",    isShopEligible: false),
+        .init(id: "matsutake",     name: "松茸",               priceKcal: 0, assetName: "food_matsutake",     isShopEligible: false),
     ]
+
+    static var shopEligibleItems: [FoodItem] {
+        all.filter(\.isShopEligible)
+    }
 
     static func byId(_ id: String) -> FoodItem? {
         all.first { $0.id == id }

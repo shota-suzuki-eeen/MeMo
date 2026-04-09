@@ -2,10 +2,14 @@
 //  GachaView.swift
 //  MeMo
 //
-//  Updated on 2026/04/06.
+//  Updated for the step-based gacha specification.
+//  NOTE:
+//  - 排出率は現行 main の 66 / 33 / 1 をベースに維持しています。
+//  - 広告視聴は SDK 接続前提のため、このファイルでは「視聴成功後に呼ばれる処理」を直接実行します。
 //
 
 import SwiftUI
+import SwiftData
 
 fileprivate enum GachaRarity: String, CaseIterable, Identifiable {
     case blue
@@ -16,25 +20,17 @@ fileprivate enum GachaRarity: String, CaseIterable, Identifiable {
 
     var displayName: String {
         switch self {
-        case .blue: return "ブルー"
-        case .red: return "レッド"
-        case .gold: return "ゴールド"
-        }
-    }
-
-    var itemRankText: String {
-        switch self {
         case .blue: return "N"
         case .red: return "R"
-        case .gold: return "SSR"
+        case .gold: return "SR"
         }
     }
 
-    var probability: Double {
+    var accentColor: Color {
         switch self {
-        case .blue: return 0.66
-        case .red: return 0.33
-        case .gold: return 0.01
+        case .blue: return Color(red: 0.34, green: 0.67, blue: 1.0)
+        case .red: return Color(red: 1.0, green: 0.39, blue: 0.35)
+        case .gold: return Color(red: 1.0, green: 0.84, blue: 0.18)
         }
     }
 
@@ -50,36 +46,115 @@ fileprivate enum GachaRarity: String, CaseIterable, Identifiable {
         "\(capsuleAssetName)_open"
     }
 
-    var accentColor: Color {
+    var baseWeight: Double {
         switch self {
-        case .blue: return Color(red: 0.34, green: 0.67, blue: 1.0)
-        case .red: return Color(red: 1.0, green: 0.39, blue: 0.35)
-        case .gold: return Color(red: 1.0, green: 0.84, blue: 0.18)
+        case .blue: return 66
+        case .red: return 33
+        case .gold: return 1
         }
     }
+}
 
-    var dummyNames: [String] {
-        switch self {
-        case .blue:
-            return ["ふつうのメモ", "ちいさなメモ", "あおいしるし", "みならいバッジ", "いつものかけら"]
-        case .red:
-            return ["きらめきメモ", "なかよしバッジ", "レアなかけら", "しあわせのしるし", "ひみつのしおり"]
-        case .gold:
-            return ["でんせつのメモ", "ゴールドバッジ", "まぼろしのかけら", "きせきのしおり", "ひかりのしるし"]
-        }
-    }
+fileprivate enum GachaRewardKind: Hashable {
+    case food(foodID: String)
+    case character(petID: String)
+    case specialItem(id: String)
 }
 
 fileprivate struct GachaReward: Identifiable, Hashable {
     let id = UUID()
     let rarity: GachaRarity
+    let kind: GachaRewardKind
     let title: String
     let subtitle: String
     let imageName: String
 }
 
+fileprivate struct GachaProbabilityRow: Identifiable {
+    let rarity: GachaRarity
+    let percentageText: String
+
+    var id: String { rarity.id }
+}
+
+fileprivate enum GachaCatalog {
+    static let normalFoodIDs: [String] = [
+        "barger", "beer", "cake", "carry", "coffee", "coke", "gyuudon", "icecream", "karaage",
+        "nabe", "onigiri", "pan", "pizza", "poteti", "ra-men", "sandowitch", "sarad", "sute-ki", "yo-guruto"
+    ]
+
+    static let rareFoodIDs: [String] = [
+        "matsuzakaBeef", "spinyLobster", "shineMuscat", "eel", "snowCrab", "otoro", "cantaloupe", "matsutake"
+    ]
+
+    static let toiletItemID: String = "wc"
+
+    static func remainingCharacters(state: AppState) -> [PetMasterItem] {
+        let owned = Set(state.ownedPetIDs())
+        return PetMaster.all.filter { !owned.contains($0.id) }
+    }
+
+    static func makeReward(for rarity: GachaRarity, state: AppState) -> GachaReward? {
+        switch rarity {
+        case .blue:
+            guard let foodID = normalFoodIDs.randomElement(),
+                  let food = FoodCatalog.byId(foodID) else { return nil }
+            return GachaReward(
+                rarity: .blue,
+                kind: .food(foodID: food.id),
+                title: food.name,
+                subtitle: "ごはん / N",
+                imageName: food.assetName
+            )
+
+        case .red:
+            let redPool: [GachaReward] = rareFoodIDs.compactMap {
+                guard let food = FoodCatalog.byId($0) else { return nil }
+                return GachaReward(
+                    rarity: .red,
+                    kind: .food(foodID: food.id),
+                    title: food.name,
+                    subtitle: "ごはん / R",
+                    imageName: food.assetName
+                )
+            } + [
+                GachaReward(
+                    rarity: .red,
+                    kind: .specialItem(id: toiletItemID),
+                    title: "トイレ",
+                    subtitle: "スペシャル / R",
+                    imageName: toiletItemID
+                )
+            ]
+            return redPool.randomElement()
+
+        case .gold:
+            let candidates = remainingCharacters(state: state)
+            guard let pet = candidates.randomElement() else { return nil }
+
+            let resolvedName: String = {
+                let trimmed = pet.name.trimmingCharacters(in: .whitespacesAndNewlines)
+                if trimmed.isEmpty || trimmed == "*" {
+                    return PetMaster.assetName(for: pet.id)
+                }
+                return trimmed
+            }()
+
+            return GachaReward(
+                rarity: .gold,
+                kind: .character(petID: pet.id),
+                title: resolvedName,
+                subtitle: "キャラクター / SR",
+                imageName: PetMaster.assetName(for: pet.id)
+            )
+        }
+    }
+}
+
 struct GachaView: View {
     @Environment(\.dismiss) private var dismiss
+    @Environment(\.modelContext) private var modelContext
+    @Query private var states: [AppState]
 
     @State private var phase: Phase = .idle
     @State private var drawMode: DrawMode = .single
@@ -89,6 +164,10 @@ struct GachaView: View {
     @State private var tapPromptAnimating = false
     @State private var overlayOpacity: Double = 0.0
     @State private var rollTask: Task<Void, Never>?
+    @State private var lastFreeAdSlot: GachaFreeAdSlot?
+    @State private var lastDrawWasFreeAd: Bool = false
+    @State private var toastMessage: String?
+    @State private var showToast: Bool = false
 
     private enum Phase {
         case idle
@@ -110,6 +189,20 @@ struct GachaView: View {
             case .ten: return 10
             }
         }
+
+        var cost: Int {
+            switch self {
+            case .single: return 500
+            case .ten: return 5_000
+            }
+        }
+
+        var title: String {
+            switch self {
+            case .single: return "1回"
+            case .ten: return "10連"
+            }
+        }
     }
 
     private enum Layout {
@@ -127,11 +220,79 @@ struct GachaView: View {
 
         static let gridSpacing: CGFloat = 10
         static let gridCornerRadius: CGFloat = 18
-        static let zoomCardMaxWidth: CGFloat = 300
+    }
+
+    private var state: AppState? {
+        states.first
     }
 
     private var isOverlayVisible: Bool {
         phase != .idle
+    }
+
+    private var canGoldAppear: Bool {
+        guard let state else { return false }
+        return !GachaCatalog.remainingCharacters(state: state).isEmpty
+    }
+
+    private var probabilityRows: [GachaProbabilityRow] {
+        let eligibleRarities: [GachaRarity] = canGoldAppear ? [.blue, .red, .gold] : [.blue, .red]
+        let totalWeight = eligibleRarities.map(\.baseWeight).reduce(0, +)
+
+        return eligibleRarities.map { rarity in
+            let percentage = totalWeight > 0 ? (rarity.baseWeight / totalWeight) * 100 : 0
+            return GachaProbabilityRow(rarity: rarity, percentageText: formattedProbability(percentage))
+        }
+    }
+
+    private var walletStepsText: String {
+        guard let state else { return "-" }
+        return "\(state.walletSteps)歩"
+    }
+
+    private var pityDescriptionText: String {
+        guard let state else { return "-" }
+        if canGoldAppear == false {
+            return "全キャラ獲得済み / SR排出なし"
+        }
+        if state.gachaGuaranteedGoldNext {
+            return "次回SR確定"
+        }
+        return "\(state.gachaPityCounter)/150"
+    }
+
+    private var freeSlotStatusText: String {
+        guard let state else { return "-" }
+        let now = Date()
+        state.gachaResetIfNeeded(now: now)
+
+        if let slot = state.gachaAvailableFreeAdSlot(now: now) {
+            return "\(slot.title)の枠が利用可能（\(slot.windowText)）"
+        }
+        if let current = GachaFreeAdSlot.current(at: now) {
+            return "\(current.title)の枠は使用済み（\(current.windowText)）"
+        }
+        return "広告枠外です（5:00-10:00 / 10:00-15:00 / 15:00-23:00）"
+    }
+
+    private var wcCountText: String {
+        guard let state else { return "0" }
+        return "\(state.gachaSpecialItemCount(id: GachaCatalog.toiletItemID))"
+    }
+
+    private var canSingleDraw: Bool {
+        guard let state else { return false }
+        return phase == .idle && state.walletSteps >= DrawMode.single.cost
+    }
+
+    private var canTenDraw: Bool {
+        guard let state else { return false }
+        return phase == .idle && state.walletSteps >= DrawMode.ten.cost
+    }
+
+    private var canFreeTenDraw: Bool {
+        guard let state else { return false }
+        return phase == .idle && state.gachaCanUseFreeTenDraw(now: Date())
     }
 
     var body: some View {
@@ -166,12 +327,23 @@ struct GachaView: View {
                 if let reward = revealOverlayReward {
                     enlargedRewardOverlay(reward: reward, safeTop: safeTop, safeBottom: safeBottom)
                 }
+
+                if showToast, let toastMessage {
+                    VStack {
+                        Spacer()
+                        ToastView(message: toastMessage)
+                            .padding(.bottom, max(24, safeBottom + 12))
+                    }
+                    .transition(.move(edge: .bottom).combined(with: .opacity))
+                }
             }
             .ignoresSafeArea()
         }
         .statusBarHidden()
         .onAppear {
             tapPromptAnimating = true
+            state?.ensureInitialPetsIfNeeded()
+            state?.gachaResetIfNeeded(now: Date())
         }
         .onDisappear {
             rollTask?.cancel()
@@ -242,7 +414,10 @@ struct GachaView: View {
                     .frame(width: machineWidth)
                     .padding(.top, 4)
 
-                descriptionPanel
+                statusPanel
+                    .frame(maxWidth: contentWidth)
+
+                probabilityPanel
                     .frame(maxWidth: contentWidth)
 
                 actionButtons
@@ -254,51 +429,79 @@ struct GachaView: View {
         }
     }
 
-    private var descriptionPanel: some View {
-        VStack(spacing: 10) {
-            Text("カプセルを回してダミーアイテムを獲得しよう")
-                .font(.system(size: 18, weight: .bold))
-                .foregroundStyle(.white)
-                .multilineTextAlignment(.center)
-
-            VStack(alignment: .leading, spacing: 6) {
-                rarityRow(rarity: .blue, text: "66%")
-                rarityRow(rarity: .red, text: "33%")
-                rarityRow(rarity: .gold, text: "1%")
-            }
-            .padding(14)
-            .frame(maxWidth: .infinity, alignment: .leading)
-            .background(Color.black.opacity(0.35), in: RoundedRectangle(cornerRadius: 18, style: .continuous))
+    private var statusPanel: some View {
+        VStack(alignment: .leading, spacing: 12) {
+            statusRow(title: "所持歩数", value: walletStepsText)
+            statusRow(title: "天井", value: pityDescriptionText)
+            statusRow(title: "広告10連", value: freeSlotStatusText)
+            statusRow(title: "トイレ所持数", value: wcCountText)
         }
+        .padding(14)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .background(Color.black.opacity(0.35), in: RoundedRectangle(cornerRadius: 18, style: .continuous))
     }
 
-    private func rarityRow(rarity: GachaRarity, text: String) -> some View {
-        HStack(spacing: 10) {
-            Circle()
-                .fill(rarity.accentColor)
-                .frame(width: 10, height: 10)
-
-            Text("\(rarity.displayName) : \(text)")
-                .font(.system(size: 14, weight: .semibold))
+    private var probabilityPanel: some View {
+        VStack(alignment: .leading, spacing: 10) {
+            Text("排出確率")
+                .font(.system(size: 18, weight: .bold))
                 .foregroundStyle(.white)
 
-            Spacer()
+            ForEach(probabilityRows) { row in
+                HStack(spacing: 10) {
+                    Circle()
+                        .fill(row.rarity.accentColor)
+                        .frame(width: 10, height: 10)
+
+                    Text("\(row.rarity.displayName) : \(row.percentageText)")
+                        .font(.system(size: 14, weight: .semibold))
+                        .foregroundStyle(.white)
+
+                    Spacer()
+                }
+            }
+
+            if canGoldAppear == false {
+                Text("※ 全キャラクター獲得済みのため、現在はSRが排出されません。")
+                    .font(.system(size: 12, weight: .medium))
+                    .foregroundStyle(.white.opacity(0.82))
+            }
         }
+        .padding(14)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .background(Color.black.opacity(0.35), in: RoundedRectangle(cornerRadius: 18, style: .continuous))
     }
 
     private var actionButtons: some View {
-        HStack(spacing: 14) {
-            drawButton(title: "1回", accent: .white, mode: .single)
-            drawButton(title: "10回", accent: Color(red: 1.0, green: 0.86, blue: 0.24), mode: .ten)
+        VStack(spacing: 12) {
+            HStack(spacing: 14) {
+                drawButton(
+                    title: "1回 / 500歩",
+                    accent: .white,
+                    isEnabled: canSingleDraw,
+                    action: { startPaidDraw(mode: .single) }
+                )
+
+                drawButton(
+                    title: "10連 / 5,000歩",
+                    accent: Color(red: 1.0, green: 0.86, blue: 0.24),
+                    isEnabled: canTenDraw,
+                    action: { startPaidDraw(mode: .ten) }
+                )
+            }
+
+            drawButton(
+                title: canFreeTenDraw ? "広告で無料10連" : "広告10連（時間外 / 使用済み）",
+                accent: Color(red: 0.45, green: 1.0, blue: 0.78),
+                isEnabled: canFreeTenDraw,
+                action: performRewardedAdThenFreeTenDraw
+            )
         }
-        .disabled(phase != .idle)
         .opacity(phase == .idle ? 1 : 0.5)
     }
 
-    private func drawButton(title: String, accent: Color, mode: DrawMode) -> some View {
-        Button {
-            startDraw(mode: mode)
-        } label: {
+    private func drawButton(title: String, accent: Color, isEnabled: Bool, action: @escaping () -> Void) -> some View {
+        Button(action: action) {
             ZStack {
                 RoundedRectangle(cornerRadius: Layout.buttonCornerRadius, style: .continuous)
                     .fill(Color.black.opacity(0.48))
@@ -307,13 +510,145 @@ struct GachaView: View {
                     .stroke(accent.opacity(0.95), lineWidth: 2)
 
                 Text(title)
-                    .font(.system(size: 24, weight: .black))
+                    .font(.system(size: 20, weight: .black))
                     .foregroundStyle(accent)
+                    .multilineTextAlignment(.center)
+                    .padding(.horizontal, 10)
             }
             .frame(maxWidth: .infinity)
             .frame(height: Layout.buttonHeight)
         }
         .buttonStyle(.plain)
+        .disabled(!isEnabled)
+        .opacity(isEnabled ? 1 : 0.45)
+    }
+
+    private func statusRow(title: String, value: String) -> some View {
+        HStack(alignment: .top, spacing: 10) {
+            Text(title)
+                .font(.system(size: 14, weight: .bold))
+                .foregroundStyle(.white.opacity(0.88))
+                .frame(width: 78, alignment: .leading)
+
+            Text(value)
+                .font(.system(size: 14, weight: .semibold))
+                .foregroundStyle(.white)
+                .multilineTextAlignment(.leading)
+
+            Spacer(minLength: 0)
+        }
+    }
+
+    private func startPaidDraw(mode: DrawMode) {
+        guard let state else { return }
+        guard phase == .idle else { return }
+        guard state.walletSteps >= mode.cost else {
+            showToast("歩数が足りません")
+            return
+        }
+
+        state.gachaResetIfNeeded(now: Date())
+        state.walletSteps -= mode.cost
+        beginDraw(mode: mode, isFreeAd: false, freeSlot: nil)
+    }
+
+    private func performRewardedAdThenFreeTenDraw() {
+        // TODO: 実アプリでは RewardedAd の完了コールバック後に beginFreeTenDraw() を呼ぶ。
+        beginFreeTenDraw()
+    }
+
+    private func beginFreeTenDraw() {
+        guard let state else { return }
+        guard phase == .idle else { return }
+
+        state.gachaResetIfNeeded(now: Date())
+        guard let slot = state.gachaConsumeFreeTenDraw(now: Date()) else {
+            showToast("現在利用できる広告10連はありません")
+            return
+        }
+
+        beginDraw(mode: .ten, isFreeAd: true, freeSlot: slot)
+    }
+
+    private func beginDraw(mode: DrawMode, isFreeAd: Bool, freeSlot: GachaFreeAdSlot?) {
+        guard let state else { return }
+
+        rollTask?.cancel()
+        rollTask = nil
+
+        drawMode = mode
+        lastDrawWasFreeAd = isFreeAd
+        lastFreeAdSlot = freeSlot
+        phase = .rolling
+        rewards = makeRewards(count: mode.count, state: state)
+        revealOverlayReward = nil
+        machineAnimationStart = Date()
+        tapPromptAnimating = true
+
+        withAnimation(.easeOut(duration: 0.2)) {
+            overlayOpacity = 0.82
+        }
+
+        rollTask = Task {
+            try? await Task.sleep(nanoseconds: 1_150_000_000)
+            guard !Task.isCancelled else { return }
+            await MainActor.run {
+                phase = .waitingTap
+            }
+        }
+    }
+
+    private func makeRewards(count: Int, state: AppState) -> [GachaReward] {
+        guard count > 0 else { return [] }
+
+        return (0..<count).compactMap { _ in
+            let rarity = rollRarity(state: state)
+            guard let reward = GachaCatalog.makeReward(for: rarity, state: state) else { return nil }
+            applyReward(reward, state: state)
+            return reward
+        }
+    }
+
+    private func rollRarity(state: AppState) -> GachaRarity {
+        let goldCandidates = GachaCatalog.remainingCharacters(state: state)
+        let hasGold = !goldCandidates.isEmpty
+
+        if hasGold, state.gachaGuaranteedGoldNext {
+            return .gold
+        }
+
+        let eligible: [GachaRarity] = hasGold ? [.blue, .red, .gold] : [.blue, .red]
+        let totalWeight = eligible.map(\.baseWeight).reduce(0, +)
+        let roll = Double.random(in: 0..<totalWeight)
+
+        var cumulative: Double = 0
+        for rarity in eligible {
+            cumulative += rarity.baseWeight
+            if roll < cumulative {
+                return rarity
+            }
+        }
+        return eligible.last ?? .blue
+    }
+
+    private func applyReward(_ reward: GachaReward, state: AppState) {
+        switch reward.kind {
+        case .food(let foodID):
+            _ = state.addFood(foodId: foodID, count: 1)
+            state.gachaAdvancePityAfterNonGold(threshold: 150)
+
+        case .specialItem(let id):
+            _ = state.gachaAddSpecialItem(id: id, count: 1)
+            state.gachaAdvancePityAfterNonGold(threshold: 150)
+
+        case .character(let petID):
+            var owned = state.ownedPetIDs()
+            if !owned.contains(petID) {
+                owned.append(petID)
+                state.setOwnedPetIDs(owned)
+            }
+            state.gachaResetPity()
+        }
     }
 
     @ViewBuilder
@@ -418,7 +753,7 @@ struct GachaView: View {
                 startDate: machineAnimationStart
             )
 
-            Text(drawMode == .single ? "ガチャを回しています…" : "10連ガチャを回しています…")
+            Text(lastDrawWasFreeAd ? "広告10連を回しています…" : "\(drawMode.title)ガチャを回しています…")
                 .font(.system(size: 18, weight: .bold))
                 .foregroundStyle(.white)
                 .padding(.horizontal, 18)
@@ -450,7 +785,15 @@ struct GachaView: View {
                 )
             }
 
-            TapPromptView(isAnimating: tapPromptAnimating, count: 1)
+            VStack(spacing: 10) {
+                TapPromptView(isAnimating: tapPromptAnimating, count: 1)
+
+                if let slot = lastFreeAdSlot, lastDrawWasFreeAd {
+                    Text("無料10連（\(slot.windowText)）")
+                        .font(.system(size: 13, weight: .semibold))
+                        .foregroundStyle(.white.opacity(0.86))
+                }
+            }
         }
         .frame(maxWidth: .infinity, minHeight: 0, alignment: .center)
     }
@@ -613,29 +956,6 @@ struct GachaView: View {
         .zIndex(50)
     }
 
-    private func startDraw(mode: DrawMode) {
-        rollTask?.cancel()
-        rollTask = nil
-        drawMode = mode
-        phase = .rolling
-        rewards = makeRewards(count: mode.count)
-        revealOverlayReward = nil
-        machineAnimationStart = Date()
-        tapPromptAnimating = true
-
-        withAnimation(.easeOut(duration: 0.2)) {
-            overlayOpacity = 0.82
-        }
-
-        rollTask = Task {
-            try? await Task.sleep(nanoseconds: 1_150_000_000)
-            guard !Task.isCancelled else { return }
-            await MainActor.run {
-                phase = .waitingTap
-            }
-        }
-    }
-
     private func handleOverlayTap() {
         guard revealOverlayReward == nil else {
             revealOverlayReward = nil
@@ -697,31 +1017,29 @@ struct GachaView: View {
 
         DispatchQueue.main.asyncAfter(deadline: .now() + 0.18) {
             phase = .idle
+            lastFreeAdSlot = nil
+            lastDrawWasFreeAd = false
         }
     }
 
-    private func makeRewards(count: Int) -> [GachaReward] {
-        (0..<count).map { _ in
-            let rarity = rollRarity()
-            let itemName = rarity.dummyNames.randomElement() ?? "ダミーアイテム"
-            return GachaReward(
-                rarity: rarity,
-                title: itemName,
-                subtitle: "ダミー報酬 / \(rarity.itemRankText)",
-                imageName: rarity.openedCapsuleAssetName
-            )
+    private func formattedProbability(_ value: Double) -> String {
+        let rounded = (value * 10).rounded() / 10
+        if rounded == floor(rounded) {
+            return String(format: "%.0f%%", rounded)
         }
+        return String(format: "%.1f%%", rounded)
     }
 
-    private func rollRarity() -> GachaRarity {
-        let value = Double.random(in: 0..<1)
-        if value < GachaRarity.gold.probability {
-            return .gold
+    private func showToast(_ message: String) {
+        toastMessage = message
+        withAnimation(.easeInOut(duration: 0.2)) {
+            showToast = true
         }
-        if value < GachaRarity.gold.probability + GachaRarity.red.probability {
-            return .red
+        DispatchQueue.main.asyncAfter(deadline: .now() + 1.5) {
+            withAnimation(.easeInOut(duration: 0.2)) {
+                self.showToast = false
+            }
         }
-        return .blue
     }
 }
 
@@ -778,7 +1096,7 @@ private struct ResultHeadlineView: View {
 
     var body: some View {
         VStack(spacing: 8) {
-            Text(reward.rarity.itemRankText)
+            Text(reward.rarity.displayName)
                 .font(.system(size: 17, weight: .black))
                 .foregroundStyle(reward.rarity.accentColor)
                 .padding(.horizontal, 14)
@@ -845,6 +1163,16 @@ private struct ResultRewardCard: View {
     }
 }
 
-#Preview {
-    GachaView()
+private struct ToastView: View {
+    let message: String
+
+    var body: some View {
+        Text(message)
+            .font(.system(size: 14, weight: .bold))
+            .foregroundStyle(.white)
+            .padding(.horizontal, 18)
+            .padding(.vertical, 12)
+            .background(Color.black.opacity(0.72), in: Capsule())
+            .shadow(radius: 8)
+    }
 }
