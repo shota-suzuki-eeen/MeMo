@@ -86,6 +86,10 @@ struct HomeView: View {
     @State private var toiletPoopActivePoint: [String: CGPoint] = [:]
     @State private var homeContentSize: CGSize = .zero
 
+    // ✅ トイレチケットによる一括掃除
+    @State private var toiletTicketClearingPoopIDs: Set<String> = []
+    @State private var isToiletTicketCleaning: Bool = false
+
     private var fullnessMaxLevel: Int {
         5
     }
@@ -125,6 +129,14 @@ struct HomeView: View {
 
     private var visibleToiletPoops: [AppState.ToiletPoopItem] {
         state.toiletPoops().filter { !$0.isCleared }
+    }
+
+    private var ownedToiletTicketCount: Int {
+        state.gachaSpecialItemCount(id: "wc")
+    }
+
+    private var canShowToiletTicketButton: Bool {
+        state.hasToiletFlag && ownedToiletTicketCount > 0
     }
 
     private var currentFullnessLevel: Int {
@@ -367,6 +379,11 @@ struct HomeView: View {
         static let bottomBarHorizontalPadding: CGFloat = 14
         static let bottomBarVerticalPadding: CGFloat = 12
 
+        static let toiletTicketBottomTrailing: CGFloat = 18
+        static let toiletTicketBottomOffset: CGFloat = 158
+        static let toiletTicketBadgeOffsetX: CGFloat = 21
+        static let toiletTicketBadgeOffsetY: CGFloat = -21
+
         // ✅ 吹き出しボタン
         static let floatingBubbleSize: CGFloat = 90
         static let foodBubbleLeading: CGFloat = 42
@@ -398,6 +415,7 @@ struct HomeView: View {
 
         static let zCharacter: Double = 50
         static let zBottomButtons: Double = 260
+        static let zToiletTicketButton: Double = 270
         static let zReward: Double = 300
         static let zToiletPoops: Double = 2000
         static let zBanner: Double = 1000
@@ -550,7 +568,7 @@ struct HomeView: View {
                                             size: Layout.toiletPoopSize,
                                             hitSize: Layout.toiletPoopHitSize,
                                             opacity: toiletPoopOpacity(for: poop),
-                                            isScratchEnabled: state.hasToiletFlag,
+                                            isScratchEnabled: state.hasToiletFlag && !isToiletTicketCleaning,
                                             onScratchChanged: { value in
                                                 handleToiletPoopScratchChanged(poop, value: value)
                                             },
@@ -562,7 +580,7 @@ struct HomeView: View {
                                     }
                                 }
                                 .frame(maxWidth: .infinity, maxHeight: .infinity)
-                                .allowsHitTesting(state.hasToiletFlag)
+                                .allowsHitTesting(state.hasToiletFlag && !isToiletTicketCleaning)
                                 .zIndex(Layout.zToiletPoops)
                             }
 
@@ -762,6 +780,20 @@ struct HomeView: View {
                 .padding(.bottom, Layout.bottomPadding)
                 .zIndex(Layout.zBottomButtons)
             }
+            .overlay(alignment: .bottomTrailing) {
+                if canShowToiletTicketButton {
+                    ToiletTicketQuickButton(
+                        imageName: "wc",
+                        countText: "\(ownedToiletTicketCount)",
+                        action: {
+                            onTapToiletTicket(state: state)
+                        }
+                    )
+                    .padding(.trailing, Layout.toiletTicketBottomTrailing)
+                    .padding(.bottom, Layout.toiletTicketBottomOffset)
+                    .zIndex(Layout.zToiletTicketButton)
+                }
+            }
             .overlay(alignment: .top) {
                 Color.clear
                     .frame(width: Layout.bannerWidthIPhone, height: Layout.bannerHeight)
@@ -936,6 +968,8 @@ struct HomeView: View {
             pendingFoodFeedID = nil
             stopFoodSelectorHorizontalRattleIfNeeded()
             toiletPoopActivePoint.removeAll()
+            toiletTicketClearingPoopIDs.removeAll()
+            isToiletTicketCleaning = false
         }
         .onChange(of: state.walletKcal) { _, _ in
             guard isHomeVisible else { return }
@@ -962,6 +996,9 @@ struct HomeView: View {
             updateWidgetSnapshot(forceReload: true)
         }
         .onChange(of: state.toiletFlagAt) { _, _ in
+            toiletTicketClearingPoopIDs.removeAll()
+            isToiletTicketCleaning = false
+
             if state.hasToiletFlag {
                 toiletPoopActivePoint.removeAll()
 
@@ -1045,6 +1082,8 @@ struct HomeView: View {
 
         if !state.hasToiletFlag {
             toiletPoopActivePoint.removeAll()
+            toiletTicketClearingPoopIDs.removeAll()
+            isToiletTicketCleaning = false
 
             if !state.toiletPoops().isEmpty {
                 state.clearToiletPoops()
@@ -1073,6 +1112,10 @@ struct HomeView: View {
     }
 
     private func toiletPoopOpacity(for poop: AppState.ToiletPoopItem) -> Double {
+        if toiletTicketClearingPoopIDs.contains(poop.id) {
+            return 0
+        }
+
         let progress = max(0, min(1, CGFloat(poop.cleanedProgress)))
         return max(0.02, 1 - (progress * 0.98))
     }
@@ -1086,6 +1129,7 @@ struct HomeView: View {
 
     private func handleToiletPoopScratchChanged(_ poop: AppState.ToiletPoopItem, value: DragGesture.Value) {
         guard state.hasToiletFlag else { return }
+        guard !isToiletTicketCleaning else { return }
 
         let scratchRect = toiletPoopScratchRect()
         let point = value.location
@@ -1135,6 +1179,7 @@ struct HomeView: View {
             resolveToilet(state: state)
         }
     }
+
 
     private func syncFoodSelectorSelection() {
         let foods = ownedFoods
@@ -2093,6 +2138,8 @@ struct HomeView: View {
             return
         }
 
+        guard !isToiletTicketCleaning else { return }
+
         syncToiletPoopsIfNeeded(containerSize: homeContentSize)
 
         guard !visibleToiletPoops.isEmpty else {
@@ -2104,6 +2151,52 @@ struct HomeView: View {
 
         bgmManager.playSE(.wc)
         toast("うんちを直接こすって掃除しよう！")
+    }
+
+    private func onTapToiletTicket(state: AppState) {
+        guard state.hasToiletFlag else { return }
+        guard !isToiletTicketCleaning else { return }
+
+        syncToiletPoopsIfNeeded(containerSize: homeContentSize)
+
+        let poops = visibleToiletPoops
+        guard !poops.isEmpty else {
+            resolveToilet(state: state)
+            return
+        }
+
+        guard state.gachaSpecialItemCount(id: "wc") > 0 else {
+            toast("トイレチケットを持っていません")
+            Task { @MainActor in
+                Haptics.rattle(duration: 0.12, style: .light)
+            }
+            return
+        }
+
+        bgmManager.playSE(.wc)
+        isToiletTicketCleaning = true
+        toiletPoopActivePoint.removeAll()
+
+        withAnimation(.easeOut(duration: 0.28)) {
+            toiletTicketClearingPoopIDs = Set(poops.map(\.id))
+        }
+
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.30) {
+            guard state.gachaConsumeSpecialItem(id: "wc", count: 1) else {
+                toiletTicketClearingPoopIDs.removeAll()
+                isToiletTicketCleaning = false
+                toast("トイレチケットの消費に失敗しました")
+                return
+            }
+
+            for poop in poops {
+                _ = state.markToiletPoopCleared(id: poop.id)
+            }
+
+            toiletTicketClearingPoopIDs.removeAll()
+            isToiletTicketCleaning = false
+            resolveToilet(state: state)
+        }
     }
 
     private func onTapStep() {
@@ -2121,6 +2214,8 @@ struct HomeView: View {
         guard r.didResolve else { return }
 
         toiletPoopActivePoint.removeAll()
+        toiletTicketClearingPoopIDs.removeAll()
+        isToiletTicketCleaning = false
 
         addFriendshipWithAnimation(points: r.isWithin1h ? 20 : 10, state: state)
         toast(r.isWithin1h ? "トイレ成功（1時間以内）+20" : "トイレ成功 +10")
@@ -2740,6 +2835,7 @@ private struct ToiletPoopView: View {
             .scaleEffect(x: item.isFlippedHorizontally ? -1 : 1, y: 1)
             .rotationEffect(.degrees(item.rotationDegrees))
             .opacity(opacity)
+            .animation(.easeOut(duration: 0.28), value: opacity)
             .frame(width: hitSize, height: hitSize)
             .contentShape(Rectangle())
             .gesture(
@@ -3087,6 +3183,53 @@ private struct BottomActionButton: View {
         .shadow(color: .black.opacity(0.18), radius: 8, x: 0, y: 4)
     }
 }
+
+private struct ToiletTicketQuickButton: View {
+    let imageName: String
+    let countText: String
+    let action: () -> Void
+
+    var body: some View {
+        Button(action: action) {
+            ZStack {
+                Image(HomeView.Layout.bottomButtonBackgroundAssetName)
+                    .resizable()
+                    .scaledToFit()
+                    .frame(
+                        width: HomeView.Layout.bottomButtonBackgroundSize,
+                        height: HomeView.Layout.bottomButtonBackgroundSize
+                    )
+
+                Image(imageName)
+                    .resizable()
+                    .scaledToFit()
+                    .frame(width: 52, height: 52)
+
+                Text(countText)
+                    .font(.system(size: 12, weight: .black))
+                    .foregroundStyle(.white)
+                    .padding(.horizontal, 8)
+                    .padding(.vertical, 4)
+                    .background(Color.black.opacity(0.78), in: Capsule())
+                    .offset(
+                        x: HomeView.Layout.toiletTicketBadgeOffsetX,
+                        y: HomeView.Layout.toiletTicketBadgeOffsetY
+                    )
+            }
+            .frame(
+                width: HomeView.Layout.bottomButtonBackgroundSize,
+                height: HomeView.Layout.bottomButtonBackgroundSize
+            )
+            .contentShape(RoundedRectangle(
+                cornerRadius: HomeView.Layout.bottomButtonCornerRadius,
+                style: .continuous
+            ))
+        }
+        .buttonStyle(.plain)
+        .shadow(color: .black.opacity(0.18), radius: 8, x: 0, y: 4)
+    }
+}
+
 
 private struct FoodSelectionCarousel: View {
     let foods: [FoodCatalog.FoodItem]

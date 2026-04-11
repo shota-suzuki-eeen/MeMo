@@ -151,6 +151,28 @@ extension AppState {
         return true
     }
 
+    @discardableResult
+    func gachaConsumeSpecialItem(id: String, count: Int = 1) -> Bool {
+        let use = max(0, count)
+        if use == 0 {
+            return true
+        }
+
+        var dict = gachaSpecialItemCountsStorage
+        let current = max(0, dict[id] ?? 0)
+        guard current >= use else { return false }
+
+        let next = current - use
+        if next <= 0 {
+            dict.removeValue(forKey: id)
+        } else {
+            dict[id] = next
+        }
+
+        gachaSpecialItemCountsStorage = dict
+        return true
+    }
+
     func gachaResetPity() {
         gachaPityCounter = 0
         gachaGuaranteedGoldNext = false
