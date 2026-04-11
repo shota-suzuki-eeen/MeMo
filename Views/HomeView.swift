@@ -64,7 +64,7 @@ struct HomeView: View {
     @State private var foodSelectorScrollSelectionDelta: Int = 0
 
     // =========================================================
-    // ✅ キャラクターアニメ（アイドルまばたき / タップジャンプ）
+    // ✅ キャラクターアニメ（アイドルまばたき）
     // =========================================================
     @State private var characterAssetName: String = ""
     @State private var idleLoopTask: Task<Void, Never>?
@@ -221,60 +221,6 @@ struct HomeView: View {
         ].contains(currentBaseAssetName)
     }
 
-    private var canPlayTapAnimation: Bool {
-        [
-            "person",
-            "dog",
-            "cat",
-            "chicken",
-            "monkey",
-            "rabbit",
-            "frog",
-            "penguin",
-            "sheep",
-            "shark",
-            "turtle",
-            "dolphin",
-            "Sloth",
-            "baku",
-            "blackGibbon",
-            "bulldog",
-            "deer",
-            "fox",
-            "frilledLizard",
-            "giraffe",
-            "koala",
-            "okapi",
-            "platypus",
-            "raccoon",
-            "Shoebill",
-            "Triceratops",
-            "bee",
-            "amesho",
-            "barinys",
-            "blue",
-            "shiba",
-            "gorilla",
-            "lizard",
-            "meerkat",
-            "otter",
-            "owl",
-            "parakeet",
-            "peacock",
-            "pig",
-            "raccoonDog",
-            "redPanda",
-            "seal",
-            "seaOtter",
-            "skunk",
-            "swallow",
-            "tiger",
-            "whiteTiger",
-            "zebra",
-            "wolf"
-        ].contains(currentBaseAssetName)
-    }
-
     private var canPlayBlinkAnimation: Bool {
         [
             "person",
@@ -359,7 +305,6 @@ struct HomeView: View {
         static let happinessGaugeLeading: CGFloat = 18
         static let happinessGaugeOuterSize: CGFloat = 135
         static let happinessGaugeInnerSize: CGFloat = 115
-        static let happinessLevelBadgeFont: CGFloat = 12
         static let happinessRewardButtonFont: CGFloat = 12
 
         static let iconHeartSize: CGFloat = 31
@@ -531,13 +476,6 @@ struct HomeView: View {
                                     outerSize: Layout.happinessGaugeOuterSize,
                                     innerSize: Layout.happinessGaugeInnerSize
                                 )
-
-                                Text("しあわせ Lv.\(displayedHappinessLevel)")
-                                    .font(.system(size: Layout.happinessLevelBadgeFont, weight: .bold))
-                                    .foregroundStyle(.white)
-                                    .padding(.horizontal, 10)
-                                    .padding(.vertical, 6)
-                                    .background(Color.black.opacity(0.55), in: Capsule())
 
                                 if let claimableLevel = currentClaimableHappinessRewardLevel {
                                     Button {
@@ -1170,7 +1108,10 @@ struct HomeView: View {
     }
 
     private func spawnFloatingHeart() {
-        let heart = FloatingHeart(xOffset: CGFloat.random(in: -28...28))
+        let heart = FloatingHeart(
+            xOffset: CGFloat.random(in: -28...28),
+            size: CGFloat.random(in: 22...40)
+        )
         floatingHearts.append(heart)
 
         DispatchQueue.main.asyncAfter(deadline: .now() + 0.95) {
@@ -1238,7 +1179,6 @@ struct HomeView: View {
         )
 
         if totalDistance < 10 {
-            triggerCharacterJump()
             registerCharacterPettingTouch()
         }
     }
@@ -1895,14 +1835,6 @@ struct HomeView: View {
         idleLoopTask = nil
     }
 
-    private func triggerCharacterJump() {
-        guard isHomeVisible else { return }
-        guard !isCharacterActionRunning else { return }
-        guard !isToiletLocked else { return }
-        guard canPlayTapAnimation else { return }
-
-        Task { await playJump() }
-    }
 
     private func playBlink() async {
         guard isHomeVisible else { return }
@@ -1936,37 +1868,6 @@ struct HomeView: View {
         await MainActor.run { characterAssetName = preferredCharacterRestAssetName }
     }
 
-    private func playJump() async {
-        guard isHomeVisible else { return }
-        guard !isCharacterActionRunning else { return }
-        guard !isToiletLocked else { return }
-
-        guard canPlayTapAnimation else {
-            await MainActor.run { characterAssetName = preferredCharacterRestAssetName }
-            return
-        }
-
-        let base = currentBaseAssetName
-        let tap1 = "\(base)_tap_0001"
-        let tap2 = "\(base)_tap_0002"
-
-        await MainActor.run {
-            isCharacterActionRunning = true
-            characterAssetName = tap1
-        }
-        try? await Task.sleep(nanoseconds: 80_000_000)
-
-        await MainActor.run { characterAssetName = tap2 }
-        try? await Task.sleep(nanoseconds: 200_000_000)
-
-        await MainActor.run { characterAssetName = tap1 }
-        try? await Task.sleep(nanoseconds: 90_000_000)
-
-        await MainActor.run {
-            characterAssetName = preferredCharacterRestAssetName
-            isCharacterActionRunning = false
-        }
-    }
 
     private func isSuperFavoriteFood(foodId: String, petID: String) -> Bool {
         switch petID {
@@ -3441,7 +3342,6 @@ private struct ToiletTicketQuickButton: View {
     }
 }
 
-
 private struct FoodSelectionCarousel: View {
     let foods: [FoodCatalog.FoodItem]
     let countProvider: (String) -> Int
@@ -3811,6 +3711,7 @@ private extension Array {
 private struct FloatingHeart: Identifiable, Equatable {
     let id = UUID()
     let xOffset: CGFloat
+    let size: CGFloat
 }
 
 private struct FloatingHeartView: View {
@@ -3818,9 +3719,10 @@ private struct FloatingHeartView: View {
     @State private var isAnimating = false
 
     var body: some View {
-        Image(systemName: "heart.fill")
-            .font(.system(size: 24, weight: .bold))
-            .foregroundStyle(Color(red: 0.98, green: 0.35, blue: 0.48))
+        Image("heart")
+            .resizable()
+            .scaledToFit()
+            .frame(width: heart.size, height: heart.size)
             .shadow(color: .white.opacity(0.35), radius: 4)
             .offset(y: isAnimating ? -72 : -12)
             .opacity(isAnimating ? 0 : 1)

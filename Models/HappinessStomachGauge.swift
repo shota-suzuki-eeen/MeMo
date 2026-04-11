@@ -2,7 +2,7 @@
 //  HappinessStomachGauge.swift
 //  MeMo
 //
-//  Safe version for happiness meter.
+//  Updated for HomeView happiness UI.
 //
 
 import SwiftUI
@@ -41,13 +41,11 @@ struct HappinessStomachGauge: View {
             let t = timeline.date.timeIntervalSinceReferenceDate
             let phase1 = CGFloat(t * 1.35)
             let phase2 = CGFloat(t * 1.02 + 1.4)
+            let heartWidth = innerSize * 0.88
+            let heartHeight = innerSize * 0.88
             let liquidDiameter = outerSize * 0.98
 
             ZStack {
-                Circle()
-                    .fill(Color.black.opacity(0.22))
-                    .frame(width: outerSize, height: outerSize)
-
                 if fillFraction > 0.001 {
                     ZStack {
                         HappinessLiquidWaveShape(
@@ -78,28 +76,92 @@ struct HappinessStomachGauge: View {
                     .clipShape(Circle())
                 }
 
-                Circle()
-                    .stroke(Color.white.opacity(0.82), lineWidth: 2)
-                    .frame(width: outerSize, height: outerSize)
+                ZStack {
+                    Image("glass_heart")
+                        .resizable()
+                        .scaledToFit()
+                        .frame(width: heartWidth, height: heartHeight)
+                        .opacity(0.92)
 
-                VStack(spacing: 6) {
-                    Image(systemName: "heart.fill")
-                        .font(.system(size: innerSize * 0.22, weight: .bold))
-                        .foregroundStyle(.white)
-                        .shadow(color: .black.opacity(0.18), radius: 4, x: 0, y: 2)
+                    LinearGradient(
+                        colors: [
+                            Color.white.opacity(0.30),
+                            Color.white.opacity(0.10),
+                            Color(red: 1.0, green: 0.82, blue: 0.88).opacity(0.14),
+                            Color.white.opacity(0.20)
+                        ],
+                        startPoint: .topLeading,
+                        endPoint: .bottomTrailing
+                    )
+                    .frame(width: heartWidth, height: heartHeight)
+                    .blendMode(.screen)
+                    .mask(
+                        Image("glass_heart")
+                            .resizable()
+                            .scaledToFit()
+                            .frame(width: heartWidth, height: heartHeight)
+                    )
 
-                    Text("\(displayPoint)/\(maxPoint)")
-                        .font(.system(size: innerSize * 0.12, weight: .black))
-                        .foregroundStyle(.white)
-                        .monospacedDigit()
+                    RadialGradient(
+                        colors: [
+                            Color.white.opacity(0.22),
+                            Color.white.opacity(0.05),
+                            Color.clear
+                        ],
+                        center: .topLeading,
+                        startRadius: 1,
+                        endRadius: innerSize * 0.52
+                    )
+                    .frame(width: heartWidth, height: heartHeight)
+                    .blendMode(.screen)
+                    .mask(
+                        Image("glass_heart")
+                            .resizable()
+                            .scaledToFit()
+                            .frame(width: heartWidth, height: heartHeight)
+                    )
 
-                    Text("Lv.\(level)")
-                        .font(.system(size: innerSize * 0.10, weight: .bold))
-                        .foregroundStyle(.white.opacity(0.92))
-                        .monospacedDigit()
+                    Capsule()
+                        .fill(Color.white.opacity(0.82))
+                        .frame(width: innerSize * 0.11, height: innerSize * 0.42)
+                        .blur(radius: 1.1)
+                        .rotationEffect(.degrees(11))
+                        .offset(x: -innerSize * 0.08, y: -innerSize * 0.06)
+                        .mask(
+                            Image("glass_heart")
+                                .resizable()
+                                .scaledToFit()
+                                .frame(width: heartWidth, height: heartHeight)
+                        )
+
+                    RoundedRectangle(cornerRadius: 30, style: .continuous)
+                        .fill(Color.white.opacity(0.34))
+                        .frame(width: innerSize * 0.42, height: innerSize * 0.14)
+                        .blur(radius: 2.0)
+                        .rotationEffect(.degrees(10))
+                        .offset(x: innerSize * 0.10, y: -innerSize * 0.18)
+                        .mask(
+                            Image("glass_heart")
+                                .resizable()
+                                .scaledToFit()
+                                .frame(width: heartWidth, height: heartHeight)
+                        )
+
+                    Capsule()
+                        .fill(Color.white.opacity(0.28))
+                        .frame(width: innerSize * 0.52, height: innerSize * 0.07)
+                        .blur(radius: 1.4)
+                        .offset(x: 0, y: innerSize * 0.28)
+                        .mask(
+                            Image("glass_heart")
+                                .resizable()
+                                .scaledToFit()
+                                .frame(width: heartWidth, height: heartHeight)
+                        )
                 }
+                .frame(width: outerSize, height: outerSize)
+                .drawingGroup()
             }
-            .frame(width: outerSize, height: outerSize)
             .shadow(color: .black.opacity(0.16), radius: 8, x: 0, y: 5)
         }
     }
