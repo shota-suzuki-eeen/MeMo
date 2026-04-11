@@ -90,6 +90,18 @@ struct HomeView: View {
     @State private var toiletTicketClearingPoopIDs: Set<String> = []
     @State private var isToiletTicketCleaning: Bool = false
 
+    // ✅ 幸せ度（SwiftData を壊さないため UserDefaults 保存）
+    @State private var displayedHappinessPoint: Int = 0
+    @State private var animatedHappinessPoint: Double = 0
+    @State private var displayedHappinessLevel: Int = 0
+    @State private var isAnimatingHappinessDecay: Bool = false
+    @State private var characterPettingStartPoint: CGPoint?
+    @State private var characterPettingLastPoint: CGPoint?
+    @State private var characterPettingAccumulatedDistance: CGFloat = 0
+    @State private var floatingHearts: [FloatingHeart] = []
+
+    private let characterRubDistancePerTouch: CGFloat = 28
+
     private var fullnessMaxLevel: Int {
         5
     }
@@ -141,6 +153,14 @@ struct HomeView: View {
 
     private var currentFullnessLevel: Int {
         normalizedFullnessLevel(state.currentSatisfaction(now: Date()))
+    }
+
+    private var happinessMaxPoints: Int {
+        AppState.happinessMaxPointsPerLevel
+    }
+
+    private var currentClaimableHappinessRewardLevel: Int? {
+        state.nextClaimableHappinessRewardLevel()
     }
 
     private var canShowFoodBubble: Bool {
@@ -335,6 +355,12 @@ struct HomeView: View {
         static let leftTopPaddingTop: CGFloat = 44
         static let leftTopPaddingLeading: CGFloat = 18
         static let meterStackSpacing: CGFloat = 18
+        static let happinessGaugeTop: CGFloat = 36
+        static let happinessGaugeLeading: CGFloat = 18
+        static let happinessGaugeOuterSize: CGFloat = 135
+        static let happinessGaugeInnerSize: CGFloat = 115
+        static let happinessLevelBadgeFont: CGFloat = 12
+        static let happinessRewardButtonFont: CGFloat = 12
 
         static let iconHeartSize: CGFloat = 31
         static let iconCoinSize: CGFloat = 26
@@ -464,13 +490,13 @@ struct HomeView: View {
                                 .offset(y: Layout.characterTopOffset)
                                 .zIndex(Layout.zCharacter)
                                 .highPriorityGesture(
-                                    TapGesture().onEnded {
-                                        if isToiletLocked {
-                                            showToiletLockedMessage()
-                                        } else {
-                                            triggerCharacterJump()
+                                    DragGesture(minimumDistance: 0)
+                                        .onChanged { value in
+                                            handleCharacterPettingChanged(value)
                                         }
-                                    }
+                                        .onEnded { value in
+                                            handleCharacterPettingEnded(value)
+                                        }
                                 )
 
                             Image(characterAssetName.isEmpty ? preferredCharacterRestAssetName : characterAssetName)
@@ -489,28 +515,48 @@ struct HomeView: View {
                                 )
                                 .allowsHitTesting(false)
 
-                            VStack(alignment: .leading, spacing: Layout.meterStackSpacing) {
-                                StepProgressCapsule(
-                                    progress: displayedStepProgress,
-                                    currentSteps: displayedTodaySteps,
-                                    goalSteps: fixedDailyGoalSteps,
-                                    barWidth: Layout.barWidth,
-                                    height: Layout.capsuleHeight,
-                                    iconSize: Layout.iconHeartSize,
-                                    minFillWidth: Layout.redMinWidth
+                            ForEach(floatingHearts) { heart in
+                                FloatingHeartView(heart: heart)
+                                    .offset(x: heart.xOffset, y: Layout.characterTopOffset - 14)
+                                    .zIndex(Layout.zCharacter + 1)
+                                    .allowsHitTesting(false)
+                            }
+
+                            VStack(alignment: .leading, spacing: 8) {
+                                HappinessStomachGauge(
+                                    point: animatedHappinessPoint,
+                                    displayPoint: displayedHappinessPoint,
+                                    maxPoint: happinessMaxPoints,
+                                    level: displayedHappinessLevel,
+                                    outerSize: Layout.happinessGaugeOuterSize,
+                                    innerSize: Layout.happinessGaugeInnerSize
                                 )
 
-                                WalletCapsule(
-                                    walletSteps: displayedWalletSteps,
-                                    barWidth: Layout.walletWidth,
-                                    height: Layout.capsuleHeight,
-                                    iconSize: Layout.iconCoinSize
-                                )
+                                Text("しあわせ Lv.\(displayedHappinessLevel)")
+                                    .font(.system(size: Layout.happinessLevelBadgeFont, weight: .bold))
+                                    .foregroundStyle(.white)
+                                    .padding(.horizontal, 10)
+                                    .padding(.vertical, 6)
+                                    .background(Color.black.opacity(0.55), in: Capsule())
+
+                                if let claimableLevel = currentClaimableHappinessRewardLevel {
+                                    Button {
+                                        claimHappinessReward(level: claimableLevel)
+                                    } label: {
+                                        Text("Lv.\(claimableLevel)報酬")
+                                            .font(.system(size: Layout.happinessRewardButtonFont, weight: .bold))
+                                            .foregroundStyle(.white)
+                                            .padding(.horizontal, 10)
+                                            .padding(.vertical, 7)
+                                            .background(Color(red: 0.85, green: 0.20, blue: 0.28).opacity(0.95), in: Capsule())
+                                    }
+                                    .buttonStyle(.plain)
+                                }
 
                                 Spacer()
                             }
-                            .padding(.top, Layout.leftTopPaddingTop)
-                            .padding(.leading, Layout.leftTopPaddingLeading)
+                            .padding(.top, Layout.happinessGaugeTop)
+                            .padding(.leading, Layout.happinessGaugeLeading)
                             .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
 
                             FullnessStomachGauge(
@@ -753,6 +799,7 @@ struct HomeView: View {
                     .onChange(of: timeline.date) { _, newDate in
                         state.ensureDailyResetIfNeeded(now: newDate)
                         syncDisplayedFullness(now: newDate)
+                        scheduleHappinessDecayIfNeeded(now: newDate)
 
                         state.ensureToiletNextSpawnScheduled(now: newDate)
                         state.ensureFoodNextSpawnScheduled(now: newDate)
@@ -766,6 +813,7 @@ struct HomeView: View {
                     .onAppear {
                         state.ensureDailyResetIfNeeded(now: now)
                         syncDisplayedFullness(now: now)
+                        scheduleHappinessDecayIfNeeded(now: now)
 
                         state.ensureToiletNextSpawnScheduled(now: now)
                         state.ensureFoodNextSpawnScheduled(now: now)
@@ -864,6 +912,7 @@ struct HomeView: View {
             displayedTodaySteps = todaySteps
             displayedWalletSteps = state.walletSteps
             displayedFriendship = Double(state.friendshipPoint)
+            syncDisplayedHappiness(animated: false)
             displayedStepProgress = calcStepProgressRaw(
                 todaySteps: displayedTodaySteps,
                 goalSteps: fixedDailyGoalSteps
@@ -884,6 +933,7 @@ struct HomeView: View {
             loadTodayPhoto()
             syncFoodSelectorSelection()
             syncDisplayedFullness()
+            scheduleHappinessDecayIfNeeded(now: Date())
 
             updateToiletWiggle()
             syncCharacterBaseFromState(force: true)
@@ -901,6 +951,7 @@ struct HomeView: View {
 
             todaySteps = state.widgetTodaySteps
             displayedTodaySteps = todaySteps
+            syncDisplayedHappiness(animated: false)
             displayedStepProgress = calcStepProgressRaw(
                 todaySteps: displayedTodaySteps,
                 goalSteps: fixedDailyGoalSteps
@@ -922,6 +973,7 @@ struct HomeView: View {
                 loadTodayPhoto()
                 syncFoodSelectorSelection()
                 syncDisplayedFullness()
+                scheduleHappinessDecayIfNeeded(now: Date())
 
                 if isHomeVisible {
                     await reconcileWalletDisplayIfNeeded(state: state)
@@ -938,7 +990,9 @@ struct HomeView: View {
             _ = state.normalizeFixedDailyStepGoal()
             syncCharacterBaseFromState(force: true)
             startCharacterIdleLoopIfNeeded()
+            syncDisplayedHappiness(animated: false)
             syncDisplayedFullness(animated: false)
+            scheduleHappinessDecayIfNeeded(now: Date())
 
             withAnimation(.easeOut(duration: 0.25)) {
                 displayedStepProgress = calcStepProgressRaw(
@@ -970,6 +1024,10 @@ struct HomeView: View {
             toiletPoopActivePoint.removeAll()
             toiletTicketClearingPoopIDs.removeAll()
             isToiletTicketCleaning = false
+            characterPettingStartPoint = nil
+            characterPettingLastPoint = nil
+            characterPettingAccumulatedDistance = 0
+            floatingHearts.removeAll()
         }
         .onChange(of: state.walletKcal) { _, _ in
             guard isHomeVisible else { return }
@@ -1035,9 +1093,11 @@ struct HomeView: View {
         }
         .onChange(of: state.satisfactionLevel) { _, _ in
             syncDisplayedFullness()
+            scheduleHappinessDecayIfNeeded(now: Date())
         }
         .onChange(of: state.satisfactionLastUpdatedAt) { _, _ in
             syncDisplayedFullness()
+            scheduleHappinessDecayIfNeeded(now: Date())
         }
         .onChange(of: state.toiletNextSpawnAt) { _, _ in
             updateWidgetSnapshot(forceReload: true)
@@ -1051,6 +1111,147 @@ struct HomeView: View {
         .onChange(of: state.lastDayKey) { _, _ in
             updateWidgetSnapshot(forceReload: true)
         }
+    }
+
+    @MainActor
+    private func syncDisplayedHappiness(animated: Bool = true) {
+        state.resetHappinessPettingIfNeeded(now: Date())
+        let point = state.happinessPoint
+        let level = state.happinessLevel
+
+        displayedHappinessPoint = point
+        displayedHappinessLevel = level
+
+        if animated {
+            withAnimation(.easeInOut(duration: 0.22)) {
+                animatedHappinessPoint = Double(point)
+            }
+        } else {
+            animatedHappinessPoint = Double(point)
+        }
+    }
+
+    private func scheduleHappinessDecayIfNeeded(now: Date = Date()) {
+        let fullness = state.currentSatisfaction(now: now)
+        state.refreshHappinessDecayTracking(fullnessLevel: fullness, now: now)
+
+        guard fullness == 0 else {
+            syncDisplayedHappiness(animated: false)
+            return
+        }
+
+        let pending = state.pendingHappinessDecayCount(fullnessLevel: fullness, now: now)
+        guard pending > 0 else {
+            syncDisplayedHappiness(animated: false)
+            return
+        }
+
+        guard !isAnimatingHappinessDecay else { return }
+        Task { await animatePendingHappinessDecay(units: pending) }
+    }
+
+    @MainActor
+    private func animatePendingHappinessDecay(units: Int) async {
+        guard !isAnimatingHappinessDecay else { return }
+        let safeUnits = max(0, units)
+        guard safeUnits > 0 else {
+            syncDisplayedHappiness(animated: false)
+            return
+        }
+
+        isAnimatingHappinessDecay = true
+        for _ in 0..<safeUnits {
+            guard state.consumeOneHappinessDecayStep() else { break }
+            syncDisplayedHappiness(animated: true)
+            try? await Task.sleep(nanoseconds: 55_000_000)
+        }
+        isAnimatingHappinessDecay = false
+        syncDisplayedHappiness(animated: false)
+    }
+
+    private func spawnFloatingHeart() {
+        let heart = FloatingHeart(xOffset: CGFloat.random(in: -28...28))
+        floatingHearts.append(heart)
+
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.95) {
+            floatingHearts.removeAll { $0.id == heart.id }
+        }
+    }
+
+    private func registerCharacterPettingTouch(count: Int = 1) {
+        guard count > 0 else { return }
+        let result = state.registerHappinessPettingTouch(count: count, now: Date())
+
+        for _ in 0..<count {
+            spawnFloatingHeart()
+        }
+
+        if result.gainedPoints > 0 {
+            syncDisplayedHappiness(animated: true)
+            Task { @MainActor in
+                Haptics.tap(style: .soft)
+            }
+        }
+    }
+
+    private func resetCharacterPettingTracking() {
+        characterPettingStartPoint = nil
+        characterPettingLastPoint = nil
+        characterPettingAccumulatedDistance = 0
+    }
+
+    private func handleCharacterPettingChanged(_ value: DragGesture.Value) {
+        guard !isToiletLocked else { return }
+
+        if characterPettingStartPoint == nil {
+            characterPettingStartPoint = value.startLocation
+            characterPettingLastPoint = value.location
+            return
+        }
+
+        guard let lastPoint = characterPettingLastPoint else {
+            characterPettingLastPoint = value.location
+            return
+        }
+
+        let distance = hypot(value.location.x - lastPoint.x, value.location.y - lastPoint.y)
+        characterPettingAccumulatedDistance += distance
+        characterPettingLastPoint = value.location
+
+        while characterPettingAccumulatedDistance >= characterRubDistancePerTouch {
+            characterPettingAccumulatedDistance -= characterRubDistancePerTouch
+            registerCharacterPettingTouch()
+        }
+    }
+
+    private func handleCharacterPettingEnded(_ value: DragGesture.Value) {
+        defer { resetCharacterPettingTracking() }
+
+        guard !isToiletLocked else {
+            showToiletLockedMessage()
+            return
+        }
+
+        let totalDistance = hypot(
+            value.location.x - value.startLocation.x,
+            value.location.y - value.startLocation.y
+        )
+
+        if totalDistance < 10 {
+            triggerCharacterJump()
+            registerCharacterPettingTouch()
+        }
+    }
+
+    private func claimHappinessReward(level: Int) {
+        guard let reward = state.claimHappinessReward(level: level, now: Date()) else {
+            toast("受け取れる報酬はありません")
+            return
+        }
+
+        save()
+        toast("幸せLv.\(reward.level)報酬で\(reward.foodName)を獲得！")
+        syncDisplayedHappiness(animated: false)
     }
 
     private func normalizedFullnessLevel(_ value: Int) -> Int {
@@ -1871,17 +2072,24 @@ struct HomeView: View {
             _ = state.revealSuperFavorite(petID: state.normalizedCurrentPetID)
         }
 
+        let happinessBonus = state.happinessBonusPoints(forFoodID: food.id)
+        if happinessBonus > 0 {
+            _ = state.addHappinessPoints(happinessBonus, now: now)
+        }
+
         save()
         syncDisplayedFullness(now: now)
+        syncDisplayedHappiness(animated: happinessBonus > 0)
 
         addFriendshipWithAnimation(points: gainedPoint, state: state)
         playFeedSound(isSuperFavorite: isSuperFavorite)
 
+        let happinessSuffix = happinessBonus > 0 ? " / 幸せ度 +\(happinessBonus)" : ""
         if isSuperFavorite {
-            toast("\(food.name)をあげた！ 満腹度 \(normalizedFullnessLevel(feedResult.after))/\(fullnessMaxLevel) +\(gainedPoint)")
+            toast("\(food.name)をあげた！ 満腹度 \(normalizedFullnessLevel(feedResult.after))/\(fullnessMaxLevel) +\(gainedPoint)\(happinessSuffix)")
             playSuperFavoriteReactionIfPossible()
         } else {
-            toast("\(food.name)をあげた！ 満腹度 \(normalizedFullnessLevel(feedResult.after))/\(fullnessMaxLevel) +\(gainedPoint)")
+            toast("\(food.name)をあげた！ 満腹度 \(normalizedFullnessLevel(feedResult.after))/\(fullnessMaxLevel) +\(gainedPoint)\(happinessSuffix)")
         }
 
         syncFoodSelectorSelection()
@@ -2256,8 +2464,11 @@ struct HomeView: View {
             displayedTodaySteps = 0
 
             state.ensureDailyResetIfNeeded(now: now)
+            state.resetHappinessPettingIfNeeded(now: now)
             state.lastSyncedAt = Calendar.current.startOfDay(for: now)
+            syncDisplayedHappiness(animated: false)
             syncDisplayedFullness(now: now)
+            scheduleHappinessDecayIfNeeded(now: now)
             save()
             loadTodayPhoto()
             return
@@ -3594,6 +3805,31 @@ private extension Array {
     subscript(safe index: Int) -> Element? {
         guard indices.contains(index) else { return nil }
         return self[index]
+    }
+}
+
+private struct FloatingHeart: Identifiable, Equatable {
+    let id = UUID()
+    let xOffset: CGFloat
+}
+
+private struct FloatingHeartView: View {
+    let heart: FloatingHeart
+    @State private var isAnimating = false
+
+    var body: some View {
+        Image(systemName: "heart.fill")
+            .font(.system(size: 24, weight: .bold))
+            .foregroundStyle(Color(red: 0.98, green: 0.35, blue: 0.48))
+            .shadow(color: .white.opacity(0.35), radius: 4)
+            .offset(y: isAnimating ? -72 : -12)
+            .opacity(isAnimating ? 0 : 1)
+            .scaleEffect(isAnimating ? 1.18 : 0.74)
+            .onAppear {
+                withAnimation(.easeOut(duration: 0.9)) {
+                    isAnimating = true
+                }
+            }
     }
 }
 

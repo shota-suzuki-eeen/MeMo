@@ -2,7 +2,7 @@
 //  FoodCatalog.swift
 //  MeMo
 //
-//  Updated for gacha food integration.
+//  Updated for gacha food integration and happiness bonus support.
 //
 
 import Foundation
@@ -19,9 +19,30 @@ enum FoodCatalog {
 
         let assetName: String
         let isShopEligible: Bool
+        let happinessBonusPoints: Int
+
+        init(
+            id: String,
+            name: String,
+            priceKcal: Int,
+            assetName: String,
+            isShopEligible: Bool,
+            happinessBonusPoints: Int = 0
+        ) {
+            self.id = id
+            self.name = name
+            self.priceKcal = priceKcal
+            self.assetName = assetName
+            self.isShopEligible = isShopEligible
+            self.happinessBonusPoints = max(0, happinessBonusPoints)
+        }
 
         var priceSteps: Int {
             max(0, priceKcal)
+        }
+
+        var grantsHappinessBonus: Bool {
+            happinessBonusPoints > 0
         }
     }
 
@@ -47,19 +68,23 @@ enum FoodCatalog {
         .init(id: "sute-ki",     name: "ステーキ",       priceKcal: 550, assetName: "food_sute-ki",     isShopEligible: true),
         .init(id: "yo-guruto",   name: "ヨーグルト",     priceKcal:  56, assetName: "food_yo-guruto",   isShopEligible: true),
 
-        // R（ガチャ専用）
-        .init(id: "matsuzakaBeef", name: "松坂牛",             priceKcal: 0, assetName: "food_matsuzakaBeef", isShopEligible: false),
-        .init(id: "spinyLobster",  name: "伊勢海老",           priceKcal: 0, assetName: "food_spinyLobster",  isShopEligible: false),
-        .init(id: "shineMuscat",   name: "シャインマスカット", priceKcal: 0, assetName: "food_shineMuscat",   isShopEligible: false),
-        .init(id: "eel",           name: "鰻",                 priceKcal: 0, assetName: "food_eel",           isShopEligible: false),
-        .init(id: "snowCrab",      name: "ズワイガニ",         priceKcal: 0, assetName: "food_snowCrab",      isShopEligible: false),
-        .init(id: "otoro",         name: "大トロ",             priceKcal: 0, assetName: "food_otoro",         isShopEligible: false),
-        .init(id: "cantaloupe",    name: "マスクメロン",       priceKcal: 0, assetName: "food_cantaloupe",    isShopEligible: false),
-        .init(id: "matsutake",     name: "松茸",               priceKcal: 0, assetName: "food_matsutake",     isShopEligible: false),
+        // R（ガチャ専用 / 幸せ度ボーナス対象）
+        .init(id: "matsuzakaBeef", name: "松坂牛",             priceKcal: 0, assetName: "food_matsuzakaBeef", isShopEligible: false, happinessBonusPoints: 10),
+        .init(id: "spinyLobster",  name: "伊勢海老",           priceKcal: 0, assetName: "food_spinyLobster",  isShopEligible: false, happinessBonusPoints: 10),
+        .init(id: "shineMuscat",   name: "シャインマスカット", priceKcal: 0, assetName: "food_shineMuscat",   isShopEligible: false, happinessBonusPoints: 10),
+        .init(id: "eel",           name: "鰻",                 priceKcal: 0, assetName: "food_eel",           isShopEligible: false, happinessBonusPoints: 10),
+        .init(id: "snowCrab",      name: "ズワイガニ",         priceKcal: 0, assetName: "food_snowCrab",      isShopEligible: false, happinessBonusPoints: 10),
+        .init(id: "otoro",         name: "大トロ",             priceKcal: 0, assetName: "food_otoro",         isShopEligible: false, happinessBonusPoints: 10),
+        .init(id: "cantaloupe",    name: "マスクメロン",       priceKcal: 0, assetName: "food_cantaloupe",    isShopEligible: false, happinessBonusPoints: 10),
+        .init(id: "matsutake",     name: "松茸",               priceKcal: 0, assetName: "food_matsutake",     isShopEligible: false, happinessBonusPoints: 10),
     ]
 
     static var shopEligibleItems: [FoodItem] {
         all.filter(\.isShopEligible)
+    }
+
+    static var happinessRewardEligibleItems: [FoodItem] {
+        all.filter(\.grantsHappinessBonus)
     }
 
     static func byId(_ id: String) -> FoodItem? {
