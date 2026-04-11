@@ -733,6 +733,19 @@ private extension UIImage {
         }
     }
 
+    func mirroredHorizontally() -> UIImage? {
+        let source = fixedOrientation()
+        let format = UIGraphicsImageRendererFormat.default()
+        format.scale = source.scale
+        format.opaque = true
+        let renderer = UIGraphicsImageRenderer(size: source.size, format: format)
+        return renderer.image { context in
+            context.cgContext.translateBy(x: source.size.width, y: 0)
+            context.cgContext.scaleBy(x: -1, y: 1)
+            source.draw(in: CGRect(origin: .zero, size: source.size))
+        }
+    }
+
     func croppedToAspectFill(of viewSize: CGSize) -> UIImage? {
         guard let cg = self.cgImage else { return nil }
         guard viewSize.width > 0, viewSize.height > 0 else { return nil }
@@ -1017,8 +1030,12 @@ private struct CameraPreviewView: UIViewRepresentable {
             error: Error?
         ) {
             let image: UIImage?
-            if let data = photo.fileDataRepresentation() {
-                image = UIImage(data: data)
+            if let data = photo.fileDataRepresentation(), let capturedImage = UIImage(data: data) {
+                if position == .front {
+                    image = capturedImage.mirroredHorizontally() ?? capturedImage
+                } else {
+                    image = capturedImage
+                }
             } else {
                 image = nil
             }
