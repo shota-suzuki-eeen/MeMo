@@ -40,20 +40,12 @@ struct HomeView: View {
     @State private var isAnimatingGain: Bool = false
     @State private var isHomeVisible: Bool = false
 
-    @State private var showMojaOverlay: Bool = false
-    @State private var rewardScale: CGFloat = 0.8
-    @State private var rewardOpacity: Double = 0.0
-
     @State private var showStepEnjoy: Bool = false
     @State private var showGachaView: Bool = false
 
-    // ✅ 追加：ワークタイマー準備画面
     @State private var showWorkTimerPreparation: Bool = false
-
-    // ✅ メニューポップアップ
     @State private var showRightMenuPopup: Bool = false
 
-    // ✅ ごはんセレクター
     @State private var showFoodSelector: Bool = false
     @State private var selectedFoodID: String?
     @State private var foodSelectorDragOffset: CGSize = .zero
@@ -63,9 +55,6 @@ struct HomeView: View {
     @State private var foodSelectorDragAnchorFoodID: String?
     @State private var foodSelectorScrollSelectionDelta: Int = 0
 
-    // =========================================================
-    // ✅ キャラクターアニメ（アイドルまばたき）
-    // =========================================================
     @State private var characterAssetName: String = ""
     @State private var idleLoopTask: Task<Void, Never>?
     @State private var isCharacterActionRunning: Bool = false
@@ -73,24 +62,17 @@ struct HomeView: View {
     private let doubleBlinkChance: Double = 0.18
     private let doubleBlinkGapRange: ClosedRange<Double> = 0.18...0.45
 
-    // =========================================================
-    // ✅ トイレフラグ中の操作ロック & ポップアップ
-    // =========================================================
     @State private var showToiletLockedPopup: Bool = false
     @State private var toiletLockedPopupText: String = ""
 
-    // ✅ トイレ中モジモジ（左右揺れ）
     @State private var isToiletWiggleOn: Bool = false
 
-    // ✅ トイレpoop擦り処理
     @State private var toiletPoopActivePoint: [String: CGPoint] = [:]
     @State private var homeContentSize: CGSize = .zero
 
-    // ✅ トイレチケットによる一括掃除
     @State private var toiletTicketClearingPoopIDs: Set<String> = []
     @State private var isToiletTicketCleaning: Bool = false
 
-    // ✅ 幸せ度（SwiftData を壊さないため UserDefaults 保存）
     @State private var displayedHappinessPoint: Int = 0
     @State private var animatedHappinessPoint: Double = 0
     @State private var displayedHappinessLevel: Int = 0
@@ -292,7 +274,6 @@ struct HomeView: View {
         )
     }
 
-    // MARK: - Layout
     fileprivate enum Layout {
         static let bannerHeight: CGFloat = 76
         static let bannerWidthIPhone: CGFloat = 320
@@ -325,23 +306,20 @@ struct HomeView: View {
         static let characterTopOffset: CGFloat = 45
         static let characterMaxWidth: CGFloat = 210
 
-        // ✅ メニューポップアップ
         static let menuPopupCornerRadius: CGFloat = 20
         static let menuPopupHorizontalPadding: CGFloat = 28
         static let menuPopupVerticalPadding: CGFloat = 24
-        static let menuPopupMaxWidth: CGFloat = 160
+        static let menuPopupMaxWidth: CGFloat = 220
         static let zMenuPopup: Double = 900
 
-        static let rightButtonSize: CGFloat = 40
+        static let rightButtonSize: CGFloat = 128
         static let rightButtonsSpacing: CGFloat = 18
 
-        // ✅ 下部ボタンを少し大きく + 間隔調整
         static let bottomButtonSize: CGFloat = 68
         static let bottomButtonsSpacing: CGFloat = 16
         static let bottomPadding: CGFloat = 72
         static let bottomHorizontalPadding: CGFloat = 18
 
-        // ✅ 下部ボタン背景
         static let bottomButtonBackgroundAssetName: String = "clay_block"
 
         static let bottomButtonBackgroundSize: CGFloat = 76
@@ -355,7 +333,6 @@ struct HomeView: View {
         static let toiletTicketBadgeOffsetX: CGFloat = 21
         static let toiletTicketBadgeOffsetY: CGFloat = -21
 
-        // ✅ 吹き出しボタン
         static let floatingBubbleSize: CGFloat = 90
         static let foodBubbleLeading: CGFloat = 42
         static let foodBubbleTop: CGFloat = 246
@@ -374,12 +351,6 @@ struct HomeView: View {
         static let foodSelectorRollMaxVisibleOffset: Double = 3.0
         static let foodSelectorPendingDecisionThreshold: CGFloat = 44
 
-        static let rewardMaxWidth: CGFloat = 220
-        static let getTextMaxWidth: CGFloat = 200
-
-        static let getTextOffsetX: CGFloat = 11
-        static let getTextOffsetY: CGFloat = -160
-
         static let fullnessLabelOffsetY: CGFloat = 44
         static let fullnessValueFont: CGFloat = 14
         static let fullnessCaptionFont: CGFloat = 10
@@ -387,7 +358,6 @@ struct HomeView: View {
         static let zCharacter: Double = 50
         static let zBottomButtons: Double = 260
         static let zToiletTicketButton: Double = 270
-        static let zReward: Double = 300
         static let zToiletPoops: Double = 2000
         static let zBanner: Double = 1000
 
@@ -607,34 +577,6 @@ struct HomeView: View {
                                 .zIndex(Layout.zFoodSelector + 1)
                             }
 
-                            if showMojaOverlay {
-                                ZStack {
-                                    Color.black.opacity(0.001)
-                                        .ignoresSafeArea()
-                                        .onTapGesture { dismissMojaOverlay() }
-
-                                    ZStack {
-                                        Image("moja")
-                                            .resizable()
-                                            .scaledToFit()
-                                            .frame(maxWidth: min(geo.size.width * 0.7, Layout.rewardMaxWidth))
-                                            .opacity(rewardOpacity)
-                                            .scaleEffect(rewardScale)
-
-                                        Image("get_text")
-                                            .resizable()
-                                            .scaledToFit()
-                                            .frame(maxWidth: min(geo.size.width * 0.62, Layout.getTextMaxWidth))
-                                            .offset(x: Layout.getTextOffsetX, y: Layout.getTextOffsetY)
-                                            .opacity(rewardOpacity)
-                                            .scaleEffect(rewardScale)
-                                    }
-                                }
-                                .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .center)
-                                .transition(.opacity)
-                                .zIndex(Layout.zReward)
-                            }
-
                             if showToiletLockedPopup {
                                 Text(toiletLockedPopupText)
                                     .font(.system(size: 16, weight: .bold))
@@ -681,7 +623,6 @@ struct HomeView: View {
                         }
 
                     CenterMenuPopup(
-                        state: state,
                         isToiletLocked: isToiletLocked,
                         onBlocked: { showToiletLockedMessage() },
                         onCamera: {
@@ -1321,7 +1262,6 @@ struct HomeView: View {
         }
     }
 
-
     private func syncFoodSelectorSelection() {
         let foods = ownedFoods
 
@@ -1835,7 +1775,6 @@ struct HomeView: View {
         idleLoopTask = nil
     }
 
-
     private func playBlink() async {
         guard isHomeVisible else { return }
         guard !isCharacterActionRunning else { return }
@@ -1867,7 +1806,6 @@ struct HomeView: View {
 
         await MainActor.run { characterAssetName = preferredCharacterRestAssetName }
     }
-
 
     private func isSuperFavoriteFood(foodId: String, petID: String) -> Bool {
         switch petID {
@@ -2062,11 +2000,6 @@ struct HomeView: View {
 
         let result = state.addFriendship(points: points, maxMeter: maxMeter)
 
-        let gainedMoja = max(0, result.gainedCards)
-        if gainedMoja > 0 {
-            state.addMoja(gainedMoja)
-        }
-
         save()
 
         let after = result.afterPoint
@@ -2080,8 +2013,6 @@ struct HomeView: View {
                 displayedFriendship = Double(maxMeter)
             }
 
-            triggerMojaOverlay()
-
             DispatchQueue.main.asyncAfter(deadline: .now() + 0.37) {
                 displayedFriendship = 0
                 withAnimation(.easeOut(duration: 0.55)) {
@@ -2093,35 +2024,6 @@ struct HomeView: View {
             withAnimation(.easeOut(duration: 0.65)) {
                 displayedFriendship = Double(after)
             }
-        }
-    }
-
-    private func triggerMojaOverlay() {
-        showMojaOverlay = false
-        rewardScale = 0.8
-        rewardOpacity = 0.0
-
-        withAnimation(.easeOut(duration: 0.12)) {
-            showMojaOverlay = true
-        }
-
-        withAnimation(.spring(response: 0.35, dampingFraction: 0.62)) {
-            rewardScale = 1.0
-        }
-        withAnimation(.easeOut(duration: 0.18)) {
-            rewardOpacity = 1.0
-        }
-    }
-
-    private func dismissMojaOverlay() {
-        withAnimation(.easeInOut(duration: 0.18)) {
-            rewardOpacity = 0.0
-        }
-        DispatchQueue.main.asyncAfter(deadline: .now() + 0.2) {
-            withAnimation(.easeOut(duration: 0.12)) {
-                showMojaOverlay = false
-            }
-            rewardScale = 0.8
         }
     }
 
@@ -2577,106 +2479,6 @@ private enum HomeWidgetBridge {
     }
 }
 
-
-// MARK: - UI Parts
-
-private struct StepProgressCapsule: View {
-    let progress: Double
-    let currentSteps: Int
-    let goalSteps: Int
-
-    let barWidth: CGFloat
-    let height: CGFloat
-    let iconSize: CGFloat
-    let minFillWidth: CGFloat
-
-    private var clampedProgress: CGFloat {
-        CGFloat(min(1.0, max(0.0, progress)))
-    }
-
-    private var rawWidth: CGFloat {
-        barWidth * clampedProgress
-    }
-
-    private var baseWidth: CGFloat {
-        Swift.max(minFillWidth, rawWidth)
-    }
-
-    private var scaleX: CGFloat {
-        guard baseWidth > 0 else { return 0 }
-        return rawWidth / baseWidth
-    }
-
-    var body: some View {
-        HStack(spacing: 10) {
-            Image(systemName: "shoeprints.fill")
-                .font(.system(size: iconSize * 0.72, weight: .bold))
-                .foregroundStyle(.white)
-                .frame(width: iconSize, height: iconSize)
-                .background(
-                    Circle()
-                        .fill(Color.black.opacity(0.82))
-                )
-
-            ZStack(alignment: .leading) {
-                Capsule()
-                    .fill(Color.black.opacity(0.85))
-                    .frame(width: barWidth, height: height)
-
-                if rawWidth > 0 {
-                    Capsule()
-                        .fill(
-                            LinearGradient(
-                                colors: [
-                                    Color(red: 0.23, green: 0.86, blue: 0.55),
-                                    Color(red: 0.26, green: 0.68, blue: 0.98)
-                                ],
-                                startPoint: .leading,
-                                endPoint: .trailing
-                            )
-                        )
-                        .frame(width: baseWidth, height: height)
-                        .scaleEffect(x: scaleX, y: 1, anchor: .leading)
-                }
-
-                Text("\(currentSteps)/\(goalSteps)")
-                    .font(.system(size: HomeView.Layout.friendshipTextFont, weight: .bold))
-                    .foregroundStyle(.white)
-                    .monospacedDigit()
-                    .frame(width: barWidth, height: height)
-            }
-        }
-    }
-}
-
-private struct WalletCapsule: View {
-    let walletSteps: Int
-
-    let barWidth: CGFloat
-    let height: CGFloat
-    let iconSize: CGFloat
-
-    var body: some View {
-        HStack(spacing: 10) {
-            Image("coin_Icon")
-                .resizable()
-                .scaledToFit()
-                .frame(width: iconSize, height: iconSize)
-
-            ZStack {
-                Capsule()
-                    .fill(Color.black.opacity(0.85))
-                    .frame(width: barWidth, height: height)
-
-                Text("\(walletSteps)")
-                    .font(.system(size: 18, weight: .bold))
-                    .foregroundStyle(.white)
-                    .monospacedDigit()
-            }
-        }
-    }
-}
-
 private struct FullnessStomachGauge: View {
     let level: Double
     let displayLevel: Int
@@ -3000,7 +2802,6 @@ private struct FloatingThoughtButton: View {
 }
 
 private struct CenterMenuPopup: View {
-    let state: AppState
     let isToiletLocked: Bool
     let onBlocked: () -> Void
     let onCamera: () -> Void
@@ -3025,7 +2826,6 @@ private struct CenterMenuPopup: View {
             }
 
             RightSideButtons(
-                state: state,
                 onCamera: onCamera,
                 isToiletLocked: isToiletLocked,
                 onBlocked: onBlocked,
@@ -3044,140 +2844,96 @@ private struct CenterMenuPopup: View {
 private struct RightSideButtons: View {
     @EnvironmentObject private var bgmManager: BGMManager
 
-    let state: AppState
     let onCamera: () -> Void
-
     let isToiletLocked: Bool
     let onBlocked: () -> Void
-
     let buttonSize: CGFloat
     let spacing: CGFloat
 
     var body: some View {
         VStack(spacing: spacing) {
-            Button(action: {
-                bgmManager.playSE(.push)
-                onCamera()
-            }) {
-                Image("camera_button")
-                    .resizable()
-                    .scaledToFit()
-                    .frame(width: buttonSize, height: buttonSize)
-            }
-
-            if isToiletLocked {
+            HStack(spacing: spacing) {
                 Button(action: {
                     bgmManager.playSE(.push)
-                    onBlocked()
+                    onCamera()
                 }) {
-                    Image("omoide_button")
+                    Image("camera_button")
                         .resizable()
                         .scaledToFit()
                         .frame(width: buttonSize, height: buttonSize)
                 }
                 .buttonStyle(.plain)
-            } else {
-                NavigationLink { MemoriesView() } label: {
-                    Image("omoide_button")
-                        .resizable()
-                        .scaledToFit()
-                        .frame(width: buttonSize, height: buttonSize)
+
+                if isToiletLocked {
+                    Button(action: {
+                        bgmManager.playSE(.push)
+                        onBlocked()
+                    }) {
+                        Image("omoide_button")
+                            .resizable()
+                            .scaledToFit()
+                            .frame(width: buttonSize, height: buttonSize)
+                    }
+                    .buttonStyle(.plain)
+                } else {
+                    NavigationLink { MemoriesView() } label: {
+                        Image("omoide_button")
+                            .resizable()
+                            .scaledToFit()
+                            .frame(width: buttonSize, height: buttonSize)
+                    }
+                    .simultaneousGesture(TapGesture().onEnded {
+                        bgmManager.playSE(.push)
+                    })
                 }
-                .simultaneousGesture(TapGesture().onEnded {
-                    bgmManager.playSE(.push)
-                })
             }
 
-            if isToiletLocked {
-                Button(action: {
-                    bgmManager.playSE(.push)
-                    onBlocked()
-                }) {
-                    Image("moja")
-                        .resizable()
-                        .scaledToFit()
-                        .frame(width: buttonSize, height: buttonSize)
+            HStack(spacing: spacing) {
+                if isToiletLocked {
+                    Button(action: {
+                        bgmManager.playSE(.push)
+                        onBlocked()
+                    }) {
+                        Image("picture_button")
+                            .resizable()
+                            .scaledToFit()
+                            .frame(width: buttonSize, height: buttonSize)
+                    }
+                    .buttonStyle(.plain)
+                } else {
+                    NavigationLink { ZukanView() } label: {
+                        Image("picture_button")
+                            .resizable()
+                            .scaledToFit()
+                            .frame(width: buttonSize, height: buttonSize)
+                    }
+                    .simultaneousGesture(TapGesture().onEnded {
+                        bgmManager.playSE(.push)
+                    })
                 }
-                .buttonStyle(.plain)
-            } else {
-                NavigationLink { GetView(state: state) } label: {
-                    Image("moja")
-                        .resizable()
-                        .scaledToFit()
-                        .frame(width: buttonSize, height: buttonSize)
-                }
-                .simultaneousGesture(TapGesture().onEnded {
-                    bgmManager.playSE(.push)
-                })
-            }
 
-            if isToiletLocked {
-                Button(action: {
-                    bgmManager.playSE(.push)
-                    onBlocked()
-                }) {
-                    Image("picture_button")
-                        .resizable()
-                        .scaledToFit()
-                        .frame(width: buttonSize, height: buttonSize)
+                if isToiletLocked {
+                    Button(action: {
+                        bgmManager.playSE(.push)
+                        onBlocked()
+                    }) {
+                        Image("option_button")
+                            .resizable()
+                            .scaledToFit()
+                            .frame(width: buttonSize, height: buttonSize)
+                    }
+                    .buttonStyle(.plain)
+                } else {
+                    NavigationLink { SettingsView() } label: {
+                        Image("option_button")
+                            .resizable()
+                            .scaledToFit()
+                            .frame(width: buttonSize, height: buttonSize)
+                    }
+                    .simultaneousGesture(TapGesture().onEnded {
+                        bgmManager.playSE(.push)
+                    })
                 }
-                .buttonStyle(.plain)
-            } else {
-                NavigationLink { ZukanView() } label: {
-                    Image("picture_button")
-                        .resizable()
-                        .scaledToFit()
-                        .frame(width: buttonSize, height: buttonSize)
-                }
-                .simultaneousGesture(TapGesture().onEnded {
-                    bgmManager.playSE(.push)
-                })
-            }
-
-            if isToiletLocked {
-                Button(action: {
-                    bgmManager.playSE(.push)
-                    onBlocked()
-                }) {
-                    Image("shop_button")
-                        .resizable()
-                        .scaledToFit()
-                        .frame(width: buttonSize, height: buttonSize)
-                }
-                .buttonStyle(.plain)
-            } else {
-                NavigationLink { ShopView(state: state) } label: {
-                    Image("shop_button")
-                        .resizable()
-                        .scaledToFit()
-                        .frame(width: buttonSize, height: buttonSize)
-                }
-                .simultaneousGesture(TapGesture().onEnded {
-                    bgmManager.playSE(.push)
-                })
-            }
-
-            if isToiletLocked {
-                Button(action: {
-                    bgmManager.playSE(.push)
-                    onBlocked()
-                }) {
-                    Image("option_button")
-                        .resizable()
-                        .scaledToFit()
-                        .frame(width: buttonSize, height: buttonSize)
-                }
-                .buttonStyle(.plain)
-            } else {
-                NavigationLink { SettingsView() } label: {
-                    Image("option_button")
-                        .resizable()
-                        .scaledToFit()
-                        .frame(width: buttonSize, height: buttonSize)
-                }
-                .simultaneousGesture(TapGesture().onEnded {
-                    bgmManager.playSE(.push)
-                })
             }
         }
     }
