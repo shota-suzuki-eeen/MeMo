@@ -349,9 +349,20 @@ struct HomeView: View {
         static let characterMaxWidth: CGFloat = 210
 
         static let menuPopupCornerRadius: CGFloat = 20
-        static let menuPopupHorizontalPadding: CGFloat = 28
-        static let menuPopupVerticalPadding: CGFloat = 24
-        static let menuPopupMaxWidth: CGFloat = 220
+        static let menuPopupHorizontalPadding: CGFloat = 18
+        static let menuPopupVerticalPadding: CGFloat = 18
+        static let menuPopupMaxWidth: CGFloat = 360
+        static let menuPopupBackgroundAssetName: String = "blue_block"
+        static let menuPopupButtonBackgroundAssetName: String = "clay_block"
+        static let menuPopupCloseButtonAssetName: String = "close_button"
+        static let menuPopupCloseButtonSize: CGFloat = 54
+        static let menuPopupCloseButtonTopPadding: CGFloat = 18
+        static let menuPopupCloseButtonTrailingPadding: CGFloat = 18
+        static let menuPopupContentTopPadding: CGFloat = 34
+        static let menuPopupContentBottomPadding: CGFloat = 20
+        static let menuPopupGridOffsetX: CGFloat = -12
+        static let menuPopupGridOffsetY: CGFloat = 8
+        static let menuPopupGridWidth: CGFloat = 296
         static let zMenuPopup: Double = 900
 
         static let topInfoPopupCornerRadius: CGFloat = 24
@@ -360,8 +371,8 @@ struct HomeView: View {
         static let topInfoPopupMaxWidth: CGFloat = 320
         static let zTopInfoPopup: Double = 1200
 
-        static let rightButtonSize: CGFloat = 128
-        static let rightButtonsSpacing: CGFloat = 18
+        static let rightButtonSize: CGFloat = 116
+        static let rightButtonsSpacing: CGFloat = 28
 
         static let bottomButtonSize: CGFloat = 68
         static let bottomButtonsSpacing: CGFloat = 16
@@ -3136,20 +3147,10 @@ private struct CenterMenuPopup: View {
     let spacing: CGFloat
 
     var body: some View {
-        VStack(spacing: 16) {
-            HStack {
-                Spacer()
-
-                Button(action: onDismiss) {
-                    Image(systemName: "xmark")
-                        .font(.system(size: 14, weight: .bold))
-                        .foregroundStyle(.white)
-                        .frame(width: 28, height: 28)
-                        .background(Color.black.opacity(0.75))
-                        .clipShape(Circle())
-                }
-                .buttonStyle(.plain)
-            }
+        ZStack(alignment: .topTrailing) {
+            Image(HomeView.Layout.menuPopupBackgroundAssetName)
+                .resizable()
+                .scaledToFit()
 
             RightSideButtons(
                 onCamera: onCamera,
@@ -3158,12 +3159,29 @@ private struct CenterMenuPopup: View {
                 buttonSize: buttonSize,
                 spacing: spacing
             )
+            .frame(width: HomeView.Layout.menuPopupGridWidth, alignment: .leading)
+            .padding(.top, HomeView.Layout.menuPopupContentTopPadding)
+            .padding(.bottom, HomeView.Layout.menuPopupContentBottomPadding)
+            .offset(
+                x: HomeView.Layout.menuPopupGridOffsetX,
+                y: HomeView.Layout.menuPopupGridOffsetY
+            )
+
+            Button(action: onDismiss) {
+                Image(HomeView.Layout.menuPopupCloseButtonAssetName)
+                    .resizable()
+                    .scaledToFit()
+                    .frame(
+                        width: HomeView.Layout.menuPopupCloseButtonSize,
+                        height: HomeView.Layout.menuPopupCloseButtonSize
+                    )
+            }
+            .buttonStyle(.plain)
+            .padding(.top, HomeView.Layout.menuPopupCloseButtonTopPadding)
+            .padding(.trailing, HomeView.Layout.menuPopupCloseButtonTrailingPadding)
         }
-        .padding(.horizontal, HomeView.Layout.menuPopupHorizontalPadding)
-        .padding(.vertical, HomeView.Layout.menuPopupVerticalPadding)
-        .background(.ultraThinMaterial)
-        .clipShape(RoundedRectangle(cornerRadius: HomeView.Layout.menuPopupCornerRadius, style: .continuous))
-        .shadow(radius: 18)
+        .frame(maxWidth: HomeView.Layout.menuPopupMaxWidth)
+        .shadow(color: .black.opacity(0.22), radius: 18, x: 0, y: 10)
     }
 }
 
@@ -3177,16 +3195,16 @@ private struct RightSideButtons: View {
     let spacing: CGFloat
 
     var body: some View {
-        VStack(spacing: spacing) {
+        VStack(alignment: .leading, spacing: spacing) {
             HStack(spacing: spacing) {
                 Button(action: {
                     bgmManager.playSE(.push)
                     onCamera()
                 }) {
-                    Image("camera_button")
-                        .resizable()
-                        .scaledToFit()
-                        .frame(width: buttonSize, height: buttonSize)
+                    MenuPopupActionIcon(
+                        imageName: "camera_button",
+                        buttonSize: buttonSize
+                    )
                 }
                 .buttonStyle(.plain)
 
@@ -3195,24 +3213,26 @@ private struct RightSideButtons: View {
                         bgmManager.playSE(.push)
                         onBlocked()
                     }) {
-                        Image("omoide_button")
-                            .resizable()
-                            .scaledToFit()
-                            .frame(width: buttonSize, height: buttonSize)
+                        MenuPopupActionIcon(
+                            imageName: "omoide_button",
+                            buttonSize: buttonSize
+                        )
                     }
                     .buttonStyle(.plain)
                 } else {
                     NavigationLink { MemoriesView() } label: {
-                        Image("omoide_button")
-                            .resizable()
-                            .scaledToFit()
-                            .frame(width: buttonSize, height: buttonSize)
+                        MenuPopupActionIcon(
+                            imageName: "omoide_button",
+                            buttonSize: buttonSize
+                        )
                     }
                     .simultaneousGesture(TapGesture().onEnded {
                         bgmManager.playSE(.push)
                     })
+                    .buttonStyle(.plain)
                 }
             }
+            .frame(maxWidth: .infinity, alignment: .leading)
 
             HStack(spacing: spacing) {
                 if isToiletLocked {
@@ -3220,22 +3240,23 @@ private struct RightSideButtons: View {
                         bgmManager.playSE(.push)
                         onBlocked()
                     }) {
-                        Image("picture_button")
-                            .resizable()
-                            .scaledToFit()
-                            .frame(width: buttonSize, height: buttonSize)
+                        MenuPopupActionIcon(
+                            imageName: "picture_button",
+                            buttonSize: buttonSize
+                        )
                     }
                     .buttonStyle(.plain)
                 } else {
                     NavigationLink { ZukanView() } label: {
-                        Image("picture_button")
-                            .resizable()
-                            .scaledToFit()
-                            .frame(width: buttonSize, height: buttonSize)
+                        MenuPopupActionIcon(
+                            imageName: "picture_button",
+                            buttonSize: buttonSize
+                        )
                     }
                     .simultaneousGesture(TapGesture().onEnded {
                         bgmManager.playSE(.push)
                     })
+                    .buttonStyle(.plain)
                 }
 
                 if isToiletLocked {
@@ -3243,25 +3264,54 @@ private struct RightSideButtons: View {
                         bgmManager.playSE(.push)
                         onBlocked()
                     }) {
-                        Image("option_button")
-                            .resizable()
-                            .scaledToFit()
-                            .frame(width: buttonSize, height: buttonSize)
+                        MenuPopupActionIcon(
+                            imageName: "option_button",
+                            buttonSize: buttonSize
+                        )
                     }
                     .buttonStyle(.plain)
                 } else {
                     NavigationLink { SettingsView() } label: {
-                        Image("option_button")
-                            .resizable()
-                            .scaledToFit()
-                            .frame(width: buttonSize, height: buttonSize)
+                        MenuPopupActionIcon(
+                            imageName: "option_button",
+                            buttonSize: buttonSize
+                        )
                     }
                     .simultaneousGesture(TapGesture().onEnded {
                         bgmManager.playSE(.push)
                     })
+                    .buttonStyle(.plain)
                 }
             }
+            .frame(maxWidth: .infinity, alignment: .leading)
         }
+        .frame(width: HomeView.Layout.menuPopupGridWidth, alignment: .leading)
+    }
+}
+
+private struct MenuPopupActionIcon: View {
+    let imageName: String
+    let buttonSize: CGFloat
+
+    private var iconSize: CGFloat {
+        buttonSize * 0.74
+    }
+
+    var body: some View {
+        ZStack {
+            Image(HomeView.Layout.menuPopupButtonBackgroundAssetName)
+                .resizable()
+                .scaledToFit()
+                .frame(width: buttonSize, height: buttonSize)
+
+            Image(imageName)
+                .resizable()
+                .scaledToFit()
+                .frame(width: iconSize, height: iconSize)
+        }
+        .frame(width: buttonSize, height: buttonSize)
+        .contentShape(RoundedRectangle(cornerRadius: 24, style: .continuous))
+        .shadow(color: .black.opacity(0.16), radius: 8, x: 0, y: 4)
     }
 }
 
