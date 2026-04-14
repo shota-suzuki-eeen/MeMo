@@ -2008,9 +2008,13 @@ private struct StepBackdropMapView: UIViewRepresentable {
         center: CLLocationCoordinate2D(latitude: 35.681236, longitude: 139.767125),
         span: MKCoordinateSpan(latitudeDelta: 0.012, longitudeDelta: 0.012)
     )
+    private let followSpan = MKCoordinateSpan(latitudeDelta: 0.0065, longitudeDelta: 0.0065)
 
     func makeCoordinator() -> Coordinator {
-        Coordinator(defaultRegion: defaultRegion)
+        Coordinator(
+            defaultRegion: defaultRegion,
+            followSpan: followSpan
+        )
     }
 
     func makeUIView(context: Context) -> MKMapView {
@@ -2025,28 +2029,38 @@ private struct StepBackdropMapView: UIViewRepresentable {
         mapView.isZoomEnabled = false
         mapView.isScrollEnabled = false
         mapView.showsUserLocation = true
-        mapView.setRegion(defaultRegion, animated: false)
+        mapView.userTrackingMode = .none
+
+        if followsUserLocation {
+            if let cachedCoordinate = Coordinator.cachedUserCoordinate {
+                mapView.setRegion(
+                    MKCoordinateRegion(center: cachedCoordinate, span: followSpan),
+                    animated: false
+                )
+            }
+        } else {
+            mapView.setRegion(defaultRegion, animated: false)
+        }
+
         return mapView
     }
 
     func updateUIView(_ mapView: MKMapView, context: Context) {
-        context.coordinator.followsUserLocation = followsUserLocation
+        context.coordinator.updateFollowMode(followsUserLocation, on: mapView)
 
         let removableAnnotations = mapView.annotations.filter { !($0 is MKUserLocation) }
         mapView.removeAnnotations(removableAnnotations)
         mapView.removeOverlays(mapView.overlays)
 
         if followsUserLocation {
-            if mapView.userTrackingMode != .follow {
-                mapView.setUserTrackingMode(.follow, animated: false)
-            }
-        } else if mapView.userTrackingMode != .none {
-            mapView.setUserTrackingMode(.none, animated: false)
+            context.coordinator.applyCurrentUserRegionIfNeeded(on: mapView)
+        } else {
+            context.coordinator.resetFollowingState()
         }
 
         guard !points.isEmpty else {
             if !followsUserLocation {
-                mapView.setRegion(defaultRegion, animated: false)
+                context.coordinator.showDefaultRegion(on: mapView)
             }
             return
         }
@@ -2059,7 +2073,7 @@ private struct StepBackdropMapView: UIViewRepresentable {
             mapView.addAnnotation(annotation)
 
             if !followsUserLocation {
-                mapView.setCenter(coordinate, animated: false)
+                context.coordinator.showRegion(around: coordinate, on: mapView)
             }
             return
         }
@@ -2091,26 +2105,81 @@ private struct StepBackdropMapView: UIViewRepresentable {
 private extension StepBackdropMapView {
     final class Coordinator: NSObject, MKMapViewDelegate {
         var followsUserLocation: Bool = true
-        private let defaultRegion: MKCoordinateRegion
 
-        init(defaultRegion: MKCoordinateRegion) {
+        static var cachedUserCoordinate: CLLocationCoordinate2D?
+
+        private let defaultRegion: MKCoordinateRegion
+        private let followSpan: MKCoordinateSpan
+        private let recenterDistanceThreshold: CLLocationDistance = 12
+
+        private var hasAppliedInitialUserRegion = false
+        private var lastUserCoordinate: CLLocationCoordinate2D?
+
+        init(
+            defaultRegion: MKCoordinateRegion,
+            followSpan: MKCoordinateSpan
+        ) {
             self.defaultRegion = defaultRegion
+            self.followSpan = followSpan
+        }
+
+        func updateFollowMode(_ followsUserLocation: Bool, on mapView: MKMapView) {
+            let modeChanged = self.followsUserLocation != followsUserLocation
+            self.followsUserLocation = followsUserLocation
+
+            if mapView.userTrackingMode != .none {
+                mapView.setUserTrackingMode(.none, animated: false)
+            }
+
+            guard followsUserLocation else { return }
+
+            if modeChanged {
+                resetFollowingState()
+                applyCurrentUserRegionIfNeeded(on: mapView)
+            }
+        }
+
+        func applyCurrentUserRegionIfNeeded(on mapView: MKMapView) {
+            guard followsUserLocation else { return }
+
+            let coordinate = mapView.userLocation.location?.coordinate ?? Self.cachedUserCoordinate
+            guard let coordinate else { return }
+
+            applyUserRegion(
+                on: mapView,
+                coordinate: coordinate,
+                forceRegionRefresh: !hasAppliedInitialUserRegion
+            )
+        }
+
+        func resetFollowingState() {
+            hasAppliedInitialUserRegion = false
+            lastUserCoordinate = nil
+        }
+
+        func showDefaultRegion(on mapView: MKMapView) {
+            if let cachedUserCoordinate = Self.cachedUserCoordinate {
+                showRegion(around: cachedUserCoordinate, on: mapView)
+            } else {
+                mapView.setRegion(defaultRegion, animated: false)
+            }
+        }
+
+        func showRegion(around coordinate: CLLocationCoordinate2D, on mapView: MKMapView) {
+            let region = MKCoordinateRegion(center: coordinate, span: followSpan)
+            mapView.setRegion(region, animated: false)
         }
 
         func mapView(_ mapView: MKMapView, didUpdate userLocation: MKUserLocation) {
-            guard followsUserLocation else { return }
-            guard let location = userLocation.location else { return }
+            guard followsUserLocation,
+                  let location = userLocation.location else { return }
 
-            let region = MKCoordinateRegion(
-                center: location.coordinate,
-                span: MKCoordinateSpan(latitudeDelta: 0.0065, longitudeDelta: 0.0065)
-            )
-            mapView.setRegion(region, animated: false)
+            applyUserRegion(on: mapView, coordinate: location.coordinate)
         }
 
         func mapView(_ mapView: MKMapView, didFailToLocateUserWithError error: Error) {
             guard !followsUserLocation else { return }
-            mapView.setRegion(defaultRegion, animated: false)
+            showDefaultRegion(on: mapView)
         }
 
         func mapView(_ mapView: MKMapView, rendererFor overlay: MKOverlay) -> MKOverlayRenderer {
@@ -2147,6 +2216,44 @@ private extension StepBackdropMapView {
             }
 
             return view
+        }
+
+        private func applyUserRegion(
+            on mapView: MKMapView,
+            coordinate: CLLocationCoordinate2D,
+            forceRegionRefresh: Bool = false
+        ) {
+            Self.cachedUserCoordinate = coordinate
+
+            if forceRegionRefresh || !hasAppliedInitialUserRegion {
+                hasAppliedInitialUserRegion = true
+                lastUserCoordinate = coordinate
+                mapView.setRegion(
+                    MKCoordinateRegion(center: coordinate, span: followSpan),
+                    animated: false
+                )
+                return
+            }
+
+            guard shouldRecenter(for: coordinate) else { return }
+
+            lastUserCoordinate = coordinate
+            mapView.setCenter(coordinate, animated: false)
+        }
+
+        private func shouldRecenter(for coordinate: CLLocationCoordinate2D) -> Bool {
+            guard let lastUserCoordinate else { return true }
+
+            let previousLocation = CLLocation(
+                latitude: lastUserCoordinate.latitude,
+                longitude: lastUserCoordinate.longitude
+            )
+            let newLocation = CLLocation(
+                latitude: coordinate.latitude,
+                longitude: coordinate.longitude
+            )
+
+            return newLocation.distance(from: previousLocation) >= recenterDistanceThreshold
         }
     }
 }
