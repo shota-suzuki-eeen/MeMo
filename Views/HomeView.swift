@@ -346,7 +346,8 @@ struct HomeView: View {
         static let fullnessGaugeInnerSize: CGFloat = 115
 
         static let characterTopOffset: CGFloat = 45
-        static let characterMaxWidth: CGFloat = 210
+        static let characterMaxHeight: CGFloat = 480
+        static let characterTouchWidth: CGFloat = 240
 
         static let menuPopupCornerRadius: CGFloat = 20
         static let menuPopupHorizontalPadding: CGFloat = 18
@@ -455,7 +456,8 @@ struct HomeView: View {
                         .frame(height: Layout.bannerHeight)
 
                     GeometryReader { geo in
-                        let characterWidth = min(geo.size.width * 0.62, Layout.characterMaxWidth)
+                        let characterDisplayHeight = min(geo.size.width * 0.9, Layout.characterMaxHeight)
+                        let characterTouchWidth = min(geo.size.width * 0.72, Layout.characterTouchWidth)
 
                         ZStack {
                             TopStatusButtons(
@@ -473,7 +475,7 @@ struct HomeView: View {
 
                             Rectangle()
                                 .fill(Color.black.opacity(0.001))
-                                .frame(width: characterWidth, height: characterWidth * 1.15)
+                                .frame(width: characterTouchWidth, height: characterDisplayHeight * 1.15)
                                 .offset(y: Layout.characterTopOffset)
                                 .zIndex(Layout.zCharacter)
                                 .highPriorityGesture(
@@ -489,7 +491,7 @@ struct HomeView: View {
                             Image(characterAssetName.isEmpty ? preferredCharacterRestAssetName : characterAssetName)
                                 .resizable()
                                 .scaledToFit()
-                                .frame(maxWidth: characterWidth)
+                                .frame(maxHeight: characterDisplayHeight)
                                 .offset(
                                     x: isToiletLocked ? (isToiletWiggleOn ? Layout.toiletWiggleOffset : -Layout.toiletWiggleOffset) : 0,
                                     y: Layout.characterTopOffset
