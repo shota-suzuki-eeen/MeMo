@@ -263,7 +263,7 @@ extension AppState {
 
     // ✅ トイレpoop仕様
     static let toiletPoopInitialCount: Int = 1
-    static let toiletPoopMaxCount: Int = 10
+    static let toiletPoopMaxCount: Int = 15
     static let toiletPoopSpawnIntervalSeconds: TimeInterval = 15 * 60
 
     /// 歩数通貨の所持数
@@ -638,56 +638,72 @@ extension AppState {
         var items = toiletPoops()
         let activeItems = items.filter { !$0.isCleared }
         let activeCount = activeItems.count
+        var didChange = false
 
         if activeCount == 0 {
             let elapsedSinceFlag = max(0, now.timeIntervalSince(flagAt))
             let additionalCount = Int(elapsedSinceFlag / interval)
             let totalCount = min(maxCount, initialCount + additionalCount)
 
-            guard totalCount > 0 else {
+            if totalCount > 0 {
+                let restoredItems = generateToiletPoops(count: totalCount)
+                setToiletPoops(restoredItems)
+                didChange = true
+
+                if totalCount >= maxCount {
+                    toiletPoopLastSpawnAt = now
+                } else {
+                    let restoredAdditionalCount = max(0, totalCount - initialCount)
+                    toiletPoopLastSpawnAt = flagAt.addingTimeInterval(TimeInterval(restoredAdditionalCount) * interval)
+                }
+            } else if toiletPoopLastSpawnAt != flagAt {
                 toiletPoopLastSpawnAt = flagAt
-                return false
+                didChange = true
             }
 
-            let restoredItems = generateToiletPoops(count: totalCount)
-            setToiletPoops(restoredItems)
-
-            let restoredAdditionalCount = max(0, totalCount - initialCount)
-            toiletPoopLastSpawnAt = flagAt.addingTimeInterval(TimeInterval(restoredAdditionalCount) * interval)
-            return true
+            return didChange
         }
 
-        guard activeCount < maxCount else {
-            if toiletPoopLastSpawnAt == nil {
-                let inferredAdditionalCount = max(0, activeCount - initialCount)
-                toiletPoopLastSpawnAt = flagAt.addingTimeInterval(TimeInterval(inferredAdditionalCount) * interval)
+        if activeCount >= maxCount {
+            if toiletPoopLastSpawnAt != now {
+                toiletPoopLastSpawnAt = now
+                didChange = true
             }
-            return false
+            return didChange
         }
 
         let effectiveLastSpawnAt: Date = {
             if let lastSpawnAt = toiletPoopLastSpawnAt {
                 return lastSpawnAt
             }
+
             let inferredAdditionalCount = max(0, activeCount - initialCount)
             return flagAt.addingTimeInterval(TimeInterval(inferredAdditionalCount) * interval)
         }()
 
         if toiletPoopLastSpawnAt == nil {
             toiletPoopLastSpawnAt = effectiveLastSpawnAt
+            didChange = true
         }
 
-        let elapsed = now.timeIntervalSince(effectiveLastSpawnAt)
-        guard elapsed >= interval else { return false }
-
+        let elapsed = max(0, now.timeIntervalSince(effectiveLastSpawnAt))
         let addableCount = min(Int(elapsed / interval), maxCount - activeCount)
-        guard addableCount > 0 else { return false }
+
+        guard addableCount > 0 else {
+            return didChange
+        }
 
         items.append(contentsOf: generateToiletPoops(count: addableCount, existing: activeItems))
         setToiletPoops(items)
+        didChange = true
 
-        toiletPoopLastSpawnAt = effectiveLastSpawnAt.addingTimeInterval(TimeInterval(addableCount) * interval)
-        return true
+        if activeCount + addableCount >= maxCount {
+            toiletPoopLastSpawnAt = now
+        } else {
+            toiletPoopLastSpawnAt = effectiveLastSpawnAt.addingTimeInterval(TimeInterval(addableCount) * interval)
+        }
+
+        return didChange
     }
 }
 
