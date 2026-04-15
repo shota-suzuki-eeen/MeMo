@@ -46,25 +46,26 @@ final class ZukanViewModel: ObservableObject {
         }
     }
 
-    /// ✅ 図鑑グリッド用スロットを返す
-    /// - 未獲得：CalPet_secret を表示
-    /// - 獲得済み：PetMaster.assetName(for:) を表示
-    func makeZukanSlots(state: AppState) -> [ZukanPetSlot] {
+    /// ✅ 図鑑に表示する所持キャラIDだけを返す
+    func visiblePetIDs(state: AppState) -> [String] {
         let owned = Set(state.ownedPetIDs())
+        return initialPetIDs.filter { owned.contains($0) }
+    }
+
+    /// ✅ 図鑑グリッド用スロットを返す
+    /// - 獲得済みキャラのみを表示
+    func makeZukanSlots(state: AppState) -> [ZukanPetSlot] {
         let current = state.normalizedCurrentPetID
 
-        return initialPetIDs.map { id in
-            let isOwned = owned.contains(id)
-            let name = isOwned
-                ? (PetMaster.all.first(where: { $0.id == id })?.name ?? id)
-                : "？？？"
-            let imageName = isOwned ? PetMaster.assetName(for: id) : "CalPet_secret"
+        return visiblePetIDs(state: state).map { id in
+            let name = PetMaster.all.first(where: { $0.id == id })?.name ?? id
+            let imageName = PetMaster.assetName(for: id)
 
             return ZukanPetSlot(
                 id: id,
                 name: name,
                 imageName: imageName,
-                isOwned: isOwned,
+                isOwned: true,
                 isCurrentPet: (current == id)
             )
         }
@@ -90,13 +91,18 @@ final class ZukanViewModel: ObservableObject {
     /// ✅ 現在お世話中のキャラが存在するページ番号を返す
     /// - 見つからない場合は 0
     func initialPageIndex(state: AppState) -> Int {
-        let currentPetID = state.normalizedCurrentPetID
+        pageIndex(for: state.normalizedCurrentPetID, state: state)
+    }
 
-        guard let currentIndex = initialPetIDs.firstIndex(of: currentPetID) else {
+    /// ✅ 指定キャラが存在するページ番号を返す
+    func pageIndex(for petID: String, state: AppState) -> Int {
+        let visibleIDs = visiblePetIDs(state: state)
+
+        guard let index = visibleIDs.firstIndex(of: petID) else {
             return 0
         }
 
-        return currentIndex / pageSize
+        return index / pageSize
     }
 
     /// ✅ 指定ページに表示するスロット一覧を返す

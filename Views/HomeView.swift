@@ -64,8 +64,6 @@ struct HomeView: View {
     @State private var toiletTicketCleanupTask: Task<Void, Never>?
     @State private var foodFeedResolutionTask: Task<Void, Never>?
     @State private var friendshipWrapTask: Task<Void, Never>?
-    @State private var superFavoriteReactionTask: Task<Void, Never>?
-    @State private var delayedLoveSoundTask: Task<Void, Never>?
     @State private var toiletWiggleActivationTask: Task<Void, Never>?
     @State private var floatingHeartCleanupTasks: [UUID: Task<Void, Never>] = [:]
     @State private var happinessDecayAnimationTask: Task<Void, Never>?
@@ -1143,12 +1141,6 @@ struct HomeView: View {
         friendshipWrapTask?.cancel()
         friendshipWrapTask = nil
 
-        superFavoriteReactionTask?.cancel()
-        superFavoriteReactionTask = nil
-
-        delayedLoveSoundTask?.cancel()
-        delayedLoveSoundTask = nil
-
         toiletWiggleActivationTask?.cancel()
         toiletWiggleActivationTask = nil
 
@@ -2059,57 +2051,6 @@ struct HomeView: View {
         await MainActor.run { characterAssetName = preferredCharacterRestAssetName }
     }
 
-    private func isSuperFavoriteFood(foodId: String, petID: String) -> Bool {
-        switch petID {
-        case "pet_001": return foodId == "ra-men"
-        case "pet_002": return foodId == "icecream"
-        case "pet_003": return foodId == "barger"
-        case "pet_004": return foodId == "coke"
-        case "pet_005": return foodId == "yo-guruto"
-        case "pet_006": return foodId == "sarad"
-        case "pet_007": return foodId == "coffee"
-        case "pet_000": return foodId == "onigiri"
-        case "pet_008": return foodId == "nabe"
-        case "pet_009": return foodId == "sute-ki"
-        case "pet_010": return foodId == "pizza"
-        default:
-            return false
-        }
-    }
-
-    @MainActor
-    private func playSuperFavoriteReactionIfPossible() {
-        guard !isToiletLocked else { return }
-
-        let base = currentBaseAssetName
-        let love = "\(base)_love"
-
-        guard !isCharacterActionRunning else { return }
-
-        superFavoriteReactionTask?.cancel()
-        isCharacterActionRunning = true
-        characterAssetName = love
-
-        superFavoriteReactionTask = scheduleMainActorTask(after: 0.9) {
-            characterAssetName = preferredCharacterRestAssetName
-            isCharacterActionRunning = false
-            superFavoriteReactionTask = nil
-        }
-    }
-
-    @MainActor
-    private func playFeedSound(isSuperFavorite: Bool) {
-        bgmManager.playSE(.eat)
-
-        guard isSuperFavorite else { return }
-
-        delayedLoveSoundTask?.cancel()
-        delayedLoveSoundTask = scheduleMainActorTask(after: 0.12) {
-            bgmManager.playSE(.love)
-            delayedLoveSoundTask = nil
-        }
-    }
-
     @discardableResult
     @MainActor
     private func resolveFood(foodId: String, state: AppState) -> Bool {
@@ -2156,12 +2097,7 @@ struct HomeView: View {
 
         _ = state.resolveFood(now: now)
 
-        let isSuperFavorite = isSuperFavoriteFood(foodId: food.id, petID: state.normalizedCurrentPetID)
-        let gainedPoint = isSuperFavorite ? 20 : 10
-
-        if isSuperFavorite {
-            _ = state.revealSuperFavorite(petID: state.normalizedCurrentPetID)
-        }
+        let gainedPoint = 10
 
         let happinessBonus = state.happinessBonusPoints(forFoodID: food.id)
         if happinessBonus > 0 {
@@ -2173,15 +2109,10 @@ struct HomeView: View {
         syncDisplayedHappiness(animated: happinessBonus > 0)
 
         addFriendshipWithAnimation(points: gainedPoint, state: state)
-        playFeedSound(isSuperFavorite: isSuperFavorite)
+        bgmManager.playSE(.eat)
 
         let happinessSuffix = happinessBonus > 0 ? " / 幸せ度 +\(happinessBonus)" : ""
-        if isSuperFavorite {
-            toast("\(food.name)をあげた！ 満腹度 \(normalizedFullnessLevel(feedResult.after))/\(fullnessMaxLevel) +\(gainedPoint)\(happinessSuffix)")
-            playSuperFavoriteReactionIfPossible()
-        } else {
-            toast("\(food.name)をあげた！ 満腹度 \(normalizedFullnessLevel(feedResult.after))/\(fullnessMaxLevel) +\(gainedPoint)\(happinessSuffix)")
-        }
+        toast("\(food.name)をあげた！ 満腹度 \(normalizedFullnessLevel(feedResult.after))/\(fullnessMaxLevel) +\(gainedPoint)\(happinessSuffix)")
 
         syncFoodSelectorSelection()
         updateWidgetSnapshot(forceReload: true)

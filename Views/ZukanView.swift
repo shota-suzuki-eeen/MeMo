@@ -63,23 +63,17 @@ struct ZukanView: View {
                     )
                     .padding(.top, 6)
 
-                    ZukanDetailPanel(
-                        state: state,
-                        selectedPetID: selectedPetID ?? state.normalizedCurrentPetID,
-                        onTrain: { id in
-                            handleTrainTapped(state: state, id: id)
-                        },
-                        isDeveloperMode: isDeveloperMode
-                    )
-                    .padding(.top, 6)
-
+                    Spacer(minLength: 0)
                 } else {
+                    Spacer(minLength: 0)
+
                     Text("（準備中）")
                         .foregroundStyle(.secondary)
-                }
 
-                Spacer(minLength: 0)
+                    Spacer(minLength: 0)
+                }
             }
+            .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
             .padding(.horizontal, 16)
         }
         .background(
@@ -93,22 +87,29 @@ struct ZukanView: View {
                     .ignoresSafeArea()
             }
         )
+        .safeAreaInset(edge: .bottom, spacing: 0) {
+            if let state {
+                ZukanDetailPanel(
+                    selectedPetID: selectedPetID ?? state.normalizedCurrentPetID,
+                    onTrain: { id in
+                        handleTrainTapped(state: state, id: id)
+                    },
+                    isDeveloperMode: isDeveloperMode,
+                    isCurrentPet: state.normalizedCurrentPetID == (selectedPetID ?? state.normalizedCurrentPetID)
+                )
+                .padding(.horizontal, 16)
+                .padding(.top, 6)
+                .padding(.bottom, 16)
+                .background(Color.clear)
+            }
+        }
         .navigationTitle("図鑑")
         .navigationBarTitleDisplayMode(.inline)
         .onAppear {
             guard let state else { return }
 
             state.ensureInitialPetsIfNeeded()
-
-            if selectedPetID == nil || selectedPetID == "pet_011" {
-                let initialPetIDs = viewModel.initialPetIDs
-                selectedPetID = initialPetIDs.contains(state.normalizedCurrentPetID)
-                    ? state.normalizedCurrentPetID
-                    : initialPetIDs.first
-            }
-
-            currentPage = viewModel.initialPageIndex(state: state)
-
+            syncSelectionAndPage(state: state)
             updateWidgetSnapshot(state: state, forceReload: true)
 
             // ✅ AdMob のロードは一旦停止
@@ -116,9 +117,11 @@ struct ZukanView: View {
         }
         .onChange(of: state?.normalizedCurrentPetID) { _, _ in
             guard let state else { return }
-            let pageCount = viewModel.pageCount(state: state)
-            let safePage = min(max(0, viewModel.initialPageIndex(state: state)), max(0, pageCount - 1))
-            currentPage = safePage
+            syncSelectionAndPage(state: state)
+        }
+        .onChange(of: state?.ownedPetIDsData) { _, _ in
+            guard let state else { return }
+            syncSelectionAndPage(state: state)
         }
     }
 
@@ -135,7 +138,7 @@ struct ZukanView: View {
 
             state.currentPetID = id
             selectedPetID = id
-            currentPage = viewModel.initialPageIndex(state: state)
+            currentPage = viewModel.pageIndex(for: id, state: state)
 
             print("✅ after state.currentPetID:", state.currentPetID)
             print("✅ after state.normalizedCurrentPetID:", state.normalizedCurrentPetID)
@@ -147,6 +150,31 @@ struct ZukanView: View {
 
         // ✅ AdMob を一旦停止中のため、そのまま切替
         switchPet()
+    }
+
+    private func syncSelectionAndPage(state: AppState) {
+        let visiblePetIDs = viewModel.visiblePetIDs(state: state)
+
+        guard !visiblePetIDs.isEmpty else {
+            selectedPetID = nil
+            currentPage = 0
+            return
+        }
+
+        let preferredPetID: String
+        if let selectedPetID, visiblePetIDs.contains(selectedPetID) {
+            preferredPetID = selectedPetID
+        } else if visiblePetIDs.contains(state.normalizedCurrentPetID) {
+            preferredPetID = state.normalizedCurrentPetID
+        } else {
+            preferredPetID = visiblePetIDs[0]
+        }
+
+        self.selectedPetID = preferredPetID
+
+        let pageCount = viewModel.pageCount(state: state)
+        let pageIndex = viewModel.pageIndex(for: preferredPetID, state: state)
+        currentPage = min(max(0, pageIndex), max(0, pageCount - 1))
     }
 
     // MARK: - Persistence
@@ -349,10 +377,10 @@ private struct ZukanCell: View {
 // MARK: - Detail (Lower half)
 
 private struct ZukanDetailPanel: View {
-    let state: AppState
     let selectedPetID: String
     let onTrain: (String) -> Void
     let isDeveloperMode: Bool
+    let isCurrentPet: Bool
 
     private var selectedName: String {
         PetMaster.all.first(where: { $0.id == selectedPetID })?.name ?? selectedPetID
@@ -362,20 +390,8 @@ private struct ZukanDetailPanel: View {
         PetMaster.assetName(for: selectedPetID)
     }
 
-    private var isCurrent: Bool {
-        state.normalizedCurrentPetID == selectedPetID
-    }
-
-    private var superFavoriteDisplayText: String {
-        state.isSuperFavoriteRevealed(petID: selectedPetID)
-        ? PetMaster.superFavoriteFoodName(for: selectedPetID)
-        : "？？？"
-    }
-
-    private var descriptionBodyText: String {
-        let full = PetMaster.description(for: selectedPetID, state: state)
-        let parts = full.components(separatedBy: "\n\n【大好物】")
-        return parts.first ?? full
+    private var descriptionText: String {
+        PetMaster.description(for: selectedPetID)
     }
 
     var body: some View {
@@ -384,7 +400,7 @@ private struct ZukanDetailPanel: View {
                 onTrain(selectedPetID)
             } label: {
                 Text(
-                    isCurrent
+                    isCurrentPet
                     ? "\(selectedName) をお世話中"
                     : (
                         isDeveloperMode
@@ -397,8 +413,8 @@ private struct ZukanDetailPanel: View {
                 .padding(.vertical, 12)
             }
             .buttonStyle(.borderedProminent)
-            .disabled(isCurrent)
-            .opacity(isCurrent ? 0.6 : 1.0)
+            .disabled(isCurrentPet)
+            .opacity(isCurrentPet ? 0.6 : 1.0)
 
             HStack(spacing: 12) {
                 VStack {
@@ -415,14 +431,9 @@ private struct ZukanDetailPanel: View {
                     Text(selectedName)
                         .font(.headline)
 
-                    Text(descriptionBodyText)
+                    Text(descriptionText)
                         .font(.subheadline)
                         .foregroundStyle(.secondary)
-                        .frame(maxWidth: .infinity, alignment: .leading)
-
-                    Text("【大好物】\(superFavoriteDisplayText)")
-                        .font(.subheadline.weight(.semibold))
-                        .foregroundStyle(.primary)
                         .frame(maxWidth: .infinity, alignment: .leading)
 
                     Spacer(minLength: 0)

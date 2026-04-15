@@ -12,24 +12,15 @@ import Foundation
 struct PetMasterItem: Identifiable, Codable, Equatable {
     let id: String
     let name: String
-
-    // 将来的に「好物/大好物」倍率を入れる可能性があるので枠だけ用意（現状ロジック未使用）
-    // 既存の .init(id:name:personality:) を壊さないためデフォルト値を付与
-    // Codable 警告回避のため let + 初期値 ではなく var にする
-    var favoriteFoodKind: FoodKind? = nil
-    var superFavoriteFoodKind: FoodKind? = nil
 }
 
 // MARK: - Care / Friendship (Spec v6)
 
 enum FriendshipSpec {
     static let maxPoint: Int = 100
-
     static let cardThreshold: Int = 100
 
-    static let foodNormal: Int = 10
-    static let foodFavorite: Int = 20
-    static let foodSuperFavorite: Int = 30
+    static let foodGain: Int = 10
 
     static let bathGain: Int = 15
     static let bathCooldownHours: Int = 8
@@ -39,26 +30,6 @@ enum FriendshipSpec {
     static let toiletNormal: Int = 10
     static let toiletWithin1h: Int = 20
     static let toiletBonusWindowSeconds: TimeInterval = 60 * 60
-}
-
-enum FoodKind: String, Codable, CaseIterable {
-    case normal
-    case favorite
-    case superFavorite
-
-    var gainPoint: Int {
-        switch self {
-        case .normal: return FriendshipSpec.foodNormal
-        case .favorite: return FriendshipSpec.foodFavorite
-        case .superFavorite: return FriendshipSpec.foodSuperFavorite
-        }
-    }
-}
-
-enum FoodTimeSlot: String, Codable, CaseIterable {
-    case morning
-    case noon
-    case night
 }
 
 // MARK: - Master List
@@ -175,28 +146,7 @@ enum PetMaster {
         }
     }
 
-    // MARK: - ✅ Super Favorite (Master)
-
-    /// ✅ 各キャラの「大好物」名称（マスタ）
-    static func superFavoriteFoodName(for petID: String) -> String {
-        switch petID {
-        case "pet_000": return "おにぎり"
-        case "pet_001": return "ラーメン"
-        case "pet_002": return "ソフトクリーム"
-        case "pet_003": return "ハンバーガー"
-        case "pet_004": return "コーラ"
-        case "pet_005": return "ヨーグルト"
-        case "pet_006": return "サラダ"
-        case "pet_007": return "コーヒー"
-        case "pet_008": return "お鍋"
-        case "pet_009": return "ステーキ"
-        case "pet_010": return "ピザ"
-        default:
-            return "？？？"
-        }
-    }
-
-    /// ✅ 説明文の本文（大好物行は別で付与する）
+    /// ✅ 説明文の本文
     private static func baseDescriptionText(for petID: String) -> String {
         switch petID {
         case "pet_000":
@@ -228,19 +178,7 @@ enum PetMaster {
 
     // MARK: - Description API
 
-    /// ✅ 既存互換：stateを渡さない場合は常に「？？？」表示（初期状態と同じ）
     static func description(for petID: String) -> String {
-        let base = baseDescriptionText(for: petID)
-        return base + "\n\n【大好物】？？？"
-    }
-
-    /// ✅ 追加：図鑑の表示用（判明済みなら大好物名を表示）
-    static func description(for petID: String, state: AppState) -> String {
-        let base = baseDescriptionText(for: petID)
-
-        let revealed = state.isSuperFavoriteRevealed(petID: petID)
-        let foodText = revealed ? superFavoriteFoodName(for: petID) : "？？？"
-
-        return base + "\n\n【大好物】" + foodText
+        baseDescriptionText(for: petID)
     }
 }
