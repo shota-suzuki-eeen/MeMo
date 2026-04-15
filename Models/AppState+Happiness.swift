@@ -10,6 +10,7 @@ import Foundation
 
 extension AppState {
     static let happinessMaxPointsPerLevel: Int = 100
+    static let happinessMaxLevel: Int = 20
     static let happinessTouchesPerPoint: Int = 5
     static let happinessDailyPettingPointLimit: Int = 100
     static let happinessDecayIntervalSeconds: TimeInterval = 2 * 60
@@ -65,8 +66,15 @@ extension AppState {
     }
 
     var happinessLevel: Int {
-        get { max(0, happinessDefaults.integer(forKey: HappinessStorageKeys.level)) }
-        set { happinessDefaults.set(max(0, newValue), forKey: HappinessStorageKeys.level) }
+        get {
+            min(AppState.happinessMaxLevel, max(0, happinessDefaults.integer(forKey: HappinessStorageKeys.level)))
+        }
+        set {
+            happinessDefaults.set(
+                min(AppState.happinessMaxLevel, max(0, newValue)),
+                forKey: HappinessStorageKeys.level
+            )
+        }
     }
 
     var happinessLastDecayAt: Date? {
@@ -127,11 +135,23 @@ extension AppState {
         happinessDefaults.set(data, forKey: HappinessStorageKeys.claimedRewardLevels)
     }
 
+    private func happinessTotalUnits(level: Int, point: Int) -> Int {
+        let safeLevel = min(AppState.happinessMaxLevel, max(0, level))
+        let safePoint = min(AppState.happinessMaxPointsPerLevel - 1, max(0, point))
+        return (safeLevel * AppState.happinessMaxPointsPerLevel) + safePoint
+    }
+
     private func increaseHappinessOnePoint() {
+        if happinessLevel >= AppState.happinessMaxLevel {
+            happinessLevel = AppState.happinessMaxLevel
+            happinessPoint = min(AppState.happinessMaxPointsPerLevel - 1, happinessPoint + 1)
+            return
+        }
+
         let next = happinessPoint + 1
         if next >= AppState.happinessMaxPointsPerLevel {
             happinessPoint = 0
-            happinessLevel += 1
+            happinessLevel = min(AppState.happinessMaxLevel, happinessLevel + 1)
         } else {
             happinessPoint = next
         }
@@ -160,6 +180,7 @@ extension AppState {
         let safePoints = max(0, points)
         let beforePoint = happinessPoint
         let beforeLevel = happinessLevel
+        let beforeUnits = happinessTotalUnits(level: beforeLevel, point: beforePoint)
 
         guard safePoints > 0 else {
             return .init(
@@ -172,15 +193,27 @@ extension AppState {
         }
 
         for _ in 0..<safePoints {
+            let previousLevel = happinessLevel
+            let previousPoint = happinessPoint
             increaseHappinessOnePoint()
+
+            if previousLevel == happinessLevel,
+               previousPoint == happinessPoint,
+               happinessLevel >= AppState.happinessMaxLevel,
+               happinessPoint >= AppState.happinessMaxPointsPerLevel - 1 {
+                break
+            }
         }
+
+        let afterUnits = happinessTotalUnits(level: happinessLevel, point: happinessPoint)
+        let actualGainedPoints = max(0, afterUnits - beforeUnits)
 
         return .init(
             beforePoint: beforePoint,
             beforeLevel: beforeLevel,
             afterPoint: happinessPoint,
             afterLevel: happinessLevel,
-            gainedPoints: safePoints
+            gainedPoints: actualGainedPoints
         )
     }
 
@@ -204,11 +237,13 @@ extension AppState {
         }
 
         let totalTouchCount = happinessPettingTouchCountToday + safeCount
-        let gainedPoints = min(availablePoints, totalTouchCount / AppState.happinessTouchesPerPoint)
+        let requestedPoints = min(availablePoints, totalTouchCount / AppState.happinessTouchesPerPoint)
 
-        if gainedPoints > 0 {
-            _ = addHappinessPoints(gainedPoints, now: now)
-            happinessPettingPointsToday += gainedPoints
+        var actualGainedPoints = 0
+        if requestedPoints > 0 {
+            let gainResult = addHappinessPoints(requestedPoints, now: now)
+            actualGainedPoints = gainResult.gainedPoints
+            happinessPettingPointsToday += actualGainedPoints
         }
 
         if happinessPettingPointsToday >= AppState.happinessDailyPettingPointLimit {
@@ -218,7 +253,7 @@ extension AppState {
         }
 
         return .init(
-            gainedPoints: gainedPoints,
+            gainedPoints: actualGainedPoints,
             afterTouchCount: happinessPettingTouchCountToday,
             afterTodayPoints: happinessPettingPointsToday,
             afterPoint: happinessPoint,

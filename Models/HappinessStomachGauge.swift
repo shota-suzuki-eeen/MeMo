@@ -15,6 +15,26 @@ struct HappinessStomachGauge: View {
     let outerSize: CGFloat
     let innerSize: CGFloat
 
+    @State private var displayedLevelAssetName: String
+    @State private var levelBadgeOpacity: Double = 1
+
+    init(
+        point: Double,
+        displayPoint: Int,
+        maxPoint: Int,
+        level: Int,
+        outerSize: CGFloat,
+        innerSize: CGFloat
+    ) {
+        self.point = point
+        self.displayPoint = displayPoint
+        self.maxPoint = maxPoint
+        self.level = level
+        self.outerSize = outerSize
+        self.innerSize = innerSize
+        _displayedLevelAssetName = State(initialValue: HappinessStomachGauge.levelAssetName(for: level))
+    }
+
     private var clampedPoint: Double {
         min(Double(maxPoint), max(0, point))
     }
@@ -34,6 +54,11 @@ struct HappinessStomachGauge: View {
 
     private var liquidHighlightColor: Color {
         Color(red: 1.0, green: 0.55, blue: 0.64)
+    }
+
+    private static func levelAssetName(for level: Int) -> String {
+        let clampedLevel = min(AppState.happinessMaxLevel, max(0, level))
+        return String(clampedLevel)
     }
 
     var body: some View {
@@ -161,9 +186,54 @@ struct HappinessStomachGauge: View {
                 }
                 .frame(width: outerSize, height: outerSize)
                 .drawingGroup()
+
+                HappinessLevelFrontBadge(
+                    assetName: displayedLevelAssetName,
+                    outerSize: outerSize,
+                    opacity: levelBadgeOpacity
+                )
+                .allowsHitTesting(false)
             }
             .shadow(color: .black.opacity(0.16), radius: 8, x: 0, y: 5)
         }
+        .onChange(of: level) { _, newLevel in
+            let nextAssetName = Self.levelAssetName(for: newLevel)
+            guard nextAssetName != displayedLevelAssetName else { return }
+
+            withAnimation(.easeOut(duration: 0.16)) {
+                levelBadgeOpacity = 0
+            }
+
+            DispatchQueue.main.asyncAfter(deadline: .now() + 0.16) {
+                displayedLevelAssetName = nextAssetName
+                withAnimation(.easeIn(duration: 0.22)) {
+                    levelBadgeOpacity = 1
+                }
+            }
+        }
+    }
+}
+
+private struct HappinessLevelFrontBadge: View {
+    let assetName: String
+    let outerSize: CGFloat
+    let opacity: Double
+
+    private var badgeWidth: CGFloat {
+        outerSize * 0.58
+    }
+
+    private var badgeHeight: CGFloat {
+        outerSize * 0.32
+    }
+
+    var body: some View {
+        Image(assetName)
+            .resizable()
+            .scaledToFit()
+            .frame(width: badgeWidth, height: badgeHeight)
+            .opacity(opacity)
+            .shadow(color: .black.opacity(0.16), radius: 4, x: 0, y: 2)
     }
 }
 
