@@ -59,6 +59,16 @@ struct HomeView: View {
     @State private var characterAssetName: String = ""
     @State private var idleLoopTask: Task<Void, Never>?
     @State private var isCharacterActionRunning: Bool = false
+    @State private var toastDismissTask: Task<Void, Never>?
+    @State private var toiletLockedPopupDismissTask: Task<Void, Never>?
+    @State private var toiletTicketCleanupTask: Task<Void, Never>?
+    @State private var foodFeedResolutionTask: Task<Void, Never>?
+    @State private var friendshipWrapTask: Task<Void, Never>?
+    @State private var superFavoriteReactionTask: Task<Void, Never>?
+    @State private var delayedLoveSoundTask: Task<Void, Never>?
+    @State private var toiletWiggleActivationTask: Task<Void, Never>?
+    @State private var floatingHeartCleanupTasks: [UUID: Task<Void, Never>] = [:]
+    @State private var happinessDecayAnimationTask: Task<Void, Never>?
 
     private let doubleBlinkChance: Double = 0.18
     private let doubleBlinkGapRange: ClosedRange<Double> = 0.18...0.45
@@ -978,11 +988,15 @@ struct HomeView: View {
         .onDisappear {
             isHomeVisible = false
             Haptics.stopRattle()
+            cancelDelayedHomeTasks()
 
             stopCharacterIdleLoop()
             isCharacterActionRunning = false
             characterAssetName = preferredCharacterRestAssetName
             activeTopInfoPopup = nil
+            showToast = false
+            toastMessage = nil
+            showToiletLockedPopup = false
             showFoodSelector = false
             resetFoodSelectorDragState()
             isFoodFeedingAnimationRunning = false
@@ -1081,6 +1095,58 @@ struct HomeView: View {
     }
 
     @MainActor
+    private func scheduleMainActorTask(
+        after delay: TimeInterval,
+        operation: @escaping @MainActor () -> Void
+    ) -> Task<Void, Never> {
+        Task { @MainActor in
+            let safeDelay = max(0, delay)
+
+            if safeDelay > 0 {
+                try? await Task.sleep(nanoseconds: UInt64(safeDelay * 1_000_000_000))
+            } else {
+                await Task.yield()
+            }
+
+            guard !Task.isCancelled else { return }
+            operation()
+        }
+    }
+
+    @MainActor
+    private func cancelDelayedHomeTasks() {
+        toastDismissTask?.cancel()
+        toastDismissTask = nil
+
+        toiletLockedPopupDismissTask?.cancel()
+        toiletLockedPopupDismissTask = nil
+
+        toiletTicketCleanupTask?.cancel()
+        toiletTicketCleanupTask = nil
+
+        foodFeedResolutionTask?.cancel()
+        foodFeedResolutionTask = nil
+
+        friendshipWrapTask?.cancel()
+        friendshipWrapTask = nil
+
+        superFavoriteReactionTask?.cancel()
+        superFavoriteReactionTask = nil
+
+        delayedLoveSoundTask?.cancel()
+        delayedLoveSoundTask = nil
+
+        toiletWiggleActivationTask?.cancel()
+        toiletWiggleActivationTask = nil
+
+        happinessDecayAnimationTask?.cancel()
+        happinessDecayAnimationTask = nil
+
+        floatingHeartCleanupTasks.values.forEach { $0.cancel() }
+        floatingHeartCleanupTasks.removeAll()
+    }
+
+    @MainActor
     private func syncDisplayedHappiness(animated: Bool = true) {
         state.resetHappinessPettingIfNeeded(now: Date())
         let point = state.happinessPoint
@@ -1098,23 +1164,33 @@ struct HomeView: View {
         }
     }
 
+    @MainActor
     private func scheduleHappinessDecayIfNeeded(now: Date = Date()) {
         let fullness = state.currentSatisfaction(now: now)
         state.refreshHappinessDecayTracking(fullnessLevel: fullness, now: now)
 
         guard fullness == 0 else {
+            happinessDecayAnimationTask?.cancel()
+            happinessDecayAnimationTask = nil
             syncDisplayedHappiness(animated: false)
             return
         }
 
         let pending = state.pendingHappinessDecayCount(fullnessLevel: fullness, now: now)
         guard pending > 0 else {
+            happinessDecayAnimationTask?.cancel()
+            happinessDecayAnimationTask = nil
             syncDisplayedHappiness(animated: false)
             return
         }
 
         guard !isAnimatingHappinessDecay else { return }
-        Task { await animatePendingHappinessDecay(units: pending) }
+
+        happinessDecayAnimationTask?.cancel()
+        happinessDecayAnimationTask = Task { @MainActor in
+            await animatePendingHappinessDecay(units: pending)
+            happinessDecayAnimationTask = nil
+        }
     }
 
     @MainActor
@@ -1128,14 +1204,17 @@ struct HomeView: View {
 
         isAnimatingHappinessDecay = true
         for _ in 0..<safeUnits {
+            guard !Task.isCancelled else { break }
             guard state.consumeOneHappinessDecayStep() else { break }
             syncDisplayedHappiness(animated: true)
             try? await Task.sleep(nanoseconds: 55_000_000)
+            guard !Task.isCancelled else { break }
         }
         isAnimatingHappinessDecay = false
         syncDisplayedHappiness(animated: false)
     }
 
+    @MainActor
     private func spawnFloatingHeart() {
         let heart = FloatingHeart(
             xOffset: CGFloat.random(in: -28...28),
@@ -1143,11 +1222,15 @@ struct HomeView: View {
         )
         floatingHearts.append(heart)
 
-        DispatchQueue.main.asyncAfter(deadline: .now() + 0.95) {
-            floatingHearts.removeAll { $0.id == heart.id }
+        let heartID = heart.id
+        floatingHeartCleanupTasks[heartID]?.cancel()
+        floatingHeartCleanupTasks[heartID] = scheduleMainActorTask(after: 0.95) {
+            floatingHearts.removeAll { $0.id == heartID }
+            floatingHeartCleanupTasks.removeValue(forKey: heartID)
         }
     }
 
+    @MainActor
     private func registerCharacterPettingTouch(count: Int = 1) {
         guard count > 0 else { return }
         let result = state.registerHappinessPettingTouch(count: count, now: Date())
@@ -1253,6 +1336,7 @@ struct HomeView: View {
         min(fullnessMaxLevel, max(0, value))
     }
 
+    @MainActor
     private func syncDisplayedFullness(now: Date = Date(), animated: Bool = true) {
         let newLevel = normalizedFullnessLevel(state.applySatisfactionDecayIfNeeded(now: now))
         let targetAnimatedLevel = Double(newLevel)
@@ -1273,6 +1357,7 @@ struct HomeView: View {
         }
     }
 
+    @MainActor
     private func syncToiletPoopsIfNeeded(containerSize: CGSize, now: Date = Date()) {
         guard containerSize.width > 1, containerSize.height > 1 else { return }
 
@@ -1359,6 +1444,7 @@ struct HomeView: View {
         save()
     }
 
+    @MainActor
     private func completeToiletPoopIfNeeded(id: String) {
         guard state.markToiletPoopCleared(id: id) else { return }
 
@@ -1708,6 +1794,7 @@ struct HomeView: View {
         }
     }
 
+    @MainActor
     private func feedSelectedFood(state: AppState) {
         stopFoodSelectorHorizontalRattleIfNeeded()
 
@@ -1749,10 +1836,12 @@ struct HomeView: View {
             Haptics.tap(style: .medium)
         }
 
-        DispatchQueue.main.asyncAfter(deadline: .now() + 0.16) {
-            let didFeed = resolveFood(foodId: selectedFood.id, state: state)
+        foodFeedResolutionTask?.cancel()
+        foodFeedResolutionTask = scheduleMainActorTask(after: 0.16) { [selectedFoodID = selectedFood.id] in
+            let didFeed = resolveFood(foodId: selectedFoodID, state: state)
             isFoodFeedingAnimationRunning = false
             foodSelectorDragOffset = .zero
+            foodFeedResolutionTask = nil
 
             if didFeed {
                 syncFoodSelectorSelection()
@@ -1763,16 +1852,19 @@ struct HomeView: View {
         }
     }
 
+    @MainActor
     private func showToiletLockedMessage() {
         toiletLockedPopupText = "\(currentPetName)は今それどころじゃない！"
         withAnimation(.easeOut(duration: 0.12)) {
             showToiletLockedPopup = true
         }
 
-        DispatchQueue.main.asyncAfter(deadline: .now() + Layout.lockedPopupShowSeconds) {
+        toiletLockedPopupDismissTask?.cancel()
+        toiletLockedPopupDismissTask = scheduleMainActorTask(after: Layout.lockedPopupShowSeconds) {
             withAnimation(.easeInOut(duration: 0.18)) {
                 showToiletLockedPopup = false
             }
+            toiletLockedPopupDismissTask = nil
         }
 
         Task { @MainActor in
@@ -1780,17 +1872,22 @@ struct HomeView: View {
         }
     }
 
+    @MainActor
     private func updateToiletWiggle() {
+        toiletWiggleActivationTask?.cancel()
+
         if isToiletLocked {
             isToiletWiggleOn = false
-            DispatchQueue.main.async {
+            toiletWiggleActivationTask = scheduleMainActorTask(after: 0) {
                 isToiletWiggleOn = true
+                toiletWiggleActivationTask = nil
             }
         } else {
             isToiletWiggleOn = false
         }
     }
 
+    @MainActor
     private func syncCharacterBaseFromState(force: Bool) {
         if !force {
             guard !isCharacterActionRunning else { return }
@@ -1798,6 +1895,7 @@ struct HomeView: View {
         characterAssetName = preferredCharacterRestAssetName
     }
 
+    @MainActor
     private func maybeSpawnToiletFlag(state: AppState, now: Date = Date()) {
         let didRaise = state.raiseToiletFlag(now: now)
         if didRaise {
@@ -1809,6 +1907,7 @@ struct HomeView: View {
         }
     }
 
+    @MainActor
     private func maybeSpawnFoodFlag(state: AppState, now: Date = Date()) {
         syncDisplayedFullness(now: now)
 
@@ -1828,6 +1927,7 @@ struct HomeView: View {
         }
     }
 
+    @MainActor
     private func startCharacterIdleLoopIfNeeded() {
         guard idleLoopTask == nil else { return }
 
@@ -1884,11 +1984,13 @@ struct HomeView: View {
         }
     }
 
+    @MainActor
     private func stopCharacterIdleLoop() {
         idleLoopTask?.cancel()
         idleLoopTask = nil
     }
 
+    @MainActor
     private func playBlink() async {
         guard isHomeVisible else { return }
         guard !isCharacterActionRunning else { return }
@@ -1939,6 +2041,7 @@ struct HomeView: View {
         }
     }
 
+    @MainActor
     private func playSuperFavoriteReactionIfPossible() {
         guard !isToiletLocked else { return }
 
@@ -1947,33 +2050,32 @@ struct HomeView: View {
 
         guard !isCharacterActionRunning else { return }
 
-        Task { @MainActor in
-            isCharacterActionRunning = true
-            characterAssetName = love
-        }
+        superFavoriteReactionTask?.cancel()
+        isCharacterActionRunning = true
+        characterAssetName = love
 
-        Task {
-            try? await Task.sleep(nanoseconds: 900_000_000)
-
-            await MainActor.run {
-                characterAssetName = preferredCharacterRestAssetName
-                isCharacterActionRunning = false
-            }
+        superFavoriteReactionTask = scheduleMainActorTask(after: 0.9) {
+            characterAssetName = preferredCharacterRestAssetName
+            isCharacterActionRunning = false
+            superFavoriteReactionTask = nil
         }
     }
 
+    @MainActor
     private func playFeedSound(isSuperFavorite: Bool) {
         bgmManager.playSE(.eat)
 
         guard isSuperFavorite else { return }
 
-        Task { @MainActor in
-            try? await Task.sleep(nanoseconds: 120_000_000)
+        delayedLoveSoundTask?.cancel()
+        delayedLoveSoundTask = scheduleMainActorTask(after: 0.12) {
             bgmManager.playSE(.love)
+            delayedLoveSoundTask = nil
         }
     }
 
     @discardableResult
+    @MainActor
     private func resolveFood(foodId: String, state: AppState) -> Bool {
         guard !isToiletLocked else {
             showToiletLockedMessage()
@@ -2055,6 +2157,7 @@ struct HomeView: View {
         return Double(todaySteps) / Double(goalSteps)
     }
 
+    @MainActor
     private func reconcileWalletDisplayIfNeeded(state: AppState) async {
         guard isHomeVisible else { return }
         guard !isAnimatingGain else { return }
@@ -2071,6 +2174,7 @@ struct HomeView: View {
         }
     }
 
+    @MainActor
     private func playWalletCountDownAnimation(from: Int, to: Int) async {
         guard isHomeVisible else { return }
         guard from > to else { return }
@@ -2106,6 +2210,7 @@ struct HomeView: View {
         }
     }
 
+    @MainActor
     private func addFriendshipWithAnimation(points: Int, state: AppState) {
         guard points > 0 else { return }
 
@@ -2127,11 +2232,13 @@ struct HomeView: View {
                 displayedFriendship = Double(maxMeter)
             }
 
-            DispatchQueue.main.asyncAfter(deadline: .now() + 0.37) {
+            friendshipWrapTask?.cancel()
+            friendshipWrapTask = scheduleMainActorTask(after: 0.37) {
                 displayedFriendship = 0
                 withAnimation(.easeOut(duration: 0.55)) {
                     displayedFriendship = Double(after)
                 }
+                friendshipWrapTask = nil
             }
         } else {
             displayedFriendship = beforeDisplayed
@@ -2146,6 +2253,7 @@ struct HomeView: View {
         return "\(dayKey)_\(ms).jpg"
     }
 
+    @MainActor
     private func loadTodayPhoto() {
         let key = AppState.makeDayKey(Date())
         do {
@@ -2174,6 +2282,7 @@ struct HomeView: View {
         return t.isEmpty ? nil : t
     }
 
+    @MainActor
     private func saveTodayPhoto(
         _ uiImage: UIImage,
         placeName: String?,
@@ -2213,14 +2322,19 @@ struct HomeView: View {
         }
     }
 
+    @MainActor
     private func toast(_ message: String) {
         toastMessage = message
         withAnimation(.easeInOut(duration: 0.2)) { showToast = true }
-        DispatchQueue.main.asyncAfter(deadline: .now() + 1.4) {
+
+        toastDismissTask?.cancel()
+        toastDismissTask = scheduleMainActorTask(after: 1.4) {
             withAnimation(.easeInOut(duration: 0.2)) { showToast = false }
+            toastDismissTask = nil
         }
     }
 
+    @MainActor
     private func onTapFood(state: AppState) {
         guard !isToiletLocked else {
             showToiletLockedMessage()
@@ -2255,6 +2369,7 @@ struct HomeView: View {
         updateWidgetSnapshot(forceReload: true)
     }
 
+    @MainActor
     private func onTapToilet(state: AppState) {
         guard state.hasToiletFlag else {
             Task { @MainActor in
@@ -2278,6 +2393,7 @@ struct HomeView: View {
         toast("うんちを直接こすって掃除しよう！")
     }
 
+    @MainActor
     private func onTapToiletTicket(state: AppState) {
         guard state.hasToiletFlag else { return }
         guard !isToiletTicketCleaning else { return }
@@ -2306,11 +2422,13 @@ struct HomeView: View {
             toiletTicketClearingPoopIDs = Set(poops.map(\.id))
         }
 
-        DispatchQueue.main.asyncAfter(deadline: .now() + 0.30) {
+        toiletTicketCleanupTask?.cancel()
+        toiletTicketCleanupTask = scheduleMainActorTask(after: 0.30) {
             guard state.gachaConsumeSpecialItem(id: "wc", count: 1) else {
                 toiletTicketClearingPoopIDs.removeAll()
                 isToiletTicketCleaning = false
                 toast("トイレチケットの消費に失敗しました")
+                toiletTicketCleanupTask = nil
                 return
             }
 
@@ -2321,9 +2439,11 @@ struct HomeView: View {
             toiletTicketClearingPoopIDs.removeAll()
             isToiletTicketCleaning = false
             resolveToilet(state: state)
+            toiletTicketCleanupTask = nil
         }
     }
 
+    @MainActor
     private func onTapStep() {
         guard !isToiletLocked else {
             showToiletLockedMessage()
@@ -2334,6 +2454,7 @@ struct HomeView: View {
         showStepEnjoy = true
     }
 
+    @MainActor
     private func resolveToilet(state: AppState) {
         let r = state.resolveToilet(now: Date())
         guard r.didResolve else { return }
@@ -2351,6 +2472,7 @@ struct HomeView: View {
         updateWidgetSnapshot(forceReload: true)
     }
 
+    @MainActor
     private func save() {
         do {
             try modelContext.save()
@@ -2360,6 +2482,7 @@ struct HomeView: View {
         }
     }
 
+    @MainActor
     private func updateWidgetSnapshot(forceReload: Bool = false) {
         let widgetState = state.makeWidgetStateSnapshot(todaySteps: widgetLinkedTodaySteps)
         let changed = HomeWidgetBridge.save(widgetState: widgetState, state: state)
@@ -2371,6 +2494,7 @@ struct HomeView: View {
         #endif
     }
 
+    @MainActor
     private func handleDayRolloverIfNeeded(state: AppState) {
         let now = Date()
         let todayKey = AppState.makeDayKey(now)
@@ -2392,6 +2516,7 @@ struct HomeView: View {
         }
     }
 
+    @MainActor
     private func runSync(state: AppState) async {
         guard hk.authState == .authorized else { return }
 
@@ -2445,6 +2570,7 @@ struct HomeView: View {
         updateWidgetSnapshot()
     }
 
+    @MainActor
     private func playGainAnimationIfNeeded(
         state: AppState,
         fromDisplayedTodaySteps: Int,
