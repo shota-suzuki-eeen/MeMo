@@ -468,6 +468,7 @@ struct HomeView: View {
                     GeometryReader { geo in
                         let characterDisplayHeight = min(geo.size.width * 0.9, Layout.characterMaxHeight)
                         let characterTouchWidth = min(geo.size.width * 0.72, Layout.characterTouchWidth)
+                        let characterTouchHeight = characterDisplayHeight * 1.15
 
                         ZStack {
                             TopStatusButtons(
@@ -485,16 +486,28 @@ struct HomeView: View {
 
                             Rectangle()
                                 .fill(Color.black.opacity(0.001))
-                                .frame(width: characterTouchWidth, height: characterDisplayHeight * 1.15)
+                                .frame(width: characterTouchWidth, height: characterTouchHeight)
                                 .offset(y: Layout.characterTopOffset)
                                 .zIndex(Layout.zCharacter)
                                 .highPriorityGesture(
                                     DragGesture(minimumDistance: 0)
                                         .onChanged { value in
-                                            handleCharacterPettingChanged(value)
+                                            handleCharacterPettingChanged(
+                                                value,
+                                                gestureAreaSize: CGSize(
+                                                    width: characterTouchWidth,
+                                                    height: characterTouchHeight
+                                                )
+                                            )
                                         }
                                         .onEnded { value in
-                                            handleCharacterPettingEnded(value)
+                                            handleCharacterPettingEnded(
+                                                value,
+                                                gestureAreaSize: CGSize(
+                                                    width: characterTouchWidth,
+                                                    height: characterTouchHeight
+                                                )
+                                            )
                                         }
                                 )
 
@@ -516,7 +529,7 @@ struct HomeView: View {
 
                             ForEach(floatingHearts) { heart in
                                 FloatingHeartView(heart: heart)
-                                    .offset(x: heart.xOffset, y: Layout.characterTopOffset - 14)
+                                    .offset(x: heart.xOffset, y: heart.yOffset)
                                     .zIndex(Layout.zCharacter + 1)
                                     .allowsHitTesting(false)
                             }
@@ -1215,10 +1228,17 @@ struct HomeView: View {
     }
 
     @MainActor
-    private func spawnFloatingHeart() {
+    private func spawnFloatingHeart(at location: CGPoint, in gestureAreaSize: CGSize) {
+        let safeWidth = max(1, gestureAreaSize.width)
+        let safeHeight = max(1, gestureAreaSize.height)
+
+        let clampedX = min(max(0, location.x), safeWidth)
+        let clampedY = min(max(0, location.y), safeHeight)
+
         let heart = FloatingHeart(
-            xOffset: CGFloat.random(in: -28...28),
-            size: CGFloat.random(in: 22...40)
+            xOffset: clampedX - (safeWidth * 0.5) + CGFloat.random(in: -10...10),
+            yOffset: Layout.characterTopOffset + clampedY - (safeHeight * 0.5) + CGFloat.random(in: -10...6),
+            size: CGFloat.random(in: 30...52)
         )
         floatingHearts.append(heart)
 
@@ -1231,12 +1251,22 @@ struct HomeView: View {
     }
 
     @MainActor
-    private func registerCharacterPettingTouch(count: Int = 1) {
+    private func registerCharacterPettingTouch(
+        at location: CGPoint,
+        in gestureAreaSize: CGSize,
+        count: Int = 1
+    ) {
         guard count > 0 else { return }
+
+        let wasDailyLimitReached =
+            state.happinessPettingPointsToday >= AppState.happinessDailyPettingPointLimit
+
         let result = state.registerHappinessPettingTouch(count: count, now: Date())
 
+        guard !wasDailyLimitReached else { return }
+
         for _ in 0..<count {
-            spawnFloatingHeart()
+            spawnFloatingHeart(at: location, in: gestureAreaSize)
         }
 
         if result.gainedPoints > 0 {
@@ -1253,7 +1283,10 @@ struct HomeView: View {
         characterPettingAccumulatedDistance = 0
     }
 
-    private func handleCharacterPettingChanged(_ value: DragGesture.Value) {
+    private func handleCharacterPettingChanged(
+        _ value: DragGesture.Value,
+        gestureAreaSize: CGSize
+    ) {
         guard !isToiletLocked else { return }
 
         if characterPettingStartPoint == nil {
@@ -1273,11 +1306,14 @@ struct HomeView: View {
 
         while characterPettingAccumulatedDistance >= characterRubDistancePerTouch {
             characterPettingAccumulatedDistance -= characterRubDistancePerTouch
-            registerCharacterPettingTouch()
+            registerCharacterPettingTouch(at: value.location, in: gestureAreaSize)
         }
     }
 
-    private func handleCharacterPettingEnded(_ value: DragGesture.Value) {
+    private func handleCharacterPettingEnded(
+        _ value: DragGesture.Value,
+        gestureAreaSize: CGSize
+    ) {
         defer { resetCharacterPettingTracking() }
 
         guard !isToiletLocked else {
@@ -1291,7 +1327,7 @@ struct HomeView: View {
         )
 
         if totalDistance < 10 {
-            registerCharacterPettingTouch()
+            registerCharacterPettingTouch(at: value.location, in: gestureAreaSize)
         }
     }
 
@@ -3971,6 +4007,7 @@ private extension Array {
 private struct FloatingHeart: Identifiable, Equatable {
     let id = UUID()
     let xOffset: CGFloat
+    let yOffset: CGFloat
     let size: CGFloat
 }
 
