@@ -408,8 +408,11 @@ struct HomeView: View {
         static let wcBubbleTop: CGFloat = 230
         static let floatingBubbleAmplitude: CGFloat = 6
         static let floatingBubbleDuration: Double = 1.7
-        static let zFloatingButtons: Double = 240
+        static let zFoodBubble: Double = 240
         static let zFoodSelector: Double = 245
+        static let zToiletPoops: Double = 270
+        static let zToiletTicketButton: Double = 275
+        static let zWcButton: Double = 240
 
         static let foodSelectorBottomGapFromButtons: CGFloat = 146
         static let foodSelectorHitAreaWidth: CGFloat = 320
@@ -425,8 +428,6 @@ struct HomeView: View {
 
         static let zCharacter: Double = 50
         static let zBottomButtons: Double = 260
-        static let zToiletTicketButton: Double = 270
-        static let zToiletPoops: Double = 2000
         static let zBanner: Double = 1000
 
         static let toiletPoopSize: CGFloat = 140
@@ -572,47 +573,7 @@ struct HomeView: View {
                                 .padding(.leading, Layout.foodBubbleLeading)
                                 .padding(.top, Layout.foodBubbleTop)
                                 .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
-                                .zIndex(Layout.zFloatingButtons)
-                            }
-
-                            if state.hasToiletFlag {
-                                FloatingThoughtButton(
-                                    imageName: "wc_button",
-                                    size: Layout.floatingBubbleSize,
-                                    amplitude: Layout.floatingBubbleAmplitude,
-                                    duration: Layout.floatingBubbleDuration,
-                                    action: {
-                                        onTapToilet(state: state)
-                                    }
-                                )
-                                .padding(.trailing, Layout.wcBubbleTrailing)
-                                .padding(.top, Layout.wcBubbleTop)
-                                .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topTrailing)
-                                .zIndex(Layout.zFloatingButtons)
-                            }
-
-                            if state.hasToiletFlag {
-                                ZStack {
-                                    ForEach(visibleToiletPoops) { poop in
-                                        ToiletPoopView(
-                                            item: poop,
-                                            size: Layout.toiletPoopSize,
-                                            hitSize: Layout.toiletPoopHitSize,
-                                            opacity: toiletPoopOpacity(for: poop),
-                                            isScratchEnabled: state.hasToiletFlag && !isToiletTicketCleaning,
-                                            onScratchChanged: { value in
-                                                handleToiletPoopScratchChanged(poop, value: value)
-                                            },
-                                            onScratchEnded: {
-                                                handleToiletPoopScratchEnded(poop)
-                                            }
-                                        )
-                                        .position(position(for: poop, in: geo.size))
-                                    }
-                                }
-                                .frame(maxWidth: .infinity, maxHeight: .infinity)
-                                .allowsHitTesting(state.hasToiletFlag && !isToiletTicketCleaning)
-                                .zIndex(Layout.zToiletPoops)
+                                .zIndex(Layout.zFoodBubble)
                             }
 
                             if showFoodSelector {
@@ -755,8 +716,6 @@ struct HomeView: View {
                     .zIndex(Layout.zMenuPopup + 1)
                     .transition(.scale(scale: 0.92).combined(with: .opacity))
                 }
-            }
-            .overlay(alignment: .bottom) {
                 TimelineView(.periodic(from: Date(), by: Layout.careSpawnCheckInterval)) { timeline in
                     let now = timeline.date
 
@@ -813,9 +772,9 @@ struct HomeView: View {
                     }
                 }
                 .padding(.bottom, Layout.bottomPadding)
+                .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .bottom)
                 .zIndex(Layout.zBottomButtons)
-            }
-            .overlay(alignment: .bottomTrailing) {
+
                 if canShowToiletTicketButton {
                     ToiletTicketQuickButton(
                         imageName: "wc",
@@ -826,14 +785,57 @@ struct HomeView: View {
                     )
                     .padding(.trailing, Layout.toiletTicketBottomTrailing)
                     .padding(.bottom, Layout.toiletTicketBottomOffset)
+                    .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .bottomTrailing)
                     .zIndex(Layout.zToiletTicketButton)
                 }
-            }
-            .overlay(alignment: .top) {
+
+                if state.hasToiletFlag {
+                    GeometryReader { rootGeo in
+                        ZStack {
+                            ForEach(visibleToiletPoops) { poop in
+                                ToiletPoopView(
+                                    item: poop,
+                                    size: Layout.toiletPoopSize,
+                                    hitSize: Layout.toiletPoopHitSize,
+                                    opacity: toiletPoopOpacity(for: poop),
+                                    isScratchEnabled: state.hasToiletFlag && !isToiletTicketCleaning,
+                                    onScratchChanged: { value in
+                                        handleToiletPoopScratchChanged(poop, value: value)
+                                    },
+                                    onScratchEnded: {
+                                        handleToiletPoopScratchEnded(poop)
+                                    }
+                                )
+                                .position(rootPosition(for: poop, rootSize: rootGeo.size))
+                            }
+                        }
+                        .frame(width: rootGeo.size.width, height: rootGeo.size.height)
+                    }
+                    .allowsHitTesting(state.hasToiletFlag && !isToiletTicketCleaning)
+                    .zIndex(Layout.zToiletPoops)
+                }
+
+                if state.hasToiletFlag {
+                    FloatingThoughtButton(
+                        imageName: "wc_button",
+                        size: Layout.floatingBubbleSize,
+                        amplitude: Layout.floatingBubbleAmplitude,
+                        duration: Layout.floatingBubbleDuration,
+                        action: {
+                            onTapToilet(state: state)
+                        }
+                    )
+                    .padding(.trailing, Layout.wcBubbleTrailing)
+                    .padding(.top, Layout.bannerHeight + Layout.wcBubbleTop)
+                    .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topTrailing)
+                    .zIndex(Layout.zWcButton)
+                }
+
                 Color.clear
                     .frame(width: Layout.bannerWidthIPhone, height: Layout.bannerHeight)
                     .frame(maxWidth: .infinity)
                     .frame(height: Layout.bannerHeight)
+                    .frame(maxHeight: .infinity, alignment: .top)
                     .zIndex(Layout.zBanner)
             }
             .navigationBarHidden(true)
@@ -1412,6 +1414,26 @@ struct HomeView: View {
         CGPoint(
             x: max(0, min(containerSize.width, CGFloat(poop.centerXRatio) * containerSize.width)),
             y: max(0, min(containerSize.height, CGFloat(poop.centerYRatio) * containerSize.height))
+        )
+    }
+
+    private func rootPosition(for poop: AppState.ToiletPoopItem, rootSize: CGSize) -> CGPoint {
+        let contentSize: CGSize
+
+        if homeContentSize.width > 1, homeContentSize.height > 1 {
+            contentSize = homeContentSize
+        } else {
+            contentSize = CGSize(
+                width: rootSize.width,
+                height: max(0, rootSize.height - Layout.bannerHeight)
+            )
+        }
+
+        let contentPosition = position(for: poop, in: contentSize)
+
+        return CGPoint(
+            x: contentPosition.x,
+            y: Layout.bannerHeight + contentPosition.y
         )
     }
 
