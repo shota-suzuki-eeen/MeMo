@@ -13,7 +13,7 @@ extension AppState {
     static let happinessMaxLevel: Int = 20
     static let happinessTouchesPerPoint: Int = 5
     static let happinessDailyPettingPointLimit: Int = 100
-    static let happinessDecayIntervalSeconds: TimeInterval = 2 * 60
+    static let happinessDecayIntervalSeconds: TimeInterval = 5 * 60
     static let happinessRewardLevelStep: Int = 5
 
     struct HappinessRewardDefinition: Identifiable, Equatable {

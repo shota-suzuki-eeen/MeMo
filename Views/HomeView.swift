@@ -20,6 +20,7 @@ struct HomeView: View {
     @ObservedObject var hk: HealthKitManager
 
     @State private var todaySteps: Int = 0
+    @State private var totalSteps: Int = 0
     @State private var displayedTodaySteps: Int = 0
     @State private var displayedWalletSteps: Int = 0
 
@@ -164,6 +165,10 @@ struct HomeView: View {
 
     private var currentTodayStepCount: Int {
         max(0, max(displayedTodaySteps, max(todaySteps, hk.todaySteps)))
+    }
+
+    private var currentTotalStepCount: Int {
+        max(0, max(totalSteps, currentTodayStepCount))
     }
 
     private var currentHappinessLevelValue: Int {
@@ -707,6 +712,7 @@ struct HomeView: View {
                         popup: activeTopInfoPopup,
                         walletCoinCount: currentWalletCoinCount,
                         todayStepCount: currentTodayStepCount,
+                        totalStepCount: currentTotalStepCount,
                         happinessLevel: currentHappinessLevelValue,
                         happinessPoint: currentHappinessPointValue,
                         happinessMaxPoints: happinessMaxPoints,
@@ -925,6 +931,7 @@ struct HomeView: View {
 
             handleDayRolloverIfNeeded(state: state)
             await runSync(state: state)
+            await refreshTotalStepCount()
 
             state.ensureToiletNextSpawnScheduled(now: Date())
             state.ensureFoodNextSpawnScheduled(now: Date())
@@ -965,6 +972,7 @@ struct HomeView: View {
 
             Task {
                 await runSync(state: state)
+                await refreshTotalStepCount()
 
                 state.ensureToiletNextSpawnScheduled(now: Date())
                 state.ensureFoodNextSpawnScheduled(now: Date())
@@ -1057,6 +1065,13 @@ struct HomeView: View {
         .onChange(of: todaySteps) { _, _ in
             updateWidgetSnapshot()
         }
+        .onChange(of: hk.todaySteps) { oldValue, newValue in
+            let safeOldValue = max(0, oldValue)
+            let safeNewValue = max(0, newValue)
+
+            guard safeNewValue > safeOldValue else { return }
+            totalSteps = max(totalSteps + (safeNewValue - safeOldValue), safeNewValue)
+        }
         .onChange(of: state.currentPetID) { _, _ in
             syncCharacterBaseFromState(force: true)
             updateWidgetSnapshot(forceReload: true)
@@ -1119,6 +1134,23 @@ struct HomeView: View {
         .onChange(of: state.lastDayKey) { _, _ in
             updateWidgetSnapshot(forceReload: true)
         }
+    }
+
+    private func totalStepFetchStartDate() -> Date {
+        Calendar.current.date(from: DateComponents(year: 2000, month: 1, day: 1)) ?? .distantPast
+    }
+
+    @MainActor
+    private func refreshTotalStepCount() async {
+        let fallback = max(0, max(todaySteps, hk.todaySteps))
+
+        guard hk.authState == .authorized else {
+            totalSteps = max(totalSteps, fallback)
+            return
+        }
+
+        let fetched = await hk.fetchStepCount(from: totalStepFetchStartDate(), to: Date())
+        totalSteps = max(fetched, fallback)
     }
 
     @MainActor
@@ -3108,6 +3140,7 @@ private struct HomeTopInfoPopup: View {
     let popup: HomeView.TopInfoPopup
     let walletCoinCount: Int
     let todayStepCount: Int
+    let totalStepCount: Int
     let happinessLevel: Int
     let happinessPoint: Int
     let happinessMaxPoints: Int
@@ -3221,6 +3254,12 @@ private struct HomeTopInfoPopup: View {
                     label: "今日の歩数",
                     valueText: "\(todayStepCount)",
                     caption: "その日の歩数を確認できます"
+                )
+
+                HomeTopInfoValueBlock(
+                    label: "総歩数",
+                    valueText: "\(totalStepCount)",
+                    caption: "これまでに歩いた累計歩数です"
                 )
             }
 
