@@ -53,6 +53,15 @@ extension AppState {
         .standard
     }
 
+    private func syncHappinessPettingDayKeyIfNeeded(now: Date = Date()) {
+        let todayKey = AppState.makeDayKey(now)
+        guard happinessPettingDayKey != todayKey else { return }
+
+        happinessPettingDayKey = todayKey
+        happinessDefaults.set(0, forKey: HappinessStorageKeys.pettingTouchCountToday)
+        happinessDefaults.set(0, forKey: HappinessStorageKeys.pettingPointsToday)
+    }
+
     var happinessPoint: Int {
         get {
             min(AppState.happinessMaxPointsPerLevel - 1, max(0, happinessDefaults.integer(forKey: HappinessStorageKeys.point)))
@@ -89,13 +98,17 @@ extension AppState {
     }
 
     var happinessPettingTouchCountToday: Int {
-        get { max(0, happinessDefaults.integer(forKey: HappinessStorageKeys.pettingTouchCountToday)) }
+        get {
+            syncHappinessPettingDayKeyIfNeeded()
+            return max(0, happinessDefaults.integer(forKey: HappinessStorageKeys.pettingTouchCountToday))
+        }
         set { happinessDefaults.set(max(0, newValue), forKey: HappinessStorageKeys.pettingTouchCountToday) }
     }
 
     var happinessPettingPointsToday: Int {
         get {
-            min(
+            syncHappinessPettingDayKeyIfNeeded()
+            return min(
                 AppState.happinessDailyPettingPointLimit,
                 max(0, happinessDefaults.integer(forKey: HappinessStorageKeys.pettingPointsToday))
             )
@@ -114,11 +127,7 @@ extension AppState {
     }
 
     func resetHappinessPettingIfNeeded(now: Date = Date()) {
-        let todayKey = AppState.makeDayKey(now)
-        guard happinessPettingDayKey != todayKey else { return }
-        happinessPettingDayKey = todayKey
-        happinessPettingTouchCountToday = 0
-        happinessPettingPointsToday = 0
+        syncHappinessPettingDayKeyIfNeeded(now: now)
     }
 
     private func claimedHappinessRewardLevels() -> Set<Int> {
