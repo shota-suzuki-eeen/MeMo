@@ -154,6 +154,10 @@ struct HomeView: View {
         state.nextClaimableHappinessRewardLevel()
     }
 
+    private var currentClaimedHappinessRewardLevels: Set<Int> {
+        state.claimedHappinessRewardLevelsSnapshot()
+    }
+
     private var currentWalletCoinCount: Int {
         max(0, max(displayedWalletSteps, state.walletSteps))
     }
@@ -170,14 +174,12 @@ struct HomeView: View {
         min(happinessMaxPoints - 1, max(displayedHappinessPoint, state.happinessPoint))
     }
 
-    private var nextHappinessRewardLevel: Int {
+    private var nextHappinessRewardLevel: Int? {
         if let claimableLevel = currentClaimableHappinessRewardLevel {
             return claimableLevel
         }
 
-        let rewardStep = AppState.happinessRewardLevelStep
-        let level = max(0, currentHappinessLevelValue)
-        return max(rewardStep, ((level / rewardStep) + 1) * rewardStep)
+        return state.nextUpcomingHappinessRewardLevel()
     }
 
     private var canShowFoodBubble: Bool {
@@ -374,10 +376,16 @@ struct HomeView: View {
         static let menuPopupGridWidth: CGFloat = 296
         static let zMenuPopup: Double = 900
 
-        static let topInfoPopupCornerRadius: CGFloat = 24
-        static let topInfoPopupHorizontalPadding: CGFloat = 28
+        static let topInfoPopupCornerRadius: CGFloat = 30
+        static let topInfoPopupHorizontalPadding: CGFloat = 22
         static let topInfoPopupVerticalPadding: CGFloat = 24
-        static let topInfoPopupMaxWidth: CGFloat = 320
+        static let topInfoPopupScreenHorizontalPadding: CGFloat = 16
+        static let topInfoPopupScreenVerticalPadding: CGFloat = 16
+        static let topInfoPopupMaxWidth: CGFloat = 360
+        static let topInfoPopupContentMaxHeight: CGFloat = 560
+        static let topInfoPopupBackgroundAssetName: String = "red_block"
+        static let topInfoPopupCloseButtonAssetName: String = "close_button"
+        static let topInfoPopupCloseButtonSize: CGFloat = 66
         static let zTopInfoPopup: Double = 1200
 
         static let rightButtonSize: CGFloat = 116
@@ -615,36 +623,6 @@ struct HomeView: View {
                                 .zIndex(Layout.zFoodSelector + 1)
                             }
 
-                            if let activeTopInfoPopup {
-                                Color.black.opacity(0.28)
-                                    .ignoresSafeArea()
-                                    .transition(.opacity)
-                                    .zIndex(Layout.zTopInfoPopup)
-                                    .onTapGesture {
-                                        closeTopInfoPopup(playSound: false)
-                                    }
-
-                                HomeTopInfoPopup(
-                                    popup: activeTopInfoPopup,
-                                    walletCoinCount: currentWalletCoinCount,
-                                    todayStepCount: currentTodayStepCount,
-                                    happinessLevel: currentHappinessLevelValue,
-                                    happinessPoint: currentHappinessPointValue,
-                                    happinessMaxPoints: happinessMaxPoints,
-                                    claimableLevel: currentClaimableHappinessRewardLevel,
-                                    nextRewardLevel: nextHappinessRewardLevel,
-                                    onClose: {
-                                        closeTopInfoPopup()
-                                    },
-                                    onClaim: {
-                                        claimCurrentHappinessRewardFromPopup()
-                                    }
-                                )
-                                .frame(maxWidth: Layout.topInfoPopupMaxWidth)
-                                .padding(.horizontal, Layout.topInfoPopupHorizontalPadding)
-                                .zIndex(Layout.zTopInfoPopup + 1)
-                                .transition(.scale(scale: 0.92).combined(with: .opacity))
-                            }
 
                             if showToiletLockedPopup {
                                 Text(toiletLockedPopupText)
@@ -716,6 +694,42 @@ struct HomeView: View {
                     .zIndex(Layout.zMenuPopup + 1)
                     .transition(.scale(scale: 0.92).combined(with: .opacity))
                 }
+                if let activeTopInfoPopup {
+                    Color.black.opacity(0.28)
+                        .ignoresSafeArea()
+                        .transition(.opacity)
+                        .zIndex(Layout.zTopInfoPopup)
+                        .onTapGesture {
+                            closeTopInfoPopup(playSound: false)
+                        }
+
+                    HomeTopInfoPopup(
+                        popup: activeTopInfoPopup,
+                        walletCoinCount: currentWalletCoinCount,
+                        todayStepCount: currentTodayStepCount,
+                        happinessLevel: currentHappinessLevelValue,
+                        happinessPoint: currentHappinessPointValue,
+                        happinessMaxPoints: happinessMaxPoints,
+                        claimableLevel: currentClaimableHappinessRewardLevel,
+                        nextRewardLevel: nextHappinessRewardLevel,
+                        rewardDefinitions: AppState.happinessRewardDefinitions,
+                        claimedRewardLevels: currentClaimedHappinessRewardLevels,
+                        onClose: {
+                            closeTopInfoPopup()
+                        },
+                        onClaim: {
+                            claimCurrentHappinessRewardFromPopup()
+                        }
+                    )
+                    .frame(maxWidth: Layout.topInfoPopupMaxWidth)
+                    .padding(.horizontal, Layout.topInfoPopupScreenHorizontalPadding)
+                    .padding(.vertical, Layout.topInfoPopupScreenVerticalPadding)
+                    .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .center)
+                    .ignoresSafeArea()
+                    .zIndex(Layout.zTopInfoPopup + 1)
+                    .transition(.scale(scale: 0.94).combined(with: .opacity))
+                }
+
                 TimelineView(.periodic(from: Date(), by: Layout.careSpawnCheckInterval)) { timeline in
                     let now = timeline.date
 
@@ -1358,7 +1372,7 @@ struct HomeView: View {
         }
 
         save()
-        toast("幸せLv.\(reward.level)報酬で\(reward.foodName)を獲得！")
+        toast("幸せLv.\(reward.level)報酬で\(reward.characterName)を獲得！")
         syncDisplayedHappiness(animated: false)
     }
 
@@ -3098,7 +3112,9 @@ private struct HomeTopInfoPopup: View {
     let happinessPoint: Int
     let happinessMaxPoints: Int
     let claimableLevel: Int?
-    let nextRewardLevel: Int
+    let nextRewardLevel: Int?
+    let rewardDefinitions: [AppState.HappinessRewardDefinition]
+    let claimedRewardLevels: Set<Int>
     let onClose: () -> Void
     let onClaim: () -> Void
 
@@ -3113,31 +3129,60 @@ private struct HomeTopInfoPopup: View {
         }
     }
 
-    private var rewardRuleText: String {
-        "幸せLv.\(AppState.happinessRewardLevelStep)ごとにレアごはんを1個受け取れます"
+    private var displayReward: AppState.HappinessRewardDefinition? {
+        if let claimableLevel,
+           let reward = rewardDefinitions.first(where: { $0.level == claimableLevel }) {
+            return reward
+        }
+
+        if let nextRewardLevel,
+           let reward = rewardDefinitions.first(where: { $0.level == nextRewardLevel }) {
+            return reward
+        }
+
+        return nil
     }
 
-    private var remainingLevelsText: String {
+    private func remainingLevelsText(nextRewardLevel: Int) -> String {
         let remaining = max(0, nextRewardLevel - happinessLevel)
         return "あと \(remaining) Lvで次の報酬です"
     }
 
+    private func isRewardClaimed(_ reward: AppState.HappinessRewardDefinition) -> Bool {
+        claimedRewardLevels.contains(reward.level)
+    }
+
+    private func isRewardClaimable(_ reward: AppState.HappinessRewardDefinition) -> Bool {
+        !isRewardClaimed(reward) && happinessLevel >= reward.level
+    }
+
+    private func rewardStatusText(for reward: AppState.HappinessRewardDefinition) -> String {
+        if isRewardClaimed(reward) {
+            return "獲得済み"
+        }
+        if isRewardClaimable(reward) {
+            return "受取可能"
+        }
+        return "Lv.\(reward.level)で解放"
+    }
+
     var body: some View {
         VStack(alignment: .leading, spacing: 18) {
-            HStack(spacing: 12) {
+            HStack(alignment: .top, spacing: 12) {
                 Text(titleText)
-                    .font(.system(size: 20, weight: .bold))
-                    .foregroundStyle(.primary)
+                    .font(.system(size: 22, weight: .bold))
+                    .foregroundStyle(.black)
 
-                Spacer()
+                Spacer(minLength: 0)
 
                 Button(action: onClose) {
-                    Image(systemName: "xmark")
-                        .font(.system(size: 14, weight: .bold))
-                        .foregroundStyle(.white)
-                        .frame(width: 28, height: 28)
-                        .background(Color.black.opacity(0.75))
-                        .clipShape(Circle())
+                    Image(HomeView.Layout.topInfoPopupCloseButtonAssetName)
+                        .resizable()
+                        .scaledToFit()
+                        .frame(
+                            width: HomeView.Layout.topInfoPopupCloseButtonSize,
+                            height: HomeView.Layout.topInfoPopupCloseButtonSize
+                        )
                 }
                 .buttonStyle(.plain)
             }
@@ -3145,10 +3190,17 @@ private struct HomeTopInfoPopup: View {
             content
         }
         .padding(.horizontal, HomeView.Layout.topInfoPopupHorizontalPadding)
-        .padding(.vertical, HomeView.Layout.topInfoPopupVerticalPadding)
-        .background(.ultraThinMaterial)
+        .padding(.top, HomeView.Layout.topInfoPopupVerticalPadding)
+        .padding(.bottom, HomeView.Layout.topInfoPopupVerticalPadding)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .fixedSize(horizontal: false, vertical: true)
+        .background {
+            Image(HomeView.Layout.topInfoPopupBackgroundAssetName)
+                .resizable()
+                .scaledToFill()
+        }
         .clipShape(RoundedRectangle(cornerRadius: HomeView.Layout.topInfoPopupCornerRadius, style: .continuous))
-        .shadow(radius: 18)
+        .shadow(color: .black.opacity(0.24), radius: 18, x: 0, y: 6)
     }
 
     @ViewBuilder
@@ -3180,19 +3232,42 @@ private struct HomeTopInfoPopup: View {
                     caption: "現在の幸せ度 \(happinessPoint)/\(happinessMaxPoints)"
                 )
 
-                HomeTopInfoDescriptionRow(
-                    title: "報酬ルール",
-                    detail: rewardRuleText
-                )
+                if let displayReward {
+                    VStack(alignment: .leading, spacing: 8) {
+                        Text("獲得キャラクター")
+                            .font(.system(size: 13, weight: .semibold))
+                            .foregroundStyle(.black.opacity(0.55))
 
-                if let claimableLevel {
-                    HomeTopInfoDescriptionRow(
-                        title: "受け取り可能",
-                        detail: "Lv.\(claimableLevel) の報酬を受け取れます"
+                        Text("Lv.\(displayReward.level) で \(displayReward.characterName) を獲得")
+                            .font(.system(size: 15, weight: .bold))
+                            .foregroundStyle(.black)
+                    }
+
+                    HappinessRewardPreviewCard(
+                        reward: displayReward,
+                        statusText: rewardStatusText(for: displayReward)
                     )
 
+                    if isRewardClaimable(displayReward) {
+                        Text("今すぐ受け取れます")
+                            .font(.system(size: 13, weight: .medium))
+                            .foregroundStyle(.black.opacity(0.42))
+                    } else {
+                        Text(remainingLevelsText(nextRewardLevel: displayReward.level))
+                            .font(.system(size: 13, weight: .medium))
+                            .foregroundStyle(.black.opacity(0.42))
+                    }
+                } else {
+                    HomeTopInfoDescriptionRow(
+                        title: "報酬状況",
+                        detail: "すべての幸せ報酬を受け取り済みです"
+                    )
+                }
+
+                if let claimableLevel,
+                   let claimableReward = rewardDefinitions.first(where: { $0.level == claimableLevel }) {
                     Button(action: onClaim) {
-                        Text("Lv.\(claimableLevel)報酬を受け取る")
+                        Text("Lv.\(claimableLevel)報酬で\(claimableReward.characterName)を受け取る")
                             .font(.system(size: 15, weight: .bold))
                             .foregroundStyle(.white)
                             .frame(maxWidth: .infinity)
@@ -3200,18 +3275,55 @@ private struct HomeTopInfoPopup: View {
                             .background(Color(red: 0.85, green: 0.20, blue: 0.28).opacity(0.95), in: RoundedRectangle(cornerRadius: 14, style: .continuous))
                     }
                     .buttonStyle(.plain)
-                } else {
-                    HomeTopInfoDescriptionRow(
-                        title: "次の報酬",
-                        detail: "Lv.\(nextRewardLevel) で獲得"
-                    )
-
-                    Text(remainingLevelsText)
-                        .font(.system(size: 13, weight: .medium))
-                        .foregroundStyle(.secondary)
                 }
             }
         }
+    }
+}
+
+private struct HappinessRewardPreviewCard: View {
+    let reward: AppState.HappinessRewardDefinition
+    let statusText: String
+
+    var body: some View {
+        HStack(alignment: .center, spacing: 14) {
+            ZStack {
+                Image(HomeView.Layout.menuPopupButtonBackgroundAssetName)
+                    .resizable()
+                    .scaledToFill()
+
+                Image(reward.assetName)
+                    .resizable()
+                    .scaledToFit()
+                    .frame(width: 112, height: 112)
+                    .padding(10)
+            }
+            .frame(width: 128, height: 128)
+            .clipShape(RoundedRectangle(cornerRadius: 18, style: .continuous))
+
+            VStack(alignment: .leading, spacing: 8) {
+                Text("Lv.\(reward.level)")
+                    .font(.system(size: 14, weight: .bold))
+                    .foregroundStyle(.black)
+
+                Text(reward.characterName)
+                    .font(.system(size: 18, weight: .bold))
+                    .foregroundStyle(.black)
+                    .lineLimit(2)
+                    .minimumScaleFactor(0.8)
+
+                Text(statusText)
+                    .font(.system(size: 12, weight: .semibold))
+                    .foregroundStyle(.black.opacity(0.35))
+                    .padding(.horizontal, 10)
+                    .padding(.vertical, 6)
+                    .background(Color.black.opacity(0.06), in: Capsule())
+            }
+            .frame(maxWidth: .infinity, alignment: .leading)
+        }
+        .padding(14)
+        .frame(maxWidth: .infinity, minHeight: 148, alignment: .leading)
+        .background(Color.white.opacity(0.16), in: RoundedRectangle(cornerRadius: 20, style: .continuous))
     }
 }
 

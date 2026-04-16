@@ -16,6 +16,21 @@ extension AppState {
     static let happinessDecayIntervalSeconds: TimeInterval = 2 * 60
     static let happinessRewardLevelStep: Int = 5
 
+    struct HappinessRewardDefinition: Identifiable, Equatable {
+        let level: Int
+        let assetName: String
+        let characterName: String
+
+        var id: Int { level }
+    }
+
+    static let happinessRewardDefinitions: [HappinessRewardDefinition] = [
+        .init(level: 5, assetName: "person_room", characterName: "部屋着"),
+        .init(level: 10, assetName: "person_chef", characterName: "シェフ"),
+        .init(level: 15, assetName: "girl_onePiece", characterName: "ワンピース"),
+        .init(level: 20, assetName: "person_skate", characterName: "スケボー")
+    ]
+
     struct HappinessGainResult: Equatable {
         let beforePoint: Int
         let beforeLevel: Int
@@ -35,8 +50,8 @@ extension AppState {
 
     struct HappinessRewardClaimResult: Equatable {
         let level: Int
-        let foodID: String
-        let foodName: String
+        let assetName: String
+        let characterName: String
     }
 
     private enum HappinessStorageKeys {
@@ -142,6 +157,18 @@ extension AppState {
         let sorted = levels.sorted()
         let data = try? JSONEncoder().encode(sorted)
         happinessDefaults.set(data, forKey: HappinessStorageKeys.claimedRewardLevels)
+    }
+
+    func claimedHappinessRewardLevelsSnapshot() -> Set<Int> {
+        claimedHappinessRewardLevels()
+    }
+
+    func isHappinessRewardClaimed(level: Int) -> Bool {
+        claimedHappinessRewardLevels().contains(level)
+    }
+
+    func happinessRewardDefinition(for level: Int) -> HappinessRewardDefinition? {
+        AppState.happinessRewardDefinitions.first(where: { $0.level == level })
     }
 
     private func happinessTotalUnits(level: Int, point: Int) -> Int {
@@ -309,11 +336,21 @@ extension AppState {
 
     func nextClaimableHappinessRewardLevel() -> Int? {
         let claimed = claimedHappinessRewardLevels()
-        guard happinessLevel >= AppState.happinessRewardLevelStep else { return nil }
 
-        for level in stride(from: AppState.happinessRewardLevelStep, through: happinessLevel, by: AppState.happinessRewardLevelStep) {
-            if !claimed.contains(level) {
-                return level
+        for reward in AppState.happinessRewardDefinitions {
+            if happinessLevel >= reward.level, !claimed.contains(reward.level) {
+                return reward.level
+            }
+        }
+        return nil
+    }
+
+    func nextUpcomingHappinessRewardLevel() -> Int? {
+        let claimed = claimedHappinessRewardLevels()
+
+        for reward in AppState.happinessRewardDefinitions {
+            if !claimed.contains(reward.level), happinessLevel < reward.level {
+                return reward.level
             }
         }
         return nil
@@ -339,20 +376,19 @@ extension AppState {
     func claimHappinessReward(level: Int, now: Date = Date()) -> HappinessRewardClaimResult? {
         resetHappinessPettingIfNeeded(now: now)
 
-        guard level > 0,
+        guard let reward = happinessRewardDefinition(for: level),
+              level > 0,
               level % AppState.happinessRewardLevelStep == 0,
-              happinessLevel >= level else { return nil }
+              happinessLevel >= level else {
+            return nil
+        }
 
         var claimed = claimedHappinessRewardLevels()
         guard !claimed.contains(level) else { return nil }
 
-        let foodID = happinessRewardRareFoodIDs.randomElement() ?? "onigiri"
-        guard addFood(foodId: foodID, count: 1) else { return nil }
-
         claimed.insert(level)
         setClaimedHappinessRewardLevels(claimed)
 
-        let foodName = FoodCatalog.byId(foodID)?.name ?? "ご飯"
-        return .init(level: level, foodID: foodID, foodName: foodName)
+        return .init(level: level, assetName: reward.assetName, characterName: reward.characterName)
     }
 }
