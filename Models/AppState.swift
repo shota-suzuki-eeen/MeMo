@@ -665,8 +665,17 @@ extension AppState {
         }
 
         if activeCount >= maxCount {
-            if toiletPoopLastSpawnAt != now {
-                toiletPoopLastSpawnAt = now
+            let cappedLastSpawnAt: Date = {
+                if let existingLastSpawnAt = toiletPoopLastSpawnAt {
+                    return existingLastSpawnAt
+                }
+
+                let inferredAdditionalCount = max(0, maxCount - initialCount)
+                return flagAt.addingTimeInterval(TimeInterval(inferredAdditionalCount) * interval)
+            }()
+
+            if toiletPoopLastSpawnAt != cappedLastSpawnAt {
+                toiletPoopLastSpawnAt = cappedLastSpawnAt
                 didChange = true
             }
             return didChange
@@ -1120,12 +1129,34 @@ extension AppState {
 
         guard canRaiseToiletFlag(now: now) else { return false }
 
-        toiletFlagAt = now
-        toiletLastRaisedAt = now
+        let effectiveFlagAt: Date = {
+            if let scheduledAt = toiletNextSpawnAt, scheduledAt <= now {
+                return scheduledAt
+            }
+            return now
+        }()
 
-        let initialPoops = generateToiletPoops(count: AppState.toiletPoopInitialCount)
+        toiletFlagAt = effectiveFlagAt
+        toiletLastRaisedAt = effectiveFlagAt
+
+        let elapsedSinceFlag = max(0, now.timeIntervalSince(effectiveFlagAt))
+        let additionalCount = Int(elapsedSinceFlag / AppState.toiletPoopSpawnIntervalSeconds)
+        let totalCount = min(
+            AppState.toiletPoopMaxCount,
+            AppState.toiletPoopInitialCount + additionalCount
+        )
+
+        let initialPoops = generateToiletPoops(count: totalCount)
         setToiletPoops(initialPoops)
-        toiletPoopLastSpawnAt = now
+
+        if totalCount >= AppState.toiletPoopMaxCount {
+            toiletPoopLastSpawnAt = now
+        } else {
+            let restoredAdditionalCount = max(0, totalCount - AppState.toiletPoopInitialCount)
+            toiletPoopLastSpawnAt = effectiveFlagAt.addingTimeInterval(
+                TimeInterval(restoredAdditionalCount) * AppState.toiletPoopSpawnIntervalSeconds
+            )
+        }
 
         return true
     }
