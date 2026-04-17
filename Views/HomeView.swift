@@ -49,6 +49,7 @@ struct HomeView: View {
 
     @State private var showFoodSelector: Bool = false
     @State private var selectedFoodID: String?
+    @State private var selectedFoodRarityTab: FoodSelectorRarityTab = .normal
     @State private var foodSelectorDragOffset: CGSize = .zero
     @State private var isFoodFeedingAnimationRunning: Bool = false
     @State private var pendingFoodFeedID: String?
@@ -93,9 +94,7 @@ struct HomeView: View {
 
     private let characterRubDistancePerTouch: CGFloat = 28
 
-    private var fullnessMaxLevel: Int {
-        5
-    }
+    private var fullnessMaxLevel: Int { 5 }
 
     private var currentBaseAssetName: String {
         PetMaster.assetName(for: state.normalizedCurrentPetID)
@@ -105,17 +104,9 @@ struct HomeView: View {
         PetMaster.all.first(where: { $0.id == state.normalizedCurrentPetID })?.name ?? "ペット"
     }
 
-    private var isToiletLocked: Bool {
-        state.hasToiletFlag
-    }
-
-    private var hasFoodFlag: Bool {
-        state.hasFoodFlag
-    }
-
-    private var fixedDailyGoalSteps: Int {
-        AppState.fixedDailyStepGoal
-    }
+    private var isToiletLocked: Bool { state.hasToiletFlag }
+    private var hasFoodFlag: Bool { state.hasFoodFlag }
+    private var fixedDailyGoalSteps: Int { AppState.fixedDailyStepGoal }
 
     private var widgetLinkedTodaySteps: Int {
         max(todaySteps, state.widgetTodaySteps)
@@ -125,9 +116,14 @@ struct HomeView: View {
         FoodCatalog.all.filter { state.foodCount(foodId: $0.id) > 0 }
     }
 
+    private var currentFoodSelectorFoods: [FoodCatalog.FoodItem] {
+        ownedFoods.filter { selectedFoodRarityTab.matches($0) }
+    }
+
     private var selectedFood: FoodCatalog.FoodItem? {
-        guard let selectedFoodID else { return ownedFoods.first }
-        return ownedFoods.first(where: { $0.id == selectedFoodID }) ?? ownedFoods.first
+        let foods = currentFoodSelectorFoods
+        guard let selectedFoodID else { return foods.first }
+        return foods.first(where: { $0.id == selectedFoodID }) ?? foods.first
     }
 
     private var visibleToiletPoops: [AppState.ToiletPoopItem] {
@@ -182,7 +178,6 @@ struct HomeView: View {
         if let claimableLevel = currentClaimableHappinessRewardLevel {
             return claimableLevel
         }
-
         return state.nextUpcomingHappinessRewardLevel()
     }
 
@@ -192,109 +187,21 @@ struct HomeView: View {
 
     private var canShowWcAsset: Bool {
         [
-            "person",
-            "dog",
-            "cat",
-            "chicken",
-            "monkey",
-            "rabbit",
-            "frog",
-            "penguin",
-            "sheep",
-            "shark",
-            "turtle",
-            "dolphin",
-            "Sloth",
-            "baku",
-            "blackGibbon",
-            "bulldog",
-            "deer",
-            "fox",
-            "frilledLizard",
-            "giraffe",
-            "koala",
-            "okapi",
-            "platypus",
-            "raccoon",
-            "Shoebill",
-            "Triceratops",
-            "bee",
-            "amesho",
-            "barinys",
-            "blue",
-            "shiba",
-            "gorilla",
-            "lizard",
-            "meerkat",
-            "otter",
-            "owl",
-            "parakeet",
-            "peacock",
-            "pig",
-            "raccoonDog",
-            "redPanda",
-            "seal",
-            "seaOtter",
-            "skunk",
-            "swallow",
-            "tiger",
-            "whiteTiger",
-            "zebra",
-            "wolf"
+            "person","dog","cat","chicken","monkey","rabbit","frog","penguin","sheep","shark","turtle","dolphin",
+            "Sloth","baku","blackGibbon","bulldog","deer","fox","frilledLizard","giraffe","koala","okapi",
+            "platypus","raccoon","Shoebill","Triceratops","bee","amesho","barinys","blue","shiba","gorilla",
+            "lizard","meerkat","otter","owl","parakeet","peacock","pig","raccoonDog","redPanda","seal",
+            "seaOtter","skunk","swallow","tiger","whiteTiger","zebra","wolf"
         ].contains(currentBaseAssetName)
     }
 
     private var canPlayBlinkAnimation: Bool {
         [
-            "person",
-            "dog",
-            "cat",
-            "chicken",
-            "monkey",
-            "rabbit",
-            "frog",
-            "penguin",
-            "sheep",
-            "shark",
-            "turtle",
-            "dolphin",
-            "Sloth",
-            "baku",
-            "blackGibbon",
-            "bulldog",
-            "deer",
-            "fox",
-            "frilledLizard",
-            "giraffe",
-            "koala",
-            "okapi",
-            "platypus",
-            "raccoon",
-            "Shoebill",
-            "Triceratops",
-            "bee",
-            "amesho",
-            "barinys",
-            "blue",
-            "shiba",
-            "gorilla",
-            "lizard",
-            "meerkat",
-            "otter",
-            "owl",
-            "parakeet",
-            "peacock",
-            "pig",
-            "raccoonDog",
-            "redPanda",
-            "seal",
-            "seaOtter",
-            "skunk",
-            "swallow",
-            "tiger",
-            "whiteTiger",
-            "zebra",
-            "wolf"
+            "person","dog","cat","chicken","monkey","rabbit","frog","penguin","sheep","shark","turtle","dolphin",
+            "Sloth","baku","blackGibbon","bulldog","deer","fox","frilledLizard","giraffe","koala","okapi",
+            "platypus","raccoon","Shoebill","Triceratops","bee","amesho","barinys","blue","shiba","gorilla",
+            "lizard","meerkat","otter","owl","parakeet","peacock","pig","raccoonDog","redPanda","seal",
+            "seaOtter","skunk","swallow","tiger","whiteTiger","zebra","wolf"
         ].contains(currentBaseAssetName)
     }
 
@@ -307,20 +214,69 @@ struct HomeView: View {
 
     private var captureMetricValues: (steps: Int, activeKcal: Int, totalKcal: Int) {
         let steps = max(todaySteps, hk.todaySteps)
-
-        return (
-            steps: steps,
-            activeKcal: 0,
-            totalKcal: steps
-        )
+        return (steps: steps, activeKcal: 0, totalKcal: steps)
     }
 
     fileprivate enum TopInfoPopup: Int, Identifiable {
         case wallet
         case todaySteps
         case happinessRewards
-
         var id: Int { rawValue }
+    }
+
+    fileprivate enum FoodSelectorRarityTab: String, CaseIterable, Identifiable {
+        case normal = "N"
+        case rare = "R"
+
+        var id: String { rawValue }
+
+        var next: FoodSelectorRarityTab {
+            self == .normal ? .rare : .normal
+        }
+
+        var accentColor: Color {
+            switch self {
+            case .normal:
+                return Color(red: 0.24, green: 0.56, blue: 0.98)
+            case .rare:
+                return Color(red: 0.97, green: 0.34, blue: 0.38)
+            }
+        }
+
+        var glowColors: [Color] {
+            switch self {
+            case .normal:
+                return [
+                    Color(red: 0.49, green: 0.73, blue: 1.0).opacity(0.70),
+                    Color(red: 0.28, green: 0.57, blue: 1.0).opacity(0.34),
+                    .clear
+                ]
+            case .rare:
+                return [
+                    Color(red: 1.0, green: 0.54, blue: 0.57).opacity(0.76),
+                    Color(red: 0.97, green: 0.32, blue: 0.36).opacity(0.38),
+                    .clear
+                ]
+            }
+        }
+
+        var emptyText: String {
+            switch self {
+            case .normal:
+                return "Nのご飯は持っていません"
+            case .rare:
+                return "Rのご飯は持っていません"
+            }
+        }
+
+        func matches(_ food: FoodCatalog.FoodItem) -> Bool {
+            switch self {
+            case .normal:
+                return food.isShopEligible
+            case .rare:
+                return !food.isShopEligible
+            }
+        }
     }
 
     fileprivate enum Layout {
@@ -426,13 +382,15 @@ struct HomeView: View {
         static let zToiletTicketButton: Double = 275
         static let zWcButton: Double = 240
 
-        static let foodSelectorBottomGapFromButtons: CGFloat = 146
+        static let foodSelectorBottomGapFromButtons: CGFloat = 166
         static let foodSelectorHitAreaWidth: CGFloat = 320
         static let foodSelectorHitAreaHeight: CGFloat = 220
         static let foodSelectorInstructionOffsetY: CGFloat = 150
         static let foodSelectorRollStepWidth: CGFloat = 96
         static let foodSelectorRollMaxVisibleOffset: Double = 3.0
         static let foodSelectorPendingDecisionThreshold: CGFloat = 44
+        static let foodSelectorToggleOffsetX: CGFloat = 148
+        static let foodSelectorToggleOffsetY: CGFloat = -18
 
         static let fullnessLabelOffsetY: CGFloat = 44
         static let fullnessValueFont: CGFloat = 14
@@ -505,19 +463,13 @@ struct HomeView: View {
                                         .onChanged { value in
                                             handleCharacterPettingChanged(
                                                 value,
-                                                gestureAreaSize: CGSize(
-                                                    width: characterTouchWidth,
-                                                    height: characterTouchHeight
-                                                )
+                                                gestureAreaSize: CGSize(width: characterTouchWidth, height: characterTouchHeight)
                                             )
                                         }
                                         .onEnded { value in
                                             handleCharacterPettingEnded(
                                                 value,
-                                                gestureAreaSize: CGSize(
-                                                    width: characterTouchWidth,
-                                                    height: characterTouchHeight
-                                                )
+                                                gestureAreaSize: CGSize(width: characterTouchWidth, height: characterTouchHeight)
                                             )
                                         }
                                 )
@@ -592,17 +544,16 @@ struct HomeView: View {
                                 Color.black.opacity(0.001)
                                     .ignoresSafeArea()
                                     .contentShape(Rectangle())
-                                    .onTapGesture {
-                                        closeFoodSelector()
-                                    }
+                                    .onTapGesture { closeFoodSelector() }
                                     .zIndex(Layout.zFoodSelector)
 
                                 FoodSelectionCarousel(
-                                    foods: ownedFoods,
+                                    foods: currentFoodSelectorFoods,
                                     countProvider: { foodID in
                                         state.foodCount(foodId: foodID)
                                     },
                                     selectedFoodID: selectedFoodID,
+                                    selectedRarityTab: selectedFoodRarityTab,
                                     pendingFoodID: pendingFoodFeedID,
                                     dragOffset: foodSelectorDragOffset,
                                     isFeedingAnimationRunning: isFoodFeedingAnimationRunning,
@@ -611,6 +562,9 @@ struct HomeView: View {
                                     },
                                     onFeed: {
                                         feedSelectedFood(state: state)
+                                    },
+                                    onToggleRarity: {
+                                        toggleFoodSelectorRarity()
                                     },
                                     onCardTap: { foodID in
                                         handleFoodSelectorTap(foodID)
@@ -626,7 +580,6 @@ struct HomeView: View {
                                 .padding(.bottom, Layout.bottomPadding + Layout.foodSelectorBottomGapFromButtons)
                                 .zIndex(Layout.zFoodSelector + 1)
                             }
-
 
                             if showToiletLockedPopup {
                                 Text(toiletLockedPopupText)
@@ -698,14 +651,13 @@ struct HomeView: View {
                     .zIndex(Layout.zMenuPopup + 1)
                     .transition(.scale(scale: 0.92).combined(with: .opacity))
                 }
+
                 if let activeTopInfoPopup {
                     Color.black.opacity(0.28)
                         .ignoresSafeArea()
                         .transition(.opacity)
                         .zIndex(Layout.zTopInfoPopup)
-                        .onTapGesture {
-                            closeTopInfoPopup(playSound: false)
-                        }
+                        .onTapGesture { closeTopInfoPopup(playSound: false) }
 
                     HomeTopInfoPopup(
                         popup: activeTopInfoPopup,
@@ -719,12 +671,8 @@ struct HomeView: View {
                         nextRewardLevel: nextHappinessRewardLevel,
                         rewardDefinitions: AppState.happinessRewardDefinitions,
                         claimedRewardLevels: currentClaimedHappinessRewardLevels,
-                        onClose: {
-                            closeTopInfoPopup()
-                        },
-                        onClaim: {
-                            claimCurrentHappinessRewardFromPopup()
-                        }
+                        onClose: { closeTopInfoPopup() },
+                        onClaim: { claimCurrentHappinessRewardFromPopup() }
                     )
                     .frame(maxWidth: Layout.topInfoPopupMaxWidth)
                     .padding(.horizontal, Layout.topInfoPopupScreenHorizontalPadding)
@@ -882,11 +830,7 @@ struct HomeView: View {
                 characterAssetName: PetMaster.assetName(for: state.normalizedCurrentPetID),
                 metricValueProvider: {
                     let values = captureMetricValues
-                    return (
-                        steps: values.steps,
-                        activeKcal: values.activeKcal,
-                        totalKcal: values.totalKcal
-                    )
+                    return (steps: values.steps, activeKcal: values.activeKcal, totalKcal: values.totalKcal)
                 }
             ) {
                 selectedCaptureMode = nil
@@ -1030,6 +974,7 @@ struct HomeView: View {
             toastMessage = nil
             showToiletLockedPopup = false
             showFoodSelector = false
+            selectedFoodRarityTab = .normal
             resetFoodSelectorDragState()
             isFoodFeedingAnimationRunning = false
             pendingFoodFeedID = nil
@@ -1049,9 +994,7 @@ struct HomeView: View {
         }
         .onChange(of: state.dailyGoalKcal) { _, _ in
             let didNormalize = state.normalizeFixedDailyStepGoal()
-            if didNormalize {
-                save()
-            }
+            if didNormalize { save() }
             withAnimation(.easeOut(duration: 0.25)) {
                 displayedStepProgress = calcStepProgressRaw(
                     todaySteps: displayedTodaySteps,
@@ -1133,13 +1076,11 @@ struct HomeView: View {
     ) -> Task<Void, Never> {
         Task { @MainActor in
             let safeDelay = max(0, delay)
-
             if safeDelay > 0 {
                 try? await Task.sleep(nanoseconds: UInt64(safeDelay * 1_000_000_000))
             } else {
                 await Task.yield()
             }
-
             guard !Task.isCancelled else { return }
             operation()
         }
@@ -1423,7 +1364,6 @@ struct HomeView: View {
         }
 
         let didChange = state.updateToiletPoopsByTime(now: now)
-
         if didChange {
             save()
         }
@@ -1532,12 +1472,14 @@ struct HomeView: View {
     }
 
     private func syncFoodSelectorSelection() {
-        let foods = ownedFoods
+        let allOwnedFoods = ownedFoods
+        let foods = currentFoodSelectorFoods
 
-        guard !foods.isEmpty else {
+        guard !allOwnedFoods.isEmpty else {
             selectedFoodID = nil
             pendingFoodFeedID = nil
             showFoodSelector = false
+            selectedFoodRarityTab = .normal
             resetFoodSelectorDragState()
             isFoodFeedingAnimationRunning = false
             return
@@ -1546,6 +1488,11 @@ struct HomeView: View {
         if let pendingFoodFeedID,
            !foods.contains(where: { $0.id == pendingFoodFeedID }) {
             self.pendingFoodFeedID = nil
+        }
+
+        guard !foods.isEmpty else {
+            selectedFoodID = nil
+            return
         }
 
         if let selectedFoodID,
@@ -1567,6 +1514,7 @@ struct HomeView: View {
         resetFoodSelectorDragState()
         isFoodFeedingAnimationRunning = false
         pendingFoodFeedID = nil
+        selectedFoodRarityTab = .normal
         stopFoodSelectorHorizontalRattleIfNeeded()
 
         withAnimation(.spring(response: 0.28, dampingFraction: 0.88)) {
@@ -1586,10 +1534,10 @@ struct HomeView: View {
             return
         }
 
-        syncFoodSelectorSelection()
-
         guard !ownedFoods.isEmpty else { return }
 
+        selectedFoodRarityTab = .normal
+        syncFoodSelectorSelection()
         resetFoodSelectorDragState()
         isFoodFeedingAnimationRunning = false
         pendingFoodFeedID = nil
@@ -1600,15 +1548,22 @@ struct HomeView: View {
         }
     }
 
-    private func moveFoodSelection(_ delta: Int) {
-        let foods = ownedFoods
-        guard foods.count >= 2 else { return }
-        guard delta != 0 else {
-            withAnimation(.spring(response: 0.28, dampingFraction: 0.9)) {
-                foodSelectorDragOffset = .zero
-            }
-            return
+    private func toggleFoodSelectorRarity() {
+        stopFoodSelectorHorizontalRattleIfNeeded()
+        pendingFoodFeedID = nil
+        resetFoodSelectorDragState()
+        selectedFoodRarityTab = selectedFoodRarityTab.next
+        syncFoodSelectorSelection()
+
+        Task { @MainActor in
+            Haptics.tap(style: .soft)
         }
+    }
+
+    private func applyFoodSelectionDelta(_ delta: Int, animated: Bool = true) {
+        let foods = currentFoodSelectorFoods
+        guard foods.count >= 2 else { return }
+        guard delta != 0 else { return }
 
         syncFoodSelectorSelection()
         guard let currentID = selectedFoodID,
@@ -1618,31 +1573,45 @@ struct HomeView: View {
             return
         }
 
-        let direction = delta > 0 ? 1 : -1
-        let nextIndex = (currentIndex + direction).positiveModulo(foods.count)
+        let nextIndex = (currentIndex + delta).positiveModulo(foods.count)
         let nextFoodID = foods[nextIndex].id
+        guard nextFoodID != currentID else { return }
 
-        guard nextFoodID != currentID else {
-            withAnimation(.spring(response: 0.28, dampingFraction: 0.9)) {
-                foodSelectorDragOffset = .zero
-            }
-            return
-        }
-
-        withAnimation(.spring(response: 0.34, dampingFraction: 0.82)) {
+        let applySelection = {
             selectedFoodID = nextFoodID
-            foodSelectorDragOffset = .zero
+            pendingFoodFeedID = nil
         }
 
-        pendingFoodFeedID = nil
+        if animated {
+            withAnimation(.spring(response: 0.34, dampingFraction: 0.82)) {
+                applySelection()
+            }
+        } else {
+            applySelection()
+        }
 
         Task { @MainActor in
             Haptics.tap(style: .soft)
         }
     }
 
+    private func moveFoodSelection(_ delta: Int) {
+        guard delta != 0 else {
+            withAnimation(.spring(response: 0.28, dampingFraction: 0.9)) {
+                foodSelectorDragOffset = .zero
+            }
+            return
+        }
+
+        applyFoodSelectionDelta(delta)
+
+        withAnimation(.spring(response: 0.28, dampingFraction: 0.9)) {
+            foodSelectorDragOffset = .zero
+        }
+    }
+
     private func updateFoodSelectionWhileDragging(_ value: DragGesture.Value) {
-        let foods = ownedFoods
+        let foods = currentFoodSelectorFoods
         guard !foods.isEmpty else {
             resetFoodSelectorDragState()
             return
@@ -1654,41 +1623,27 @@ struct HomeView: View {
             foodSelectorScrollSelectionDelta = 0
         }
 
-        guard let anchorFoodID = foodSelectorDragAnchorFoodID,
-              let anchorIndex = foods.firstIndex(where: { $0.id == anchorFoodID }) else {
-            foodSelectorDragAnchorFoodID = selectedFoodID ?? foods.first?.id
-            foodSelectorScrollSelectionDelta = 0
-            foodSelectorDragOffset = value.translation
-            return
-        }
+        foodSelectorDragOffset = value.translation
+    }
 
-        guard foods.count >= 2 else {
-            foodSelectorDragOffset = CGSize(width: 0, height: value.translation.height)
-            return
-        }
-
+    private func resolvedFoodSelectionDelta(horizontal: CGFloat, predictedHorizontal: CGFloat) -> Int {
         let stepWidth = max(Layout.foodSelectorRollStepWidth, 1)
-        let steppedDelta = Int(round((-value.translation.width) / stepWidth))
+        let projectedHorizontal = abs(predictedHorizontal) > abs(horizontal) ? predictedHorizontal : horizontal
+        let roundedDelta = Int(round((-projectedHorizontal) / stepWidth))
 
-        if steppedDelta != foodSelectorScrollSelectionDelta {
-            let nextIndex = (anchorIndex + steppedDelta).positiveModulo(foods.count)
-            let nextFoodID = foods[nextIndex].id
-
-            if nextFoodID != selectedFoodID {
-                withAnimation(.spring(response: 0.18, dampingFraction: 0.92)) {
-                    selectedFoodID = nextFoodID
-                }
-
-                Task { @MainActor in
-                    Haptics.tap(style: .soft)
-                }
-            }
-
-            foodSelectorScrollSelectionDelta = steppedDelta
+        if roundedDelta != 0 {
+            return roundedDelta
         }
 
-        let residualX = value.translation.width + (CGFloat(foodSelectorScrollSelectionDelta) * stepWidth)
-        foodSelectorDragOffset = CGSize(width: residualX, height: value.translation.height)
+        let fallbackThreshold = stepWidth * 0.32
+        if projectedHorizontal <= -fallbackThreshold {
+            return 1
+        }
+        if projectedHorizontal >= fallbackThreshold {
+            return -1
+        }
+
+        return 0
     }
 
     private func cancelPendingFoodSelection() {
@@ -1728,10 +1683,6 @@ struct HomeView: View {
         defer {
             foodSelectorDragAnchorFoodID = nil
             foodSelectorScrollSelectionDelta = 0
-
-            withAnimation(.spring(response: 0.28, dampingFraction: 0.9)) {
-                foodSelectorDragOffset = .zero
-            }
         }
 
         if pendingFoodFeedID != nil {
@@ -1753,6 +1704,9 @@ struct HomeView: View {
                 return
             }
 
+            withAnimation(.spring(response: 0.28, dampingFraction: 0.9)) {
+                foodSelectorDragOffset = .zero
+            }
             return
         }
 
@@ -1770,19 +1724,16 @@ struct HomeView: View {
             return
         }
 
-        let selectionThreshold = Layout.foodSelectorRollStepWidth * 0.42
-        let didContinuouslyScroll = abs(horizontal) >= selectionThreshold
+        let committedDelta = resolvedFoodSelectionDelta(
+            horizontal: horizontal,
+            predictedHorizontal: predictedHorizontal
+        )
 
-        if !didContinuouslyScroll {
-            if predictedHorizontal <= -selectionThreshold {
-                moveFoodSelection(1)
-                return
+        withAnimation(.spring(response: 0.30, dampingFraction: 0.88)) {
+            if committedDelta != 0 {
+                applyFoodSelectionDelta(committedDelta, animated: false)
             }
-
-            if predictedHorizontal >= selectionThreshold {
-                moveFoodSelection(-1)
-                return
-            }
+            foodSelectorDragOffset = .zero
         }
     }
 
@@ -1845,7 +1796,7 @@ struct HomeView: View {
             return
         }
 
-        guard ownedFoods.contains(where: { $0.id == foodID }) else {
+        guard currentFoodSelectorFoods.contains(where: { $0.id == foodID }) else {
             toast("ご飯が見つかりません")
             return
         }
@@ -2035,7 +1986,6 @@ struct HomeView: View {
                 }
 
                 let doDouble = Double.random(in: 0...1) < doubleBlinkChance
-
                 await playBlink()
 
                 if doDouble {
@@ -2139,7 +2089,6 @@ struct HomeView: View {
         _ = state.resolveFood(now: now)
 
         let gainedPoint = 10
-
         let happinessBonus = state.happinessBonusPoints(forFoodID: food.id)
         if happinessBonus > 0 {
             _ = state.addHappinessPoints(happinessBonus, now: now)
@@ -2226,7 +2175,6 @@ struct HomeView: View {
         let beforeDisplayed = displayedFriendship
 
         let result = state.addFriendship(points: points, maxMeter: maxMeter)
-
         save()
 
         let after = result.afterPoint
@@ -2833,10 +2781,7 @@ private struct FullnessStomachGauge: View {
                                 let r = spec.2
 
                                 let rect = CGRect(x: x - r, y: y - r, width: r * 2, height: r * 2)
-                                context.fill(
-                                    Path(ellipseIn: rect),
-                                    with: .color(Color.white.opacity(0.34))
-                                )
+                                context.fill(Path(ellipseIn: rect), with: .color(Color.white.opacity(0.34)))
                                 context.stroke(
                                     Path(ellipseIn: rect.insetBy(dx: 0.8, dy: 0.8)),
                                     with: .color(Color.white.opacity(0.52)),
@@ -3058,26 +3003,9 @@ private struct TopStatusButtons: View {
 
     var body: some View {
         VStack(spacing: spacing) {
-            StatusIconButton(
-                imageName: "coin",
-                buttonSize: buttonSize,
-                iconSize: iconSize,
-                action: onCoin
-            )
-
-            StatusIconButton(
-                imageName: "shoes",
-                buttonSize: buttonSize,
-                iconSize: iconSize,
-                action: onShoes
-            )
-
-            StatusIconButton(
-                imageName: "presentBox",
-                buttonSize: buttonSize,
-                iconSize: iconSize,
-                action: onPresentBox
-            )
+            StatusIconButton(imageName: "coin", buttonSize: buttonSize, iconSize: iconSize, action: onCoin)
+            StatusIconButton(imageName: "shoes", buttonSize: buttonSize, iconSize: iconSize, action: onShoes)
+            StatusIconButton(imageName: "presentBox", buttonSize: buttonSize, iconSize: iconSize, action: onPresentBox)
         }
     }
 }
@@ -3126,12 +3054,9 @@ private struct HomeTopInfoPopup: View {
 
     private var titleText: String {
         switch popup {
-        case .wallet:
-            return "所持コイン"
-        case .todaySteps:
-            return "今日の歩数"
-        case .happinessRewards:
-            return "幸せ報酬"
+        case .wallet: return "所持コイン"
+        case .todaySteps: return "今日の歩数"
+        case .happinessRewards: return "幸せ報酬"
         }
     }
 
@@ -3140,12 +3065,10 @@ private struct HomeTopInfoPopup: View {
            let reward = rewardDefinitions.first(where: { $0.level == claimableLevel }) {
             return reward
         }
-
         if let nextRewardLevel,
            let reward = rewardDefinitions.first(where: { $0.level == nextRewardLevel }) {
             return reward
         }
-
         return nil
     }
 
@@ -3163,12 +3086,8 @@ private struct HomeTopInfoPopup: View {
     }
 
     private func rewardStatusText(for reward: AppState.HappinessRewardDefinition) -> String {
-        if isRewardClaimed(reward) {
-            return "獲得済み"
-        }
-        if isRewardClaimable(reward) {
-            return "受取可能"
-        }
+        if isRewardClaimed(reward) { return "獲得済み" }
+        if isRewardClaimable(reward) { return "受取可能" }
         return "Lv.\(reward.level)で解放"
     }
 
@@ -3284,7 +3203,10 @@ private struct HomeTopInfoPopup: View {
                             .foregroundStyle(.white)
                             .frame(maxWidth: .infinity)
                             .padding(.vertical, 12)
-                            .background(Color(red: 0.85, green: 0.20, blue: 0.28).opacity(0.95), in: RoundedRectangle(cornerRadius: 14, style: .continuous))
+                            .background(
+                                Color(red: 0.85, green: 0.20, blue: 0.28).opacity(0.95),
+                                in: RoundedRectangle(cornerRadius: 14, style: .continuous)
+                            )
                     }
                     .buttonStyle(.plain)
                 }
@@ -3442,10 +3364,7 @@ private struct RightSideButtons: View {
                     bgmManager.playSE(.push)
                     onCamera()
                 }) {
-                    MenuPopupActionIcon(
-                        imageName: "camera_button",
-                        buttonSize: buttonSize
-                    )
+                    MenuPopupActionIcon(imageName: "camera_button", buttonSize: buttonSize)
                 }
                 .buttonStyle(.plain)
 
@@ -3454,18 +3373,12 @@ private struct RightSideButtons: View {
                         bgmManager.playSE(.push)
                         onBlocked()
                     }) {
-                        MenuPopupActionIcon(
-                            imageName: "omoide_button",
-                            buttonSize: buttonSize
-                        )
+                        MenuPopupActionIcon(imageName: "omoide_button", buttonSize: buttonSize)
                     }
                     .buttonStyle(.plain)
                 } else {
                     NavigationLink { MemoriesView() } label: {
-                        MenuPopupActionIcon(
-                            imageName: "omoide_button",
-                            buttonSize: buttonSize
-                        )
+                        MenuPopupActionIcon(imageName: "omoide_button", buttonSize: buttonSize)
                     }
                     .simultaneousGesture(TapGesture().onEnded {
                         bgmManager.playSE(.push)
@@ -3481,18 +3394,12 @@ private struct RightSideButtons: View {
                         bgmManager.playSE(.push)
                         onBlocked()
                     }) {
-                        MenuPopupActionIcon(
-                            imageName: "picture_button",
-                            buttonSize: buttonSize
-                        )
+                        MenuPopupActionIcon(imageName: "picture_button", buttonSize: buttonSize)
                     }
                     .buttonStyle(.plain)
                 } else {
                     NavigationLink { ZukanView() } label: {
-                        MenuPopupActionIcon(
-                            imageName: "picture_button",
-                            buttonSize: buttonSize
-                        )
+                        MenuPopupActionIcon(imageName: "picture_button", buttonSize: buttonSize)
                     }
                     .simultaneousGesture(TapGesture().onEnded {
                         bgmManager.playSE(.push)
@@ -3505,18 +3412,12 @@ private struct RightSideButtons: View {
                         bgmManager.playSE(.push)
                         onBlocked()
                     }) {
-                        MenuPopupActionIcon(
-                            imageName: "option_button",
-                            buttonSize: buttonSize
-                        )
+                        MenuPopupActionIcon(imageName: "option_button", buttonSize: buttonSize)
                     }
                     .buttonStyle(.plain)
                 } else {
                     NavigationLink { SettingsView() } label: {
-                        MenuPopupActionIcon(
-                            imageName: "option_button",
-                            buttonSize: buttonSize
-                        )
+                        MenuPopupActionIcon(imageName: "option_button", buttonSize: buttonSize)
                     }
                     .simultaneousGesture(TapGesture().onEnded {
                         bgmManager.playSE(.push)
@@ -3534,9 +3435,7 @@ private struct MenuPopupActionIcon: View {
     let imageName: String
     let buttonSize: CGFloat
 
-    private var iconSize: CGFloat {
-        buttonSize * 0.74
-    }
+    private var iconSize: CGFloat { buttonSize * 0.74 }
 
     var body: some View {
         ZStack {
@@ -3573,57 +3472,29 @@ private struct BottomButtons: View {
 
     var body: some View {
         HStack(spacing: spacing) {
-            BottomActionButton(
-                imageName: "menu_button",
-                buttonSize: buttonSize,
-                action: {
-                    bgmManager.playSE(.push)
-                    if isToiletLocked {
-                        onBlocked()
-                        return
-                    }
-                    onMenu()
-                }
-            )
+            BottomActionButton(imageName: "menu_button", buttonSize: buttonSize) {
+                bgmManager.playSE(.push)
+                if isToiletLocked { onBlocked(); return }
+                onMenu()
+            }
 
-            BottomActionButton(
-                imageName: "gatya_button",
-                buttonSize: buttonSize,
-                action: {
-                    bgmManager.playSE(.push)
-                    if isToiletLocked {
-                        onBlocked()
-                        return
-                    }
-                    onGatya()
-                }
-            )
+            BottomActionButton(imageName: "gatya_button", buttonSize: buttonSize) {
+                bgmManager.playSE(.push)
+                if isToiletLocked { onBlocked(); return }
+                onGatya()
+            }
 
-            BottomActionButton(
-                imageName: "work_button",
-                buttonSize: buttonSize,
-                action: {
-                    bgmManager.playSE(.push)
-                    if isToiletLocked {
-                        onBlocked()
-                        return
-                    }
-                    onWork()
-                }
-            )
+            BottomActionButton(imageName: "work_button", buttonSize: buttonSize) {
+                bgmManager.playSE(.push)
+                if isToiletLocked { onBlocked(); return }
+                onWork()
+            }
 
-            BottomActionButton(
-                imageName: "step_button",
-                buttonSize: buttonSize,
-                action: {
-                    bgmManager.playSE(.push)
-                    if isToiletLocked {
-                        onBlocked()
-                        return
-                    }
-                    onStep()
-                }
-            )
+            BottomActionButton(imageName: "step_button", buttonSize: buttonSize) {
+                bgmManager.playSE(.push)
+                if isToiletLocked { onBlocked(); return }
+                onStep()
+            }
         }
         .padding(.horizontal, HomeView.Layout.bottomBarHorizontalPadding)
         .padding(.vertical, HomeView.Layout.bottomBarVerticalPadding)
@@ -3659,10 +3530,12 @@ private struct BottomActionButton: View {
                 width: HomeView.Layout.bottomButtonBackgroundSize,
                 height: HomeView.Layout.bottomButtonBackgroundSize
             )
-            .contentShape(RoundedRectangle(
-                cornerRadius: HomeView.Layout.bottomButtonCornerRadius,
-                style: .continuous
-            ))
+            .contentShape(
+                RoundedRectangle(
+                    cornerRadius: HomeView.Layout.bottomButtonCornerRadius,
+                    style: .continuous
+                )
+            )
         }
         .buttonStyle(.plain)
         .shadow(color: .black.opacity(0.18), radius: 8, x: 0, y: 4)
@@ -3705,10 +3578,12 @@ private struct ToiletTicketQuickButton: View {
                 width: HomeView.Layout.bottomButtonBackgroundSize,
                 height: HomeView.Layout.bottomButtonBackgroundSize
             )
-            .contentShape(RoundedRectangle(
-                cornerRadius: HomeView.Layout.bottomButtonCornerRadius,
-                style: .continuous
-            ))
+            .contentShape(
+                RoundedRectangle(
+                    cornerRadius: HomeView.Layout.bottomButtonCornerRadius,
+                    style: .continuous
+                )
+            )
         }
         .buttonStyle(.plain)
         .shadow(color: .black.opacity(0.18), radius: 8, x: 0, y: 4)
@@ -3719,11 +3594,13 @@ private struct FoodSelectionCarousel: View {
     let foods: [FoodCatalog.FoodItem]
     let countProvider: (String) -> Int
     let selectedFoodID: String?
+    let selectedRarityTab: HomeView.FoodSelectorRarityTab
     let pendingFoodID: String?
     let dragOffset: CGSize
     let isFeedingAnimationRunning: Bool
     let onMoveSelection: (Int) -> Void
     let onFeed: () -> Void
+    let onToggleRarity: () -> Void
     let onCardTap: (String) -> Void
     let onDragChanged: (DragGesture.Value) -> Void
     let onDragEnded: (DragGesture.Value) -> Void
@@ -3746,23 +3623,15 @@ private struct FoodSelectionCarousel: View {
     private var pendingActionText: String? {
         guard isPendingMode else { return nil }
 
-        if dragOffset.height <= -HomeView.Layout.foodSelectorPendingDecisionThreshold {
-            return "あげる"
-        }
-
-        if dragOffset.height >= HomeView.Layout.foodSelectorPendingDecisionThreshold {
-            return "やめる"
-        }
-
+        if dragOffset.height <= -HomeView.Layout.foodSelectorPendingDecisionThreshold { return "あげる" }
+        if dragOffset.height >= HomeView.Layout.foodSelectorPendingDecisionThreshold { return "やめる" }
         return nil
     }
 
     private var selectedIndex: Int {
         guard !foods.isEmpty else { return 0 }
         guard let selectedFoodID,
-              let idx = foods.firstIndex(where: { $0.id == selectedFoodID }) else {
-            return 0
-        }
+              let idx = foods.firstIndex(where: { $0.id == selectedFoodID }) else { return 0 }
         return idx
     }
 
@@ -3785,14 +3654,13 @@ private struct FoodSelectionCarousel: View {
     private var visibleCards: [VisibleCard] {
         guard !foods.isEmpty else { return [] }
 
-        let candidateOffsets = [-3, -2, -1, 0, 1, 2, 3]
+        let candidateOffsets = [0, 1, -1, 2, -2, 3, -3]
         var seenIndexes: Set<Int> = []
         var cards: [VisibleCard] = []
 
         for relative in candidateOffsets {
             let index = (selectedIndex + relative).positiveModulo(foods.count)
             guard seenIndexes.insert(index).inserted else { continue }
-
             cards.append(
                 VisibleCard(
                     id: foods[index].id + "_\(relative)",
@@ -3814,6 +3682,16 @@ private struct FoodSelectionCarousel: View {
                 )
                 .contentShape(Rectangle())
 
+            FoodRarityToggleButton(
+                selectedTab: selectedRarityTab,
+                action: onToggleRarity
+            )
+            .offset(
+                x: HomeView.Layout.foodSelectorToggleOffsetX,
+                y: HomeView.Layout.foodSelectorToggleOffsetY
+            )
+            .zIndex(40)
+
             if isPendingMode, let pendingFoodItem {
                 PendingFoodSelectionCard(
                     item: pendingFoodItem,
@@ -3832,6 +3710,21 @@ private struct FoodSelectionCarousel: View {
                         .offset(y: pendingActionText == "あげる" ? -138 : 138)
                         .transition(.opacity)
                 }
+
+                VStack(spacing: 6) {
+                    Text(pendingFoodItem.name)
+                        .font(.system(size: 14, weight: .bold))
+                        .foregroundStyle(.white)
+
+                    Text("上フリックであげる / 下フリックでキャンセル")
+                        .font(.system(size: 11, weight: .medium))
+                        .foregroundStyle(.white.opacity(0.82))
+                        .multilineTextAlignment(.center)
+                }
+                .offset(y: HomeView.Layout.foodSelectorInstructionOffsetY)
+            } else if foods.isEmpty {
+                FoodSelectionEmptyState(tab: selectedRarityTab)
+                    .offset(y: 16)
             } else {
                 ForEach(visibleCards.sorted(by: {
                     abs(Double($0.relativeIndex) + normalizedHorizontalProgress) >
@@ -3860,7 +3753,7 @@ private struct FoodSelectionCarousel: View {
                             .font(.system(size: 14, weight: .bold))
                             .foregroundStyle(.white)
 
-                        Text("左右フリックで1つずつ / 横スクロールで連続選択 / タップ or 上フリックで仮止め")
+                        Text("横スクロールで選ぶ / タップで仮決定 / 上フリックであげる / 下フリックでキャンセル")
                             .font(.system(size: 11, weight: .medium))
                             .foregroundStyle(.white.opacity(0.8))
                             .multilineTextAlignment(.center)
@@ -3876,7 +3769,7 @@ private struct FoodSelectionCarousel: View {
         )
         .accessibilityElement(children: .combine)
         .accessibilityLabel("ごはんセレクター")
-        .accessibilityHint("左右フリックで1つずつ、横スクロールで連続してごはんを選び、タップまたは上フリックで仮止めします")
+        .accessibilityHint("横スクロールでごはんを選び、タップで仮決定してから、上フリックであげるか下フリックでキャンセルします")
     }
 
     private func countText(for foodID: String) -> String {
@@ -3889,6 +3782,89 @@ private struct FoodSelectionCarousel: View {
     }
 }
 
+private struct FoodRarityToggleButton: View {
+    let selectedTab: HomeView.FoodSelectorRarityTab
+    let action: () -> Void
+
+    var body: some View {
+        Button(action: action) {
+            HStack(spacing: 8) {
+                FoodRarityTogglePill(tab: selectedTab, isActive: true)
+
+                Image(systemName: "arrow.triangle.2.circlepath")
+                    .font(.system(size: 11, weight: .bold))
+                    .foregroundStyle(.white.opacity(0.88))
+
+                FoodRarityTogglePill(tab: selectedTab.next, isActive: false)
+            }
+            .padding(.horizontal, 12)
+            .padding(.vertical, 8)
+            .background(Color.black.opacity(0.42), in: Capsule())
+        }
+        .buttonStyle(.plain)
+        .shadow(color: .black.opacity(0.18), radius: 8, x: 0, y: 4)
+        .accessibilityLabel("ご飯表示切り替え")
+        .accessibilityHint("タップするたびにNとRを切り替えます")
+    }
+}
+
+private struct FoodRarityTogglePill: View {
+    let tab: HomeView.FoodSelectorRarityTab
+    let isActive: Bool
+
+    private var backgroundColor: Color {
+        isActive ? tab.accentColor : Color.white.opacity(0.18)
+    }
+
+    var body: some View {
+        Text(tab.rawValue)
+            .font(.system(size: 12, weight: .black))
+            .foregroundStyle(isActive ? Color.white : Color.white.opacity(0.78))
+            .padding(.horizontal, 10)
+            .padding(.vertical, 5)
+            .background(backgroundColor, in: Capsule())
+    }
+}
+
+private struct FoodSelectionEmptyState: View {
+    let tab: HomeView.FoodSelectorRarityTab
+
+    var body: some View {
+        VStack(spacing: 10) {
+            Text(tab.emptyText)
+                .font(.system(size: 15, weight: .bold))
+                .foregroundStyle(.white)
+
+            Text("切り替えボタンで別レアリティを表示できます")
+                .font(.system(size: 11, weight: .medium))
+                .foregroundStyle(.white.opacity(0.78))
+                .multilineTextAlignment(.center)
+        }
+        .padding(.horizontal, 18)
+        .padding(.vertical, 16)
+        .background(Color.black.opacity(0.36), in: RoundedRectangle(cornerRadius: 20, style: .continuous))
+    }
+}
+
+private struct FoodRarityBackdropGlow: View {
+    let tab: HomeView.FoodSelectorRarityTab
+    let size: CGFloat
+
+    var body: some View {
+        Circle()
+            .fill(
+                RadialGradient(
+                    colors: tab.glowColors,
+                    center: .center,
+                    startRadius: 4,
+                    endRadius: size * 0.6
+                )
+            )
+            .frame(width: size, height: size)
+            .blur(radius: 8)
+    }
+}
+
 private struct FoodCarouselCard: View {
     let item: FoodCatalog.FoodItem
     let countText: String
@@ -3898,6 +3874,10 @@ private struct FoodCarouselCard: View {
     let isFocused: Bool
     let isPendingFeed: Bool
     let onTap: () -> Void
+
+    private var rarityTab: HomeView.FoodSelectorRarityTab {
+        item.isShopEligible ? .normal : .rare
+    }
 
     private var clampedPosition: Double {
         min(
@@ -3945,42 +3925,29 @@ private struct FoodCarouselCard: View {
     }
 
     private var backgroundOpacity: Double {
-        if isPendingFeed && absPosition < 0.75 {
-            return 0.32
-        }
-        return absPosition < 0.75 ? 0.24 : 0.18
+        if isPendingFeed && absPosition < 0.75 { return 0.24 }
+        return absPosition < 0.75 ? 0.16 : 0.12
     }
 
-    private var borderOpacity: Double {
-        if isPendingFeed && absPosition < 0.75 {
-            return 0.95
-        }
-        if isFocused && absPosition < 0.75 {
-            return 0.42
-        }
-        return 0.16
-    }
-
-    private var borderLineWidth: CGFloat {
-        isPendingFeed && absPosition < 0.75 ? 3 : 1
+    private var focusShadowColor: Color {
+        rarityTab.accentColor.opacity(isFocused && absPosition < 0.75 ? 0.28 : 0.0)
     }
 
     var body: some View {
-        ZStack(alignment: .bottomTrailing) {
+        ZStack {
             RoundedRectangle(cornerRadius: 26, style: .continuous)
                 .fill(Color.black.opacity(backgroundOpacity))
-                .frame(width: cardSize.width, height: cardSize.height)
-                .overlay(
-                    RoundedRectangle(cornerRadius: 26, style: .continuous)
-                        .stroke(Color.white.opacity(borderOpacity), lineWidth: borderLineWidth)
-                )
+
+            FoodRarityBackdropGlow(tab: rarityTab, size: cardSize.width * 0.72)
 
             Image(item.assetName)
                 .resizable()
                 .scaledToFit()
                 .frame(width: cardSize.width * 0.68, height: cardSize.height * 0.68)
                 .padding(10)
-
+        }
+        .frame(width: cardSize.width, height: cardSize.height)
+        .overlay(alignment: .bottomTrailing) {
             Text(countText)
                 .font(.system(size: 12, weight: .bold))
                 .foregroundStyle(.white)
@@ -3989,6 +3956,7 @@ private struct FoodCarouselCard: View {
                 .background(Color.black.opacity(0.72), in: Capsule())
                 .offset(x: 10, y: 10)
         }
+        .shadow(color: focusShadowColor, radius: 12, x: 0, y: 6)
         .scaleEffect(config.scale)
         .opacity(config.opacity)
         .blur(radius: config.blur)
@@ -3997,14 +3965,9 @@ private struct FoodCarouselCard: View {
             axis: (x: 0, y: 1, z: 0),
             perspective: 0.65
         )
-        .offset(
-            x: config.x,
-            y: config.y + dragY + feedLift
-        )
+        .offset(x: config.x, y: config.y + dragY + feedLift)
         .contentShape(Rectangle())
-        .onTapGesture {
-            onTap()
-        }
+        .onTapGesture { onTap() }
         .animation(.interactiveSpring(response: 0.26, dampingFraction: 0.82), value: dragOffset)
         .animation(.spring(response: 0.28, dampingFraction: 0.8), value: isFeedingAnimationRunning)
     }
@@ -4017,6 +3980,10 @@ private struct PendingFoodSelectionCard: View {
     let isFeedingAnimationRunning: Bool
 
     @State private var startDate: Date = Date()
+
+    private var rarityTab: HomeView.FoodSelectorRarityTab {
+        item.isShopEligible ? .normal : .rare
+    }
 
     private var dragFollowOffsetY: CGFloat {
         max(-92, min(92, dragOffset.height * 0.42))
@@ -4035,20 +4002,19 @@ private struct PendingFoodSelectionCard: View {
                 ? CGFloat.zero
                 : CGFloat(sin(phase)) * HomeView.Layout.floatingBubbleAmplitude
 
-            ZStack(alignment: .bottomTrailing) {
+            ZStack {
                 RoundedRectangle(cornerRadius: 34, style: .continuous)
-                    .fill(Color.black.opacity(0.34))
-                    .frame(width: 188, height: 188)
-                    .overlay(
-                        RoundedRectangle(cornerRadius: 34, style: .continuous)
-                            .stroke(Color.white.opacity(0.92), lineWidth: 3)
-                    )
+                    .fill(Color.black.opacity(0.26))
+
+                FoodRarityBackdropGlow(tab: rarityTab, size: 138)
 
                 Image(item.assetName)
                     .resizable()
                     .scaledToFit()
                     .frame(width: 126, height: 126)
-
+            }
+            .frame(width: 188, height: 188)
+            .overlay(alignment: .bottomTrailing) {
                 Text(countText)
                     .font(.system(size: 14, weight: .bold))
                     .foregroundStyle(.white)
