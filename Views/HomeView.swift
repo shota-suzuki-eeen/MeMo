@@ -836,10 +836,8 @@ struct HomeView: View {
                 selectedCaptureMode = nil
             } onCapture: { image in
                 saveTodayPhoto(image, placeName: nil, latitude: nil, longitude: nil)
-                selectedCaptureMode = nil
             } onCaptureWithPlace: { image, placeName, lat, lon in
                 saveTodayPhoto(image, placeName: placeName, latitude: lat, longitude: lon)
-                selectedCaptureMode = nil
             }
         }
         .fullScreenCover(isPresented: $showWorkTimerPreparation) {
