@@ -14,14 +14,11 @@ struct RootView: View {
     @Query private var appStates: [AppState]
     @StateObject private var hk = HealthKitManager()
 
-    // ✅ 起動時処理が多重実行されないようにする（VM側でガード）
+    // 起動処理の多重実行防止は ViewModel 側で担保
     @StateObject private var viewModel = RootViewModel()
 
-    // ✅ BGM（App側でenvironmentObject注入している前提）
+    // App 側で environmentObject 注入済み
     @EnvironmentObject private var bgmManager: BGMManager
-
-    // ✅ フォア/バックの監視
-    @Environment(\.scenePhase) private var scenePhase
 
     var body: some View {
         Group {
@@ -37,14 +34,12 @@ struct RootView: View {
 
             case .authorized:
                 if let sharedState = viewModel.sharedState {
-                    // ✅ 重要：引数順は state → hk
                     HomeView(state: sharedState, hk: hk)
                 } else {
                     ProgressView()
                 }
             }
         }
-        // ✅ boot処理（VM側で「多重実行しない」ガードを持つ想定）
         .task {
             await viewModel.bootIfNeeded(
                 appStates: appStates,
@@ -52,34 +47,6 @@ struct RootView: View {
                 hk: hk,
                 bgmManager: bgmManager
             )
-
-            if hk.authState == .authorized {
-                await hk.startStepUpdatesIfNeeded()
-                await hk.refreshTodayStepsForWidget()
-            }
-        }
-        .onChange(of: scenePhase) { _, newPhase in
-            switch newPhase {
-            case .active:
-                // ✅ 復帰時に再生が止まっていたら再開
-                bgmManager.startIfNeeded()
-
-                // ✅ 復帰時に歩数監視を再確認し、Widget 用の歩数も更新
-                Task {
-                    await hk.startStepUpdatesIfNeeded()
-                    await hk.refreshTodayStepsForWidget()
-                }
-
-            case .background:
-                // ✅ 常時再生したい場合でも、ここで止めない（仕様：無限ループ再生）
-                break
-
-            case .inactive:
-                break
-
-            @unknown default:
-                break
-            }
         }
     }
 }

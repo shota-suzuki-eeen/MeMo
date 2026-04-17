@@ -14,6 +14,7 @@ import WidgetKit
 
 struct HomeView: View {
     @Environment(\.modelContext) private var modelContext
+    @Environment(\.scenePhase) private var scenePhase
     @EnvironmentObject private var bgmManager: BGMManager
 
     let state: AppState
@@ -22,9 +23,6 @@ struct HomeView: View {
     @State private var todaySteps: Int = 0
     @State private var displayedTodaySteps: Int = 0
     @State private var displayedWalletSteps: Int = 0
-
-    @State private var todayPhotoImage: UIImage?
-    @State private var todayPhotoEntry: TodayPhotoEntry?
 
     @State private var showCaptureModeDialog: Bool = false
     @State private var selectedCaptureMode: CameraCaptureView.Mode?
@@ -39,6 +37,8 @@ struct HomeView: View {
 
     @State private var isAnimatingGain: Bool = false
     @State private var isHomeVisible: Bool = false
+    @State private var hasCompletedInitialLoad: Bool = false
+    @State private var isForegroundSyncInProgress: Bool = false
 
     @State private var showStepEnjoy: Bool = false
     @State private var showGachaView: Bool = false
@@ -93,6 +93,31 @@ struct HomeView: View {
     @State private var floatingHearts: [FloatingHeart] = []
 
     private let characterRubDistancePerTouch: CGFloat = 28
+
+    private struct HomePersistenceSnapshot: Equatable {
+        let walletSteps: Int
+        let pendingSteps: Int
+        let lastSyncedAt: Date?
+        let dailyGoalKcal: Int
+        let lastDayKey: String
+        let cachedTodaySteps: Int
+        let cachedTodayMeterSteps: Int
+        let friendshipPoint: Int
+        let friendshipCardCount: Int
+        let satisfactionLevel: Int
+        let satisfactionLastUpdatedAt: Date?
+        let foodFlagAt: Date?
+        let foodLastRaisedAt: Date?
+        let foodNextSpawnAt: Date?
+        let toiletFlagAt: Date?
+        let toiletLastRaisedAt: Date?
+        let toiletNextSpawnAt: Date?
+        let toiletPoopsData: Data?
+        let toiletPoopLastSpawnAt: Date?
+        let currentPetID: String
+        let ownedPetIDsData: Data?
+        let ownedFoodCountsData: Data?
+    }
 
     private var fullnessMaxLevel: Int { 5 }
 
@@ -420,650 +445,830 @@ struct HomeView: View {
         static let careSpawnCheckInterval: Double = 1.0
     }
 
+
     var body: some View {
-        NavigationStack {
-            ZStack {
-                Image(Layout.homeBackgroundAssetName)
-                    .resizable()
-                    .scaledToFill()
-                    .ignoresSafeArea()
+        lifecycleConfiguredHomeView
+    }
 
-                VStack(spacing: 0) {
-                    Color.clear
-                        .frame(width: Layout.bannerWidthIPhone, height: Layout.bannerHeight)
-                        .frame(maxWidth: .infinity)
-                        .frame(height: Layout.bannerHeight)
+    private var lifecycleConfiguredHomeView: some View {
+        modalConfiguredHomeView
+            .task {
+                guard !hasCompletedInitialLoad else { return }
+                let previousSnapshot = makeHomePersistenceSnapshot()
 
-                    GeometryReader { geo in
-                        let characterDisplayHeight = min(geo.size.width * 0.9, Layout.characterMaxHeight)
-                        let characterTouchWidth = min(geo.size.width * 0.72, Layout.characterTouchWidth)
-                        let characterTouchHeight = characterDisplayHeight * 1.15
+                state.ensureInitialPetsIfNeeded()
+                _ = state.normalizeFixedDailyStepGoal()
 
-                        ZStack {
-                            TopStatusButtons(
-                                onCoin: { openTopInfoPopup(.wallet) },
-                                onShoes: { openTopInfoPopup(.todaySteps) },
-                                onPresentBox: { openTopInfoPopup(.happinessRewards) },
-                                buttonSize: Layout.topStatusButtonSize,
-                                iconSize: Layout.topStatusButtonIconSize,
-                                spacing: Layout.topStatusButtonsSpacing
-                            )
-                            .padding(.top, Layout.topStatusButtonsTop)
-                            .padding(.leading, Layout.topStatusButtonsLeading)
-                            .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
-                            .zIndex(Layout.zBanner + 1)
+                await hk.startStepUpdatesIfNeeded()
+                await hk.refreshTodayStepsForWidget()
 
-                            Rectangle()
-                                .fill(Color.black.opacity(0.001))
-                                .frame(width: characterTouchWidth, height: characterTouchHeight)
-                                .offset(y: Layout.characterTopOffset)
-                                .zIndex(Layout.zCharacter)
-                                .highPriorityGesture(
-                                    DragGesture(minimumDistance: 0)
-                                        .onChanged { value in
-                                            handleCharacterPettingChanged(
-                                                value,
-                                                gestureAreaSize: CGSize(width: characterTouchWidth, height: characterTouchHeight)
-                                            )
-                                        }
-                                        .onEnded { value in
-                                            handleCharacterPettingEnded(
-                                                value,
-                                                gestureAreaSize: CGSize(width: characterTouchWidth, height: characterTouchHeight)
-                                            )
-                                        }
-                                )
+                syncCharacterBaseFromState(force: true)
 
-                            Image(characterAssetName.isEmpty ? preferredCharacterRestAssetName : characterAssetName)
-                                .resizable()
-                                .scaledToFit()
-                                .frame(maxHeight: characterDisplayHeight)
-                                .offset(
-                                    x: isToiletLocked ? (isToiletWiggleOn ? Layout.toiletWiggleOffset : -Layout.toiletWiggleOffset) : 0,
-                                    y: Layout.characterTopOffset
-                                )
-                                .animation(
-                                    isToiletLocked
-                                    ? .easeInOut(duration: Layout.toiletWiggleDuration).repeatForever(autoreverses: true)
-                                    : .default,
-                                    value: isToiletWiggleOn
-                                )
-                                .allowsHitTesting(false)
+                todaySteps = state.widgetTodaySteps
+                displayedTodaySteps = todaySteps
+                displayedWalletSteps = state.walletSteps
+                displayedFriendship = Double(state.friendshipPoint)
+                syncDisplayedHappiness(animated: false)
+                displayedStepProgress = calcStepProgressRaw(
+                    todaySteps: displayedTodaySteps,
+                    goalSteps: fixedDailyGoalSteps
+                )
+                displayedFullnessLevel = normalizedFullnessLevel(state.applySatisfactionDecayIfNeeded(now: Date()))
+                animatedFullnessLevel = Double(displayedFullnessLevel)
 
-                            ForEach(floatingHearts) { heart in
-                                FloatingHeartView(heart: heart)
-                                    .offset(x: heart.xOffset, y: heart.yOffset)
-                                    .zIndex(Layout.zCharacter + 1)
-                                    .allowsHitTesting(false)
-                            }
-
-                            HappinessStomachGauge(
-                                point: animatedHappinessPoint,
-                                displayPoint: displayedHappinessPoint,
-                                maxPoint: happinessMaxPoints,
-                                level: displayedHappinessLevel,
-                                outerSize: Layout.happinessGaugeOuterSize,
-                                innerSize: Layout.happinessGaugeInnerSize
-                            )
-                            .padding(.top, Layout.happinessGaugeTop)
-                            .padding(.leading, Layout.happinessGaugeLeading)
-                            .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
-
-                            FullnessStomachGauge(
-                                level: animatedFullnessLevel,
-                                displayLevel: displayedFullnessLevel,
-                                maxLevel: fullnessMaxLevel,
-                                outerSize: Layout.fullnessGaugeOuterSize,
-                                innerSize: Layout.fullnessGaugeInnerSize
-                            )
-                            .padding(.top, Layout.fullnessGaugeTop)
-                            .padding(.trailing, Layout.fullnessGaugeTrailing)
-                            .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topTrailing)
-
-                            if canShowFoodBubble {
-                                FloatingThoughtButton(
-                                    imageName: "food_button",
-                                    size: Layout.floatingBubbleSize,
-                                    amplitude: Layout.floatingBubbleAmplitude,
-                                    duration: Layout.floatingBubbleDuration,
-                                    action: {
-                                        if isToiletLocked {
-                                            showToiletLockedMessage()
-                                            return
-                                        }
-                                        onTapFood(state: state)
-                                    }
-                                )
-                                .padding(.leading, Layout.foodBubbleLeading)
-                                .padding(.top, Layout.foodBubbleTop)
-                                .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
-                                .zIndex(Layout.zFoodBubble)
-                            }
-
-                            if showFoodSelector {
-                                Color.black.opacity(0.001)
-                                    .ignoresSafeArea()
-                                    .contentShape(Rectangle())
-                                    .onTapGesture { closeFoodSelector() }
-                                    .zIndex(Layout.zFoodSelector)
-
-                                FoodSelectionCarousel(
-                                    foods: currentFoodSelectorFoods,
-                                    countProvider: { foodID in
-                                        state.foodCount(foodId: foodID)
-                                    },
-                                    selectedFoodID: selectedFoodID,
-                                    selectedRarityTab: selectedFoodRarityTab,
-                                    pendingFoodID: pendingFoodFeedID,
-                                    dragOffset: foodSelectorDragOffset,
-                                    isFeedingAnimationRunning: isFoodFeedingAnimationRunning,
-                                    onMoveSelection: { delta in
-                                        moveFoodSelection(delta)
-                                    },
-                                    onFeed: {
-                                        feedSelectedFood(state: state)
-                                    },
-                                    onToggleRarity: {
-                                        toggleFoodSelectorRarity()
-                                    },
-                                    onCardTap: { foodID in
-                                        handleFoodSelectorTap(foodID)
-                                    },
-                                    onDragChanged: { value in
-                                        handleFoodSelectorDragChanged(value)
-                                    },
-                                    onDragEnded: { value in
-                                        handleFoodSelectorDragEnded(value, state: state)
-                                    }
-                                )
-                                .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .bottom)
-                                .padding(.bottom, Layout.bottomPadding + Layout.foodSelectorBottomGapFromButtons)
-                                .zIndex(Layout.zFoodSelector + 1)
-                            }
-
-                            if showToiletLockedPopup {
-                                Text(toiletLockedPopupText)
-                                    .font(.system(size: 16, weight: .bold))
-                                    .foregroundStyle(.primary)
-                                    .padding(.horizontal, Layout.lockedPopupPaddingH)
-                                    .padding(.vertical, Layout.lockedPopupPaddingV)
-                                    .background(.thinMaterial)
-                                    .clipShape(RoundedRectangle(cornerRadius: 16, style: .continuous))
-                                    .shadow(radius: 10)
-                                    .frame(maxWidth: Layout.lockedPopupMaxWidth)
-                                    .transition(.opacity.combined(with: .scale))
-                                    .zIndex(999)
-                            }
-                        }
-                        .frame(maxWidth: .infinity, maxHeight: .infinity)
-                        .onAppear {
-                            homeContentSize = geo.size
-                            syncDisplayedFullness(animated: false)
-                            syncToiletPoopsIfNeeded(containerSize: geo.size)
-                        }
-                        .onChange(of: geo.size) { _, newSize in
-                            homeContentSize = newSize
-                            syncToiletPoopsIfNeeded(containerSize: newSize)
-                        }
-                        .overlay(alignment: .bottom) {
-                            if showToast, let toastMessage {
-                                ToastView(message: toastMessage)
-                                    .padding(.bottom, 18)
-                                    .transition(.move(edge: .bottom).combined(with: .opacity))
-                            }
-                        }
-                    }
-                }
-
-                if showRightMenuPopup {
-                    Color.black.opacity(0.28)
-                        .ignoresSafeArea()
-                        .transition(.opacity)
-                        .zIndex(Layout.zMenuPopup)
-                        .onTapGesture {
-                            withAnimation(.easeInOut(duration: 0.18)) {
-                                showRightMenuPopup = false
-                            }
-                        }
-
-                    CenterMenuPopup(
-                        isToiletLocked: isToiletLocked,
-                        onBlocked: { showToiletLockedMessage() },
-                        onCamera: {
-                            if isToiletLocked {
-                                showToiletLockedMessage()
-                                return
-                            }
-                            showRightMenuPopup = false
-                            showCaptureModeDialog = true
-                        },
-                        onDismiss: {
-                            bgmManager.playSE(.push)
-                            withAnimation(.easeInOut(duration: 0.18)) {
-                                showRightMenuPopup = false
-                            }
-                        },
-                        buttonSize: Layout.rightButtonSize,
-                        spacing: Layout.rightButtonsSpacing
-                    )
-                    .frame(maxWidth: Layout.menuPopupMaxWidth)
-                    .padding(.horizontal, Layout.menuPopupHorizontalPadding)
-                    .zIndex(Layout.zMenuPopup + 1)
-                    .transition(.scale(scale: 0.92).combined(with: .opacity))
-                }
-
-                if let activeTopInfoPopup {
-                    Color.black.opacity(0.28)
-                        .ignoresSafeArea()
-                        .transition(.opacity)
-                        .zIndex(Layout.zTopInfoPopup)
-                        .onTapGesture { closeTopInfoPopup(playSound: false) }
-
-                    HomeTopInfoPopup(
-                        popup: activeTopInfoPopup,
-                        walletCoinCount: currentWalletCoinCount,
-                        todayStepCount: currentTodayStepCount,
-                        totalStepCount: currentTotalStepCount,
-                        happinessLevel: currentHappinessLevelValue,
-                        happinessPoint: currentHappinessPointValue,
-                        happinessMaxPoints: happinessMaxPoints,
-                        claimableLevel: currentClaimableHappinessRewardLevel,
-                        nextRewardLevel: nextHappinessRewardLevel,
-                        rewardDefinitions: AppState.happinessRewardDefinitions,
-                        claimedRewardLevels: currentClaimedHappinessRewardLevels,
-                        onClose: { closeTopInfoPopup() },
-                        onClaim: { claimCurrentHappinessRewardFromPopup() }
-                    )
-                    .frame(maxWidth: Layout.topInfoPopupMaxWidth)
-                    .padding(.horizontal, Layout.topInfoPopupScreenHorizontalPadding)
-                    .padding(.vertical, Layout.topInfoPopupScreenVerticalPadding)
-                    .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .center)
-                    .ignoresSafeArea()
-                    .zIndex(Layout.zTopInfoPopup + 1)
-                    .transition(.scale(scale: 0.94).combined(with: .opacity))
-                }
-
-                TimelineView(.periodic(from: Date(), by: Layout.careSpawnCheckInterval)) { timeline in
-                    let now = timeline.date
-
-                    BottomButtons(
-                        onMenu: {
-                            bgmManager.playSE(.open)
-                            withAnimation(.easeInOut(duration: 0.18)) {
-                                showRightMenuPopup = true
-                            }
-                        },
-                        onGatya: {
-                            bgmManager.playSE(.push)
-                            showGachaView = true
-                        },
-                        onWork: {
-                            showWorkTimerPreparation = true
-                        },
-                        onStep: {
-                            onTapStep()
-                        },
-                        isToiletLocked: isToiletLocked,
-                        onBlocked: { showToiletLockedMessage() },
-                        buttonSize: Layout.bottomButtonSize,
-                        spacing: Layout.bottomButtonsSpacing,
-                        horizontalPadding: Layout.bottomHorizontalPadding
-                    )
-                    .onChange(of: timeline.date) { _, newDate in
-                        state.ensureDailyResetIfNeeded(now: newDate)
-                        syncDisplayedFullness(now: newDate)
-                        scheduleHappinessDecayIfNeeded(now: newDate)
-
-                        state.ensureToiletNextSpawnScheduled(now: newDate)
-                        state.ensureFoodNextSpawnScheduled(now: newDate)
-
-                        maybeSpawnToiletFlag(state: state, now: newDate)
-                        maybeSpawnFoodFlag(state: state, now: newDate)
-                        syncToiletPoopsIfNeeded(containerSize: homeContentSize, now: newDate)
-
-                        save()
-                    }
-                    .onAppear {
-                        state.ensureDailyResetIfNeeded(now: now)
-                        syncDisplayedFullness(now: now)
-                        scheduleHappinessDecayIfNeeded(now: now)
-
-                        state.ensureToiletNextSpawnScheduled(now: now)
-                        state.ensureFoodNextSpawnScheduled(now: now)
-
-                        maybeSpawnToiletFlag(state: state, now: now)
-                        maybeSpawnFoodFlag(state: state, now: now)
-                        syncToiletPoopsIfNeeded(containerSize: homeContentSize, now: now)
-
-                        save()
-                    }
-                }
-                .padding(.bottom, Layout.bottomPadding)
-                .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .bottom)
-                .zIndex(Layout.zBottomButtons)
-
-                if canShowToiletTicketButton {
-                    ToiletTicketQuickButton(
-                        imageName: "wc",
-                        countText: "\(ownedToiletTicketCount)",
-                        action: {
-                            onTapToiletTicket(state: state)
-                        }
-                    )
-                    .padding(.trailing, Layout.toiletTicketBottomTrailing)
-                    .padding(.bottom, Layout.toiletTicketBottomOffset)
-                    .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .bottomTrailing)
-                    .zIndex(Layout.zToiletTicketButton)
-                }
-
-                if state.hasToiletFlag {
-                    GeometryReader { rootGeo in
-                        ZStack {
-                            ForEach(visibleToiletPoops) { poop in
-                                ToiletPoopView(
-                                    item: poop,
-                                    size: Layout.toiletPoopSize,
-                                    hitSize: Layout.toiletPoopHitSize,
-                                    opacity: toiletPoopOpacity(for: poop),
-                                    isScratchEnabled: state.hasToiletFlag && !isToiletTicketCleaning,
-                                    onScratchChanged: { value in
-                                        handleToiletPoopScratchChanged(poop, value: value)
-                                    },
-                                    onScratchEnded: {
-                                        handleToiletPoopScratchEnded(poop)
-                                    }
-                                )
-                                .position(rootPosition(for: poop, rootSize: rootGeo.size))
-                            }
-                        }
-                        .frame(width: rootGeo.size.width, height: rootGeo.size.height)
-                    }
-                    .allowsHitTesting(state.hasToiletFlag && !isToiletTicketCleaning)
-                    .zIndex(Layout.zToiletPoops)
-                }
-
-                if state.hasToiletFlag {
-                    FloatingThoughtButton(
-                        imageName: "wc_button",
-                        size: Layout.floatingBubbleSize,
-                        amplitude: Layout.floatingBubbleAmplitude,
-                        duration: Layout.floatingBubbleDuration,
-                        action: {
-                            onTapToilet(state: state)
-                        }
-                    )
-                    .padding(.trailing, Layout.wcBubbleTrailing)
-                    .padding(.top, Layout.bannerHeight + Layout.wcBubbleTop)
-                    .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topTrailing)
-                    .zIndex(Layout.zWcButton)
-                }
-
-                Color.clear
-                    .frame(width: Layout.bannerWidthIPhone, height: Layout.bannerHeight)
-                    .frame(maxWidth: .infinity)
-                    .frame(height: Layout.bannerHeight)
-                    .frame(maxHeight: .infinity, alignment: .top)
-                    .zIndex(Layout.zBanner)
-            }
-            .navigationBarHidden(true)
-        }
-        .confirmationDialog("撮影モードを選択", isPresented: $showCaptureModeDialog, titleVisibility: .visible) {
-            Button("ARで撮影") {
-                bgmManager.playSE(.push)
-                selectedCaptureMode = .ar
-            }
-            Button("通常撮影") {
-                bgmManager.playSE(.push)
-                selectedCaptureMode = .plain
-            }
-            Button("キャンセル", role: .cancel) {
-                bgmManager.playSE(.push)
-            }
-        }
-        .fullScreenCover(item: $selectedCaptureMode) { mode in
-            CameraCaptureView(
-                initialMode: mode,
-                todaySteps: captureMetricValues.steps,
-                todayActiveKcal: captureMetricValues.activeKcal,
-                todayTotalKcal: captureMetricValues.totalKcal,
-                plainBackgroundAssetName: Layout.homeBackgroundAssetName,
-                characterAssetName: PetMaster.assetName(for: state.normalizedCurrentPetID),
-                metricValueProvider: {
-                    let values = captureMetricValues
-                    return (steps: values.steps, activeKcal: values.activeKcal, totalKcal: values.totalKcal)
-                }
-            ) {
-                selectedCaptureMode = nil
-            } onCapture: { image in
-                saveTodayPhoto(image, placeName: nil, latitude: nil, longitude: nil)
-            } onCaptureWithPlace: { image, placeName, lat, lon in
-                saveTodayPhoto(image, placeName: placeName, latitude: lat, longitude: lon)
-            }
-        }
-        .fullScreenCover(isPresented: $showWorkTimerPreparation) {
-            WorkTimerPreparationView()
-        }
-        .fullScreenCover(isPresented: $showGachaView) {
-            GachaView()
-                .environmentObject(bgmManager)
-        }
-        .fullScreenCover(isPresented: $showStepEnjoy) {
-            NavigationStack {
-                StepView(state: state, hk: hk, onSave: save)
-            }
-        }
-        .task {
-            state.ensureInitialPetsIfNeeded()
-            let didNormalizeGoal = state.normalizeFixedDailyStepGoal()
-
-            syncCharacterBaseFromState(force: true)
-
-            todaySteps = state.widgetTodaySteps
-            displayedTodaySteps = todaySteps
-            displayedWalletSteps = state.walletSteps
-            displayedFriendship = Double(state.friendshipPoint)
-            syncDisplayedHappiness(animated: false)
-            displayedStepProgress = calcStepProgressRaw(
-                todaySteps: displayedTodaySteps,
-                goalSteps: fixedDailyGoalSteps
-            )
-            displayedFullnessLevel = normalizedFullnessLevel(state.applySatisfactionDecayIfNeeded(now: Date()))
-            animatedFullnessLevel = Double(displayedFullnessLevel)
-
-            handleDayRolloverIfNeeded(state: state)
-            await runSync(state: state)
-
-            state.ensureToiletNextSpawnScheduled(now: Date())
-            state.ensureFoodNextSpawnScheduled(now: Date())
-
-            maybeSpawnToiletFlag(state: state)
-            maybeSpawnFoodFlag(state: state)
-
-            syncToiletPoopsIfNeeded(containerSize: homeContentSize)
-            loadTodayPhoto()
-            syncFoodSelectorSelection()
-            syncDisplayedFullness()
-            scheduleHappinessDecayIfNeeded(now: Date())
-
-            updateToiletWiggle()
-            syncCharacterBaseFromState(force: true)
-            updateWidgetSnapshot(forceReload: true)
-
-            if didNormalizeGoal {
-                save()
-            }
-        }
-        .onReceive(NotificationCenter.default.publisher(for: UIApplication.willEnterForegroundNotification)) { _ in
-            state.ensureInitialPetsIfNeeded()
-            _ = state.normalizeFixedDailyStepGoal()
-
-            syncCharacterBaseFromState(force: true)
-
-            todaySteps = state.widgetTodaySteps
-            displayedTodaySteps = todaySteps
-            syncDisplayedHappiness(animated: false)
-            displayedStepProgress = calcStepProgressRaw(
-                todaySteps: displayedTodaySteps,
-                goalSteps: fixedDailyGoalSteps
-            )
-            syncDisplayedFullness()
-
-            handleDayRolloverIfNeeded(state: state)
-
-            Task {
+                handleDayRolloverIfNeeded(state: state)
                 await runSync(state: state)
 
                 state.ensureToiletNextSpawnScheduled(now: Date())
                 state.ensureFoodNextSpawnScheduled(now: Date())
 
-                maybeSpawnToiletFlag(state: state)
-                maybeSpawnFoodFlag(state: state)
+                maybeSpawnToiletFlag(state: state, persistChanges: false)
+                maybeSpawnFoodFlag(state: state, persistChanges: false)
 
-                syncToiletPoopsIfNeeded(containerSize: homeContentSize)
-                loadTodayPhoto()
+                syncToiletPoopsIfNeeded(containerSize: homeContentSize, persistChanges: false)
                 syncFoodSelectorSelection()
                 syncDisplayedFullness()
                 scheduleHappinessDecayIfNeeded(now: Date())
 
-                if isHomeVisible {
-                    await reconcileWalletDisplayIfNeeded(state: state)
+                updateToiletWiggle()
+                syncCharacterBaseFromState(force: true)
+                persistHomeStateIfNeeded(previousSnapshot: previousSnapshot, forceWidgetReload: true)
+                hasCompletedInitialLoad = true
+            }
+            .onChange(of: scenePhase) { _, newPhase in
+                guard newPhase == .active else { return }
+                guard hasCompletedInitialLoad else { return }
+                runForegroundResyncIfNeeded()
+            }
+            .onAppear {
+                isHomeVisible = true
+
+                _ = state.normalizeFixedDailyStepGoal()
+                syncCharacterBaseFromState(force: true)
+                startCharacterIdleLoopIfNeeded()
+                syncDisplayedHappiness(animated: false)
+                syncDisplayedFullness(animated: false)
+                scheduleHappinessDecayIfNeeded(now: Date())
+
+                withAnimation(.easeOut(duration: 0.25)) {
+                    displayedStepProgress = calcStepProgressRaw(
+                        todaySteps: displayedTodaySteps,
+                        goalSteps: fixedDailyGoalSteps
+                    )
                 }
 
+                Task { await reconcileWalletDisplayIfNeeded(state: state) }
+
+                syncFoodSelectorSelection()
+                syncToiletPoopsIfNeeded(containerSize: homeContentSize)
                 updateToiletWiggle()
                 syncCharacterBaseFromState(force: true)
                 updateWidgetSnapshot(forceReload: true)
             }
-        }
-        .onAppear {
-            isHomeVisible = true
+            .onDisappear {
+                isHomeVisible = false
+                Haptics.stopRattle()
+                cancelDelayedHomeTasks()
 
-            _ = state.normalizeFixedDailyStepGoal()
-            syncCharacterBaseFromState(force: true)
-            startCharacterIdleLoopIfNeeded()
-            syncDisplayedHappiness(animated: false)
-            syncDisplayedFullness(animated: false)
-            scheduleHappinessDecayIfNeeded(now: Date())
-
-            withAnimation(.easeOut(duration: 0.25)) {
-                displayedStepProgress = calcStepProgressRaw(
-                    todaySteps: displayedTodaySteps,
-                    goalSteps: fixedDailyGoalSteps
-                )
-            }
-
-            Task { await reconcileWalletDisplayIfNeeded(state: state) }
-
-            syncFoodSelectorSelection()
-            syncToiletPoopsIfNeeded(containerSize: homeContentSize)
-            updateToiletWiggle()
-            syncCharacterBaseFromState(force: true)
-            updateWidgetSnapshot(forceReload: true)
-        }
-        .onDisappear {
-            isHomeVisible = false
-            Haptics.stopRattle()
-            cancelDelayedHomeTasks()
-
-            stopCharacterIdleLoop()
-            isCharacterActionRunning = false
-            characterAssetName = preferredCharacterRestAssetName
-            activeTopInfoPopup = nil
-            showToast = false
-            toastMessage = nil
-            showToiletLockedPopup = false
-            showFoodSelector = false
-            selectedFoodRarityTab = .normal
-            resetFoodSelectorDragState()
-            isFoodFeedingAnimationRunning = false
-            pendingFoodFeedID = nil
-            stopFoodSelectorHorizontalRattleIfNeeded()
-            toiletPoopActivePoint.removeAll()
-            toiletTicketClearingPoopIDs.removeAll()
-            isToiletTicketCleaning = false
-            characterPettingStartPoint = nil
-            characterPettingLastPoint = nil
-            characterPettingAccumulatedDistance = 0
-            floatingHearts.removeAll()
-        }
-        .onChange(of: state.walletKcal) { _, _ in
-            guard isHomeVisible else { return }
-            Task { await reconcileWalletDisplayIfNeeded(state: state) }
-            updateWidgetSnapshot()
-        }
-        .onChange(of: state.dailyGoalKcal) { _, _ in
-            let didNormalize = state.normalizeFixedDailyStepGoal()
-            if didNormalize { save() }
-            withAnimation(.easeOut(duration: 0.25)) {
-                displayedStepProgress = calcStepProgressRaw(
-                    todaySteps: displayedTodaySteps,
-                    goalSteps: fixedDailyGoalSteps
-                )
-            }
-        }
-        .onChange(of: todaySteps) { _, _ in
-            updateWidgetSnapshot()
-        }
-        .onChange(of: state.currentPetID) { _, _ in
-            syncCharacterBaseFromState(force: true)
-            updateWidgetSnapshot(forceReload: true)
-        }
-        .onChange(of: state.toiletFlagAt) { _, _ in
-            toiletTicketClearingPoopIDs.removeAll()
-            isToiletTicketCleaning = false
-
-            if state.hasToiletFlag {
+                stopCharacterIdleLoop()
+                isCharacterActionRunning = false
+                characterAssetName = preferredCharacterRestAssetName
+                activeTopInfoPopup = nil
+                showToast = false
+                toastMessage = nil
+                showToiletLockedPopup = false
+                showFoodSelector = false
+                selectedFoodRarityTab = .normal
+                resetFoodSelectorDragState()
+                isFoodFeedingAnimationRunning = false
+                pendingFoodFeedID = nil
+                stopFoodSelectorHorizontalRattleIfNeeded()
                 toiletPoopActivePoint.removeAll()
+                toiletTicketClearingPoopIDs.removeAll()
+                isToiletTicketCleaning = false
+                characterPettingStartPoint = nil
+                characterPettingLastPoint = nil
+                characterPettingAccumulatedDistance = 0
+                floatingHearts.removeAll()
+            }
+            .onChange(of: state.walletKcal) { _, _ in
+                guard isHomeVisible else { return }
+                Task { await reconcileWalletDisplayIfNeeded(state: state) }
+                updateWidgetSnapshot()
+            }
+            .onChange(of: state.dailyGoalKcal) { _, _ in
+                let didNormalize = state.normalizeFixedDailyStepGoal()
+                if didNormalize { save() }
+                withAnimation(.easeOut(duration: 0.25)) {
+                    displayedStepProgress = calcStepProgressRaw(
+                        todaySteps: displayedTodaySteps,
+                        goalSteps: fixedDailyGoalSteps
+                    )
+                }
+            }
+            .onChange(of: todaySteps) { _, _ in
+                updateWidgetSnapshot()
+            }
+            .onChange(of: state.currentPetID) { _, _ in
+                syncCharacterBaseFromState(force: true)
+                updateWidgetSnapshot(forceReload: true)
+            }
+            .onChange(of: state.toiletFlagAt) { _, _ in
+                toiletTicketClearingPoopIDs.removeAll()
+                isToiletTicketCleaning = false
 
-                if showFoodSelector {
+                if state.hasToiletFlag {
+                    toiletPoopActivePoint.removeAll()
+
+                    if showFoodSelector {
+                        closeFoodSelector()
+                    }
+
+                    if showRightMenuPopup {
+                        withAnimation(.easeInOut(duration: 0.18)) {
+                            showRightMenuPopup = false
+                        }
+                    }
+
+                    showCaptureModeDialog = false
+                    syncToiletPoopsIfNeeded(containerSize: homeContentSize)
+                } else {
+                    toiletPoopActivePoint.removeAll()
+                }
+
+                syncCharacterBaseFromState(force: true)
+                updateToiletWiggle()
+                updateWidgetSnapshot(forceReload: true)
+            }
+            .onChange(of: state.foodFlagAt) { _, _ in
+                syncDisplayedFullness()
+
+                if currentFullnessLevel < fullnessMaxLevel {
+                    syncFoodSelectorSelection()
+                } else {
                     closeFoodSelector()
                 }
 
-                if showRightMenuPopup {
+                updateWidgetSnapshot(forceReload: true)
+            }
+            .onChange(of: state.satisfactionLevel) { _, _ in
+                syncDisplayedFullness()
+                scheduleHappinessDecayIfNeeded(now: Date())
+            }
+            .onChange(of: state.satisfactionLastUpdatedAt) { _, _ in
+                syncDisplayedFullness()
+                scheduleHappinessDecayIfNeeded(now: Date())
+            }
+            .onChange(of: state.toiletNextSpawnAt) { _, _ in
+                updateWidgetSnapshot(forceReload: true)
+            }
+            .onChange(of: state.foodNextSpawnAt) { _, _ in
+                updateWidgetSnapshot(forceReload: true)
+            }
+            .onChange(of: state.ownedFoodCountsData) { _, _ in
+                syncFoodSelectorSelection()
+            }
+            .onChange(of: state.lastDayKey) { _, _ in
+                updateWidgetSnapshot(forceReload: true)
+            }
+    }
+
+    private var modalConfiguredHomeView: some View {
+        homeRootView
+            .confirmationDialog("撮影モードを選択", isPresented: $showCaptureModeDialog, titleVisibility: .visible) {
+                Button("ARで撮影") {
+                    bgmManager.playSE(.push)
+                    selectedCaptureMode = .ar
+                }
+                Button("通常撮影") {
+                    bgmManager.playSE(.push)
+                    selectedCaptureMode = .plain
+                }
+                Button("キャンセル", role: .cancel) {
+                    bgmManager.playSE(.push)
+                }
+            }
+            .fullScreenCover(item: $selectedCaptureMode) { mode in
+                CameraCaptureView(
+                    initialMode: mode,
+                    todaySteps: captureMetricValues.steps,
+                    todayActiveKcal: captureMetricValues.activeKcal,
+                    todayTotalKcal: captureMetricValues.totalKcal,
+                    plainBackgroundAssetName: Layout.homeBackgroundAssetName,
+                    characterAssetName: PetMaster.assetName(for: state.normalizedCurrentPetID),
+                    metricValueProvider: {
+                        let values = captureMetricValues
+                        return (steps: values.steps, activeKcal: values.activeKcal, totalKcal: values.totalKcal)
+                    }
+                ) {
+                    selectedCaptureMode = nil
+                } onCapture: { image in
+                    saveTodayPhoto(image, placeName: nil, latitude: nil, longitude: nil)
+                } onCaptureWithPlace: { image, placeName, lat, lon in
+                    saveTodayPhoto(image, placeName: placeName, latitude: lat, longitude: lon)
+                }
+            }
+            .fullScreenCover(isPresented: $showWorkTimerPreparation) {
+                WorkTimerPreparationView()
+            }
+            .fullScreenCover(isPresented: $showGachaView) {
+                GachaView()
+                    .environmentObject(bgmManager)
+            }
+            .fullScreenCover(isPresented: $showStepEnjoy) {
+                NavigationStack {
+                    StepView(state: state, hk: hk, onSave: { save() })
+                }
+            }
+    }
+
+    private var homeRootView: some View {
+        NavigationStack {
+            homeSceneView
+        }
+        .navigationBarHidden(true)
+    }
+
+    private var homeSceneView: some View {
+        ZStack {
+            homeBackgroundView
+            mainHomeContentView
+            rightMenuPopupOverlay
+            topInfoPopupOverlay
+            bottomButtonsTimelineLayer
+            toiletTicketButtonLayer
+            toiletPoopsLayer
+            toiletBubbleLayer
+            topBannerOverlay
+        }
+    }
+
+    private var homeBackgroundView: some View {
+        Image(Layout.homeBackgroundAssetName)
+            .resizable()
+            .scaledToFill()
+            .ignoresSafeArea()
+    }
+
+    private var mainHomeContentView: some View {
+        VStack(spacing: 0) {
+            headerSpacerView
+            homeGeometryContentView
+        }
+    }
+
+    private var headerSpacerView: some View {
+        Color.clear
+            .frame(width: Layout.bannerWidthIPhone, height: Layout.bannerHeight)
+            .frame(maxWidth: .infinity)
+            .frame(height: Layout.bannerHeight)
+    }
+
+    private var homeGeometryContentView: some View {
+        GeometryReader { geo in
+            geometryContentBody(geo: geo)
+        }
+    }
+
+    private func geometryContentBody(geo: GeometryProxy) -> some View {
+        let characterDisplayHeight = min(geo.size.width * 0.9, Layout.characterMaxHeight)
+        let characterTouchWidth = min(geo.size.width * 0.72, Layout.characterTouchWidth)
+        let characterTouchHeight = characterDisplayHeight * 1.15
+
+        return interactiveHomeArea(
+            geo: geo,
+            characterDisplayHeight: characterDisplayHeight,
+            characterTouchWidth: characterTouchWidth,
+            characterTouchHeight: characterTouchHeight
+        )
+    }
+
+    private func interactiveHomeArea(
+        geo: GeometryProxy,
+        characterDisplayHeight: CGFloat,
+        characterTouchWidth: CGFloat,
+        characterTouchHeight: CGFloat
+    ) -> some View {
+        ZStack {
+            topStatusButtonsLayer
+            characterTouchLayer(width: characterTouchWidth, height: characterTouchHeight)
+            characterImageLayer(displayHeight: characterDisplayHeight)
+            floatingHeartsLayer
+            happinessGaugeLayer
+            fullnessGaugeLayer
+            foodBubbleLayer
+            foodSelectorOverlayLayer
+            toiletLockedPopupLayer
+        }
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
+        .onAppear {
+            homeContentSize = geo.size
+            syncDisplayedFullness(animated: false)
+            syncToiletPoopsIfNeeded(containerSize: geo.size)
+        }
+        .onChange(of: geo.size) { _, newSize in
+            homeContentSize = newSize
+            syncToiletPoopsIfNeeded(containerSize: newSize)
+        }
+        .overlay(alignment: .bottom) {
+            toastOverlayView
+        }
+    }
+
+    private var topStatusButtonsLayer: some View {
+        TopStatusButtons(
+            onCoin: { openTopInfoPopup(.wallet) },
+            onShoes: { openTopInfoPopup(.todaySteps) },
+            onPresentBox: { openTopInfoPopup(.happinessRewards) },
+            buttonSize: Layout.topStatusButtonSize,
+            iconSize: Layout.topStatusButtonIconSize,
+            spacing: Layout.topStatusButtonsSpacing
+        )
+        .padding(.top, Layout.topStatusButtonsTop)
+        .padding(.leading, Layout.topStatusButtonsLeading)
+        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
+        .zIndex(Layout.zBanner + 1)
+    }
+
+    private func characterTouchLayer(width: CGFloat, height: CGFloat) -> some View {
+        Rectangle()
+            .fill(Color.black.opacity(0.001))
+            .frame(width: width, height: height)
+            .offset(y: Layout.characterTopOffset)
+            .zIndex(Layout.zCharacter)
+            .highPriorityGesture(
+                DragGesture(minimumDistance: 0)
+                    .onChanged { value in
+                        handleCharacterPettingChanged(
+                            value,
+                            gestureAreaSize: CGSize(width: width, height: height)
+                        )
+                    }
+                    .onEnded { value in
+                        handleCharacterPettingEnded(
+                            value,
+                            gestureAreaSize: CGSize(width: width, height: height)
+                        )
+                    }
+            )
+    }
+
+    private func characterImageLayer(displayHeight: CGFloat) -> some View {
+        Image(characterAssetName.isEmpty ? preferredCharacterRestAssetName : characterAssetName)
+            .resizable()
+            .scaledToFit()
+            .frame(maxHeight: displayHeight)
+            .offset(
+                x: isToiletLocked ? (isToiletWiggleOn ? Layout.toiletWiggleOffset : -Layout.toiletWiggleOffset) : 0,
+                y: Layout.characterTopOffset
+            )
+            .animation(
+                isToiletLocked
+                ? .easeInOut(duration: Layout.toiletWiggleDuration).repeatForever(autoreverses: true)
+                : .default,
+                value: isToiletWiggleOn
+            )
+            .allowsHitTesting(false)
+    }
+
+    private var floatingHeartsLayer: some View {
+        ForEach(floatingHearts) { heart in
+            FloatingHeartView(heart: heart)
+                .offset(x: heart.xOffset, y: heart.yOffset)
+                .zIndex(Layout.zCharacter + 1)
+                .allowsHitTesting(false)
+        }
+    }
+
+    private var happinessGaugeLayer: some View {
+        HappinessStomachGauge(
+            point: animatedHappinessPoint,
+            displayPoint: displayedHappinessPoint,
+            maxPoint: happinessMaxPoints,
+            level: displayedHappinessLevel,
+            outerSize: Layout.happinessGaugeOuterSize,
+            innerSize: Layout.happinessGaugeInnerSize
+        )
+        .padding(.top, Layout.happinessGaugeTop)
+        .padding(.leading, Layout.happinessGaugeLeading)
+        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
+    }
+
+    private var fullnessGaugeLayer: some View {
+        FullnessStomachGauge(
+            level: animatedFullnessLevel,
+            displayLevel: displayedFullnessLevel,
+            maxLevel: fullnessMaxLevel,
+            outerSize: Layout.fullnessGaugeOuterSize,
+            innerSize: Layout.fullnessGaugeInnerSize
+        )
+        .padding(.top, Layout.fullnessGaugeTop)
+        .padding(.trailing, Layout.fullnessGaugeTrailing)
+        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topTrailing)
+    }
+
+    @ViewBuilder
+    private var foodBubbleLayer: some View {
+        if canShowFoodBubble {
+            FloatingThoughtButton(
+                imageName: "food_button",
+                size: Layout.floatingBubbleSize,
+                amplitude: Layout.floatingBubbleAmplitude,
+                duration: Layout.floatingBubbleDuration,
+                action: {
+                    if isToiletLocked {
+                        showToiletLockedMessage()
+                        return
+                    }
+                    onTapFood(state: state)
+                }
+            )
+            .padding(.leading, Layout.foodBubbleLeading)
+            .padding(.top, Layout.foodBubbleTop)
+            .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
+            .zIndex(Layout.zFoodBubble)
+        }
+    }
+
+    @ViewBuilder
+    private var foodSelectorOverlayLayer: some View {
+        if showFoodSelector {
+            Color.black.opacity(0.001)
+                .ignoresSafeArea()
+                .contentShape(Rectangle())
+                .onTapGesture { closeFoodSelector() }
+                .zIndex(Layout.zFoodSelector)
+
+            FoodSelectionCarousel(
+                foods: currentFoodSelectorFoods,
+                countProvider: { foodID in
+                    state.foodCount(foodId: foodID)
+                },
+                selectedFoodID: selectedFoodID,
+                selectedRarityTab: selectedFoodRarityTab,
+                pendingFoodID: pendingFoodFeedID,
+                dragOffset: foodSelectorDragOffset,
+                isFeedingAnimationRunning: isFoodFeedingAnimationRunning,
+                onMoveSelection: { delta in
+                    moveFoodSelection(delta)
+                },
+                onFeed: {
+                    feedSelectedFood(state: state)
+                },
+                onToggleRarity: {
+                    toggleFoodSelectorRarity()
+                },
+                onCardTap: { foodID in
+                    handleFoodSelectorTap(foodID)
+                },
+                onDragChanged: { value in
+                    handleFoodSelectorDragChanged(value)
+                },
+                onDragEnded: { value in
+                    handleFoodSelectorDragEnded(value, state: state)
+                }
+            )
+            .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .bottom)
+            .padding(.bottom, Layout.bottomPadding + Layout.foodSelectorBottomGapFromButtons)
+            .zIndex(Layout.zFoodSelector + 1)
+        }
+    }
+
+    @ViewBuilder
+    private var toiletLockedPopupLayer: some View {
+        if showToiletLockedPopup {
+            Text(toiletLockedPopupText)
+                .font(.system(size: 16, weight: .bold))
+                .foregroundStyle(.primary)
+                .padding(.horizontal, Layout.lockedPopupPaddingH)
+                .padding(.vertical, Layout.lockedPopupPaddingV)
+                .background(.thinMaterial)
+                .clipShape(RoundedRectangle(cornerRadius: 16, style: .continuous))
+                .shadow(radius: 10)
+                .frame(maxWidth: Layout.lockedPopupMaxWidth)
+                .transition(.opacity.combined(with: .scale))
+                .zIndex(999)
+        }
+    }
+
+    @ViewBuilder
+    private var toastOverlayView: some View {
+        if showToast, let toastMessage {
+            ToastView(message: toastMessage)
+                .padding(.bottom, 18)
+                .transition(.move(edge: .bottom).combined(with: .opacity))
+        }
+    }
+
+    @ViewBuilder
+    private var rightMenuPopupOverlay: some View {
+        if showRightMenuPopup {
+            Color.black.opacity(0.28)
+                .ignoresSafeArea()
+                .transition(.opacity)
+                .zIndex(Layout.zMenuPopup)
+                .onTapGesture {
                     withAnimation(.easeInOut(duration: 0.18)) {
                         showRightMenuPopup = false
                     }
                 }
 
-                showCaptureModeDialog = false
-                syncToiletPoopsIfNeeded(containerSize: homeContentSize)
-            } else {
-                toiletPoopActivePoint.removeAll()
+            CenterMenuPopup(
+                isToiletLocked: isToiletLocked,
+                onBlocked: { showToiletLockedMessage() },
+                onCamera: {
+                    if isToiletLocked {
+                        showToiletLockedMessage()
+                        return
+                    }
+                    showRightMenuPopup = false
+                    showCaptureModeDialog = true
+                },
+                onDismiss: {
+                    bgmManager.playSE(.push)
+                    withAnimation(.easeInOut(duration: 0.18)) {
+                        showRightMenuPopup = false
+                    }
+                },
+                buttonSize: Layout.rightButtonSize,
+                spacing: Layout.rightButtonsSpacing
+            )
+            .frame(maxWidth: Layout.menuPopupMaxWidth)
+            .padding(.horizontal, Layout.menuPopupHorizontalPadding)
+            .zIndex(Layout.zMenuPopup + 1)
+            .transition(.scale(scale: 0.92).combined(with: .opacity))
+        }
+    }
+
+    @ViewBuilder
+    private var topInfoPopupOverlay: some View {
+        if let activeTopInfoPopup {
+            Color.black.opacity(0.28)
+                .ignoresSafeArea()
+                .transition(.opacity)
+                .zIndex(Layout.zTopInfoPopup)
+                .onTapGesture { closeTopInfoPopup(playSound: false) }
+
+            HomeTopInfoPopup(
+                popup: activeTopInfoPopup,
+                walletCoinCount: currentWalletCoinCount,
+                todayStepCount: currentTodayStepCount,
+                totalStepCount: currentTotalStepCount,
+                happinessLevel: currentHappinessLevelValue,
+                happinessPoint: currentHappinessPointValue,
+                happinessMaxPoints: happinessMaxPoints,
+                claimableLevel: currentClaimableHappinessRewardLevel,
+                nextRewardLevel: nextHappinessRewardLevel,
+                rewardDefinitions: AppState.happinessRewardDefinitions,
+                claimedRewardLevels: currentClaimedHappinessRewardLevels,
+                onClose: { closeTopInfoPopup() },
+                onClaim: { claimCurrentHappinessRewardFromPopup() }
+            )
+            .frame(maxWidth: Layout.topInfoPopupMaxWidth)
+            .padding(.horizontal, Layout.topInfoPopupScreenHorizontalPadding)
+            .padding(.vertical, Layout.topInfoPopupScreenVerticalPadding)
+            .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .center)
+            .ignoresSafeArea()
+            .zIndex(Layout.zTopInfoPopup + 1)
+            .transition(.scale(scale: 0.94).combined(with: .opacity))
+        }
+    }
+
+    private var bottomButtonsTimelineLayer: some View {
+        TimelineView(.periodic(from: Date(), by: Layout.careSpawnCheckInterval)) { timeline in
+            let now = timeline.date
+
+            BottomButtons(
+                onMenu: {
+                    bgmManager.playSE(.open)
+                    withAnimation(.easeInOut(duration: 0.18)) {
+                        showRightMenuPopup = true
+                    }
+                },
+                onGatya: {
+                    bgmManager.playSE(.push)
+                    showGachaView = true
+                },
+                onWork: {
+                    showWorkTimerPreparation = true
+                },
+                onStep: {
+                    onTapStep()
+                },
+                isToiletLocked: isToiletLocked,
+                onBlocked: { showToiletLockedMessage() },
+                buttonSize: Layout.bottomButtonSize,
+                spacing: Layout.bottomButtonsSpacing,
+                horizontalPadding: Layout.bottomHorizontalPadding
+            )
+            .onChange(of: timeline.date) { _, newDate in
+                let previousSnapshot = makeHomePersistenceSnapshot()
+
+                state.ensureDailyResetIfNeeded(now: newDate)
+                syncDisplayedFullness(now: newDate)
+                scheduleHappinessDecayIfNeeded(now: newDate)
+
+                state.ensureToiletNextSpawnScheduled(now: newDate)
+                state.ensureFoodNextSpawnScheduled(now: newDate)
+
+                maybeSpawnToiletFlag(state: state, now: newDate, persistChanges: false)
+                maybeSpawnFoodFlag(state: state, now: newDate, persistChanges: false)
+                syncToiletPoopsIfNeeded(containerSize: homeContentSize, now: newDate, persistChanges: false)
+
+                persistHomeStateIfNeeded(previousSnapshot: previousSnapshot)
             }
+            .onAppear {
+                let previousSnapshot = makeHomePersistenceSnapshot()
+
+                state.ensureDailyResetIfNeeded(now: now)
+                syncDisplayedFullness(now: now)
+                scheduleHappinessDecayIfNeeded(now: now)
+
+                state.ensureToiletNextSpawnScheduled(now: now)
+                state.ensureFoodNextSpawnScheduled(now: now)
+
+                maybeSpawnToiletFlag(state: state, now: now, persistChanges: false)
+                maybeSpawnFoodFlag(state: state, now: now, persistChanges: false)
+                syncToiletPoopsIfNeeded(containerSize: homeContentSize, now: now, persistChanges: false)
+
+                persistHomeStateIfNeeded(previousSnapshot: previousSnapshot)
+            }
+        }
+        .padding(.bottom, Layout.bottomPadding)
+        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .bottom)
+        .zIndex(Layout.zBottomButtons)
+    }
+
+    @ViewBuilder
+    private var toiletTicketButtonLayer: some View {
+        if canShowToiletTicketButton {
+            ToiletTicketQuickButton(
+                imageName: "wc",
+                countText: "\(ownedToiletTicketCount)",
+                action: {
+                    onTapToiletTicket(state: state)
+                }
+            )
+            .padding(.trailing, Layout.toiletTicketBottomTrailing)
+            .padding(.bottom, Layout.toiletTicketBottomOffset)
+            .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .bottomTrailing)
+            .zIndex(Layout.zToiletTicketButton)
+        }
+    }
+
+    @ViewBuilder
+    private var toiletPoopsLayer: some View {
+        if state.hasToiletFlag {
+            GeometryReader { rootGeo in
+                ZStack {
+                    ForEach(visibleToiletPoops) { poop in
+                        ToiletPoopView(
+                            item: poop,
+                            size: Layout.toiletPoopSize,
+                            hitSize: Layout.toiletPoopHitSize,
+                            opacity: toiletPoopOpacity(for: poop),
+                            isScratchEnabled: state.hasToiletFlag && !isToiletTicketCleaning,
+                            onScratchChanged: { value in
+                                handleToiletPoopScratchChanged(poop, value: value)
+                            },
+                            onScratchEnded: {
+                                handleToiletPoopScratchEnded(poop)
+                            }
+                        )
+                        .position(rootPosition(for: poop, rootSize: rootGeo.size))
+                    }
+                }
+                .frame(width: rootGeo.size.width, height: rootGeo.size.height)
+            }
+            .allowsHitTesting(state.hasToiletFlag && !isToiletTicketCleaning)
+            .zIndex(Layout.zToiletPoops)
+        }
+    }
+
+    @ViewBuilder
+    private var toiletBubbleLayer: some View {
+        if state.hasToiletFlag {
+            FloatingThoughtButton(
+                imageName: "wc_button",
+                size: Layout.floatingBubbleSize,
+                amplitude: Layout.floatingBubbleAmplitude,
+                duration: Layout.floatingBubbleDuration,
+                action: {
+                    onTapToilet(state: state)
+                }
+            )
+            .padding(.trailing, Layout.wcBubbleTrailing)
+            .padding(.top, Layout.bannerHeight + Layout.wcBubbleTop)
+            .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topTrailing)
+            .zIndex(Layout.zWcButton)
+        }
+    }
+
+    private var topBannerOverlay: some View {
+        Color.clear
+            .frame(width: Layout.bannerWidthIPhone, height: Layout.bannerHeight)
+            .frame(maxWidth: .infinity)
+            .frame(height: Layout.bannerHeight)
+            .frame(maxHeight: .infinity, alignment: .top)
+            .zIndex(Layout.zBanner)
+    }
+
+    private func makeHomePersistenceSnapshot() -> HomePersistenceSnapshot {
+        HomePersistenceSnapshot(
+            walletSteps: state.walletSteps,
+            pendingSteps: state.pendingSteps,
+            lastSyncedAt: state.lastSyncedAt,
+            dailyGoalKcal: state.dailyGoalKcal,
+            lastDayKey: state.lastDayKey,
+            cachedTodaySteps: state.cachedTodaySteps,
+            cachedTodayMeterSteps: state.cachedTodayMeterSteps,
+            friendshipPoint: state.friendshipPoint,
+            friendshipCardCount: state.friendshipCardCount,
+            satisfactionLevel: state.satisfactionLevel,
+            satisfactionLastUpdatedAt: state.satisfactionLastUpdatedAt,
+            foodFlagAt: state.foodFlagAt,
+            foodLastRaisedAt: state.foodLastRaisedAt,
+            foodNextSpawnAt: state.foodNextSpawnAt,
+            toiletFlagAt: state.toiletFlagAt,
+            toiletLastRaisedAt: state.toiletLastRaisedAt,
+            toiletNextSpawnAt: state.toiletNextSpawnAt,
+            toiletPoopsData: state.toiletPoopsData,
+            toiletPoopLastSpawnAt: state.toiletPoopLastSpawnAt,
+            currentPetID: state.currentPetID,
+            ownedPetIDsData: state.ownedPetIDsData,
+            ownedFoodCountsData: state.ownedFoodCountsData
+        )
+    }
+
+    @discardableResult
+    @MainActor
+    private func persistHomeStateIfNeeded(
+        previousSnapshot: HomePersistenceSnapshot?,
+        forceWidgetReload: Bool = false
+    ) -> Bool {
+        let currentSnapshot = makeHomePersistenceSnapshot()
+
+        if let previousSnapshot, previousSnapshot == currentSnapshot {
+            if forceWidgetReload {
+                updateWidgetSnapshot(forceReload: true)
+            }
+            return false
+        }
+
+        save(forceWidgetReload: forceWidgetReload)
+        return true
+    }
+
+    @MainActor
+    private func runForegroundResyncIfNeeded() {
+        guard !isForegroundSyncInProgress else { return }
+        isForegroundSyncInProgress = true
+
+        Task { @MainActor in
+            defer { isForegroundSyncInProgress = false }
+
+            let previousSnapshot = makeHomePersistenceSnapshot()
+
+            bgmManager.startIfNeeded()
+            await hk.startStepUpdatesIfNeeded()
+            await hk.refreshTodayStepsForWidget()
+
+            state.ensureInitialPetsIfNeeded()
+            _ = state.normalizeFixedDailyStepGoal()
 
             syncCharacterBaseFromState(force: true)
-            updateToiletWiggle()
-            updateWidgetSnapshot(forceReload: true)
-        }
-        .onChange(of: state.foodFlagAt) { _, _ in
+
+            todaySteps = state.widgetTodaySteps
+            displayedTodaySteps = todaySteps
+            syncDisplayedHappiness(animated: false)
+            displayedStepProgress = calcStepProgressRaw(
+                todaySteps: displayedTodaySteps,
+                goalSteps: fixedDailyGoalSteps
+            )
             syncDisplayedFullness()
 
-            if currentFullnessLevel < fullnessMaxLevel {
-                syncFoodSelectorSelection()
-            } else {
-                closeFoodSelector()
+            handleDayRolloverIfNeeded(state: state)
+
+            await runSync(state: state)
+
+            state.ensureToiletNextSpawnScheduled(now: Date())
+            state.ensureFoodNextSpawnScheduled(now: Date())
+
+            maybeSpawnToiletFlag(state: state, persistChanges: false)
+            maybeSpawnFoodFlag(state: state, persistChanges: false)
+
+            syncToiletPoopsIfNeeded(containerSize: homeContentSize, persistChanges: false)
+            syncFoodSelectorSelection()
+            syncDisplayedFullness()
+            scheduleHappinessDecayIfNeeded(now: Date())
+
+            if isHomeVisible {
+                await reconcileWalletDisplayIfNeeded(state: state)
             }
 
-            updateWidgetSnapshot(forceReload: true)
-        }
-        .onChange(of: state.satisfactionLevel) { _, _ in
-            syncDisplayedFullness()
-            scheduleHappinessDecayIfNeeded(now: Date())
-        }
-        .onChange(of: state.satisfactionLastUpdatedAt) { _, _ in
-            syncDisplayedFullness()
-            scheduleHappinessDecayIfNeeded(now: Date())
-        }
-        .onChange(of: state.toiletNextSpawnAt) { _, _ in
-            updateWidgetSnapshot(forceReload: true)
-        }
-        .onChange(of: state.foodNextSpawnAt) { _, _ in
-            updateWidgetSnapshot(forceReload: true)
-        }
-        .onChange(of: state.ownedFoodCountsData) { _, _ in
-            syncFoodSelectorSelection()
-        }
-        .onChange(of: state.lastDayKey) { _, _ in
-            updateWidgetSnapshot(forceReload: true)
+            updateToiletWiggle()
+            syncCharacterBaseFromState(force: true)
+            persistHomeStateIfNeeded(previousSnapshot: previousSnapshot, forceWidgetReload: true)
         }
     }
 
@@ -1345,9 +1550,14 @@ struct HomeView: View {
         }
     }
 
+    @discardableResult
     @MainActor
-    private func syncToiletPoopsIfNeeded(containerSize: CGSize, now: Date = Date()) {
-        guard containerSize.width > 1, containerSize.height > 1 else { return }
+    private func syncToiletPoopsIfNeeded(
+        containerSize: CGSize,
+        now: Date = Date(),
+        persistChanges: Bool = true
+    ) -> Bool {
+        guard containerSize.width > 1, containerSize.height > 1 else { return false }
 
         if !state.hasToiletFlag {
             toiletPoopActivePoint.removeAll()
@@ -1356,15 +1566,19 @@ struct HomeView: View {
 
             if !state.toiletPoops().isEmpty {
                 state.clearToiletPoops()
-                save()
+                if persistChanges {
+                    save()
+                }
+                return true
             }
-            return
+            return false
         }
 
         let didChange = state.updateToiletPoopsByTime(now: now)
-        if didChange {
+        if didChange, persistChanges {
             save()
         }
+        return didChange
     }
 
     private func position(for poop: AppState.ToiletPoopItem, in containerSize: CGSize) -> CGPoint {
@@ -1913,36 +2127,55 @@ struct HomeView: View {
         characterAssetName = preferredCharacterRestAssetName
     }
 
+    @discardableResult
     @MainActor
-    private func maybeSpawnToiletFlag(state: AppState, now: Date = Date()) {
+    private func maybeSpawnToiletFlag(
+        state: AppState,
+        now: Date = Date(),
+        persistChanges: Bool = true
+    ) -> Bool {
         let didRaise = state.raiseToiletFlag(now: now)
         if didRaise {
-            save()
-            syncToiletPoopsIfNeeded(containerSize: homeContentSize, now: now)
+            if persistChanges {
+                save()
+            }
+            syncToiletPoopsIfNeeded(containerSize: homeContentSize, now: now, persistChanges: persistChanges)
             toast("トイレ行きたい！")
             syncCharacterBaseFromState(force: true)
             updateToiletWiggle()
         }
+        return didRaise
     }
 
+    @discardableResult
     @MainActor
-    private func maybeSpawnFoodFlag(state: AppState, now: Date = Date()) {
+    private func maybeSpawnFoodFlag(
+        state: AppState,
+        now: Date = Date(),
+        persistChanges: Bool = true
+    ) -> Bool {
         syncDisplayedFullness(now: now)
 
         let feedState = state.canFeedNow(now: now)
         guard feedState.can else {
             if state.hasFoodFlag {
-                _ = state.resolveFood(now: now)
-                save()
+                let didResolve = state.resolveFood(now: now)
+                if didResolve, persistChanges {
+                    save()
+                }
+                return didResolve
             }
-            return
+            return false
         }
 
         let didRaise = state.raiseFoodFlagIfNeeded(now: now)
         if didRaise {
-            save()
+            if persistChanges {
+                save()
+            }
             toast("おなかすいた！")
         }
+        return didRaise
     }
 
     @MainActor
@@ -2207,29 +2440,6 @@ struct HomeView: View {
         return "\(dayKey)_\(ms).jpg"
     }
 
-    @MainActor
-    private func loadTodayPhoto() {
-        let key = AppState.makeDayKey(Date())
-        do {
-            var descriptor = FetchDescriptor<TodayPhotoEntry>(
-                predicate: #Predicate { $0.dayKey == key },
-                sortBy: [SortDescriptor(\.date, order: .reverse)]
-            )
-            descriptor.fetchLimit = 1
-
-            let found = try modelContext.fetch(descriptor).first
-            todayPhotoEntry = found
-            if let fileName = found?.fileName {
-                todayPhotoImage = TodayPhotoStorage.loadImage(fileName: fileName)
-            } else {
-                todayPhotoImage = nil
-            }
-        } catch {
-            todayPhotoEntry = nil
-            todayPhotoImage = nil
-        }
-    }
-
     private func normalizePlaceName(_ placeName: String?) -> String? {
         guard let placeName else { return nil }
         let t = placeName.trimmingCharacters(in: .whitespacesAndNewlines)
@@ -2262,9 +2472,6 @@ struct HomeView: View {
             modelContext.insert(created)
 
             try modelContext.save()
-
-            todayPhotoEntry = created
-            todayPhotoImage = uiImage
 
             toast("今日の一枚を保存しました")
             Task { @MainActor in
@@ -2427,10 +2634,10 @@ struct HomeView: View {
     }
 
     @MainActor
-    private func save() {
+    private func save(forceWidgetReload: Bool = false) {
         do {
             try modelContext.save()
-            updateWidgetSnapshot()
+            updateWidgetSnapshot(forceReload: forceWidgetReload)
         } catch {
             print("❌ modelContext.save() failed:", error)
         }
@@ -2465,7 +2672,6 @@ struct HomeView: View {
             syncDisplayedFullness(now: now)
             scheduleHappinessDecayIfNeeded(now: now)
             save()
-            loadTodayPhoto()
             return
         }
     }
