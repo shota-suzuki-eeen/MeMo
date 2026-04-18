@@ -343,6 +343,13 @@ struct HomeView: View {
         static let characterTopOffset: CGFloat = 45
         static let characterMaxHeight: CGFloat = 480
         static let characterTouchWidth: CGFloat = 240
+        static let characterShadowWidthRatio: CGFloat = 0.8
+        static let characterShadowHeightRatio: CGFloat = 0.10
+        static let characterShadowMaxWidth: CGFloat = 170
+        static let characterShadowMaxHeight: CGFloat = 40
+        static let characterShadowYOffsetRatio: CGFloat = 0.48
+        static let characterShadowOpacity: Double = 0.9
+        static let characterShadowBlurRadius: CGFloat = 14
 
         static let menuPopupCornerRadius: CGFloat = 20
         static let menuPopupHorizontalPadding: CGFloat = 18
@@ -751,6 +758,7 @@ struct HomeView: View {
     ) -> some View {
         ZStack {
             topStatusButtonsLayer
+            characterShadowLayer(displayHeight: characterDisplayHeight)
             characterTouchLayer(width: characterTouchWidth, height: characterTouchHeight)
             characterImageLayer(displayHeight: characterDisplayHeight)
             floatingHeartsLayer
@@ -788,6 +796,20 @@ struct HomeView: View {
         .padding(.leading, Layout.topStatusButtonsLeading)
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
         .zIndex(Layout.zBanner + 1)
+    }
+
+    private func characterShadowLayer(displayHeight: CGFloat) -> some View {
+        let shadowWidth = min(Layout.characterShadowMaxWidth, displayHeight * Layout.characterShadowWidthRatio)
+        let shadowHeight = min(Layout.characterShadowMaxHeight, displayHeight * Layout.characterShadowHeightRatio)
+        let shadowYOffset = Layout.characterTopOffset + (displayHeight * Layout.characterShadowYOffsetRatio)
+
+        return Ellipse()
+            .fill(Color.black.opacity(Layout.characterShadowOpacity))
+            .frame(width: shadowWidth, height: shadowHeight)
+            .blur(radius: Layout.characterShadowBlurRadius)
+            .offset(y: shadowYOffset)
+            .allowsHitTesting(false)
+            .zIndex(Layout.zCharacter - 2)
     }
 
     private func characterTouchLayer(width: CGFloat, height: CGFloat) -> some View {
@@ -828,6 +850,7 @@ struct HomeView: View {
                 : .default,
                 value: isToiletWiggleOn
             )
+            .zIndex(Layout.zCharacter - 1)
             .allowsHitTesting(false)
     }
 
@@ -959,6 +982,7 @@ struct HomeView: View {
                 .transition(.move(edge: .bottom).combined(with: .opacity))
         }
     }
+
 
     @ViewBuilder
     private var rightMenuPopupOverlay: some View {
@@ -1822,6 +1846,7 @@ struct HomeView: View {
         }
     }
 
+
     private func updateFoodSelectionWhileDragging(_ value: DragGesture.Value) {
         let foods = currentFoodSelectorFoods
         guard !foods.isEmpty else {
@@ -2361,6 +2386,7 @@ struct HomeView: View {
             await MainActor.run { displayedWalletSteps = target }
         }
     }
+
 
     @MainActor
     private func playWalletCountDownAnimation(from: Int, to: Int) async {
@@ -2903,6 +2929,7 @@ private struct FullnessStomachGauge: View {
         return CGFloat(clampedLevel) / CGFloat(maxLevel)
     }
 
+
     private var liquidMainColor: Color {
         switch colorLevel {
         case 0: return Color(red: 0.18, green: 0.42, blue: 0.20).opacity(0.18)
@@ -3240,6 +3267,7 @@ private struct StatusIconButton: View {
         .shadow(color: .black.opacity(0.16), radius: 8, x: 0, y: 4)
     }
 }
+
 
 private struct HomeTopInfoPopup: View {
     let popup: HomeView.TopInfoPopup
@@ -3746,6 +3774,7 @@ private struct BottomActionButton: View {
     }
 }
 
+
 private struct ToiletTicketQuickButton: View {
     let imageName: String
     let countText: String
@@ -4068,6 +4097,7 @@ private struct FoodRarityBackdropGlow: View {
             .blur(radius: 8)
     }
 }
+
 
 private struct FoodCarouselCard: View {
     let item: FoodCatalog.FoodItem
