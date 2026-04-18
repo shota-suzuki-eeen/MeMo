@@ -206,7 +206,7 @@ struct GachaView: View {
     }
 
     private enum Layout {
-        static let backgroundAssetName = "Home_background"
+        static let backgroundAssetName = "gacha_background"
         static let machineAssetName = "gatyaMachine"
         static let horizontalPadding: CGFloat = 20
         static let contentMaxWidth: CGFloat = 430

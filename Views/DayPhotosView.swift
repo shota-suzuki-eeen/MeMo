@@ -47,7 +47,7 @@ struct DayPhotosView: View {
     var body: some View {
         NavigationStack {
             ZStack {
-                Image("Omoide_card")
+                Image("omoide_background")
                     .resizable()
                     .scaledToFill()
                     .ignoresSafeArea()

@@ -177,7 +177,7 @@ struct MemoriesView: View {
         }
         .background {
             ZStack {
-                Image("Omoide_background")
+                Image("omoide_background")
                     .resizable()
                     .scaledToFill()
                     .ignoresSafeArea()
