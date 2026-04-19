@@ -8,6 +8,7 @@
 import SwiftUI
 import AVFoundation
 import Combine
+import UIKit
 
 @MainActor
 final class LoopingVideoPlayerController: ObservableObject {
@@ -20,10 +21,12 @@ final class LoopingVideoPlayerController: ObservableObject {
     init() {
         player.isMuted = true
         player.actionAtItemEnd = .none
+        player.automaticallyWaitsToMinimizeStalling = false
     }
 
     func prepare(assetName: String) {
         guard currentAssetName != assetName else { return }
+
         objectWillChange.send()
         currentAssetName = assetName
 
@@ -33,12 +36,15 @@ final class LoopingVideoPlayerController: ObservableObject {
 
         guard let url = Self.assetURL(named: assetName) else { return }
 
-        let item = AVPlayerItem(url: url)
+        let asset = AVURLAsset(url: url)
+        let item = AVPlayerItem(asset: asset)
+        item.preferredForwardBufferDuration = 1
+
         looper = AVPlayerLooper(player: player, templateItem: item)
     }
 
     func play() {
-        player.play()
+        player.playImmediately(atRate: 1.0)
     }
 
     func pause() {
@@ -61,25 +67,52 @@ struct LoopingVideoPlayer: UIViewRepresentable {
 
     func makeUIView(context: Context) -> PlayerContainerView {
         let view = PlayerContainerView()
-        view.playerLayer.videoGravity = .resizeAspectFill
-        view.playerLayer.player = controller.player
+        view.setPlayer(controller.player)
         return view
     }
 
     func updateUIView(_ uiView: PlayerContainerView, context: Context) {
-        uiView.playerLayer.player = controller.player
+        uiView.setPlayer(controller.player)
+    }
+
+    static func dismantleUIView(_ uiView: PlayerContainerView, coordinator: ()) {
+        uiView.setPlayer(nil)
     }
 }
 
 final class PlayerContainerView: UIView {
-    override class var layerClass: AnyClass {
-        AVPlayerLayer.self
+    let playerLayer = AVPlayerLayer()
+
+    override init(frame: CGRect) {
+        super.init(frame: frame)
+        commonInit()
     }
 
-    var playerLayer: AVPlayerLayer {
-        guard let layer = self.layer as? AVPlayerLayer else {
-            fatalError("Failed to cast layer to AVPlayerLayer")
+    required init?(coder: NSCoder) {
+        super.init(coder: coder)
+        commonInit()
+    }
+
+    private func commonInit() {
+        isOpaque = true
+        backgroundColor = .black
+        clipsToBounds = true
+
+        playerLayer.videoGravity = .resizeAspectFill
+        playerLayer.backgroundColor = UIColor.black.cgColor
+        playerLayer.contentsGravity = .resizeAspectFill
+
+        layer.addSublayer(playerLayer)
+    }
+
+    override func layoutSubviews() {
+        super.layoutSubviews()
+        playerLayer.frame = bounds
+    }
+
+    func setPlayer(_ player: AVPlayer?) {
+        if playerLayer.player !== player {
+            playerLayer.player = player
         }
-        return layer
     }
 }
