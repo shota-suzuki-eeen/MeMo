@@ -2,7 +2,7 @@
 //  WorkTimerPreparationView.swift
 //  MeMo
 //
-//  Created by shota suzuki on 2026/03/31.
+//  Updated for compact no-scroll work preparation UI adjustment.
 //
 
 import SwiftUI
@@ -16,6 +16,13 @@ struct WorkTimerPreparationView: View {
     var body: some View {
         NavigationStack {
             GeometryReader { geo in
+                let availableHeight = geo.size.height - geo.safeAreaInsets.top - geo.safeAreaInsets.bottom
+                let sectionSpacing = min(18, max(12, availableHeight * 0.018))
+                let topPadding = geo.safeAreaInsets.top + 8
+                let bottomPadding = max(geo.safeAreaInsets.bottom, 18)
+                let situationCardWidth = min(geo.size.width - 40, 332)
+                let contentVerticalOffset: CGFloat = -70
+
                 ZStack {
                     Image("Home_background")
                         .resizable()
@@ -25,36 +32,22 @@ struct WorkTimerPreparationView: View {
                     Color.black.opacity(0.22)
                         .ignoresSafeArea()
 
-                    ScrollView(.vertical, showsIndicators: false) {
-                        VStack(spacing: 20) {
-                            headerView
+                    VStack(spacing: sectionSpacing) {
+                        headerView
 
-                            focusSummaryCard
+                        focusSummaryCard
 
-                            durationSettingCard
+                        situationSelectionCard(cardWidth: situationCardWidth)
 
-                            Button {
-                                viewModel.start()
-                            } label: {
-                                Image("work_clay")
-                                    .resizable()
-                                    .scaledToFit()
-                                    .frame(width: 220, height: 88)
-                                    .shadow(color: .black.opacity(0.18), radius: 10, x: 0, y: 4)
-                            }
-                            .buttonStyle(.plain)
-                            .padding(.top, 4)
-                        }
-                        .frame(maxWidth: .infinity)
-                        .frame(
-                            minHeight: geo.size.height - geo.safeAreaInsets.top - geo.safeAreaInsets.bottom,
-                            alignment: .center
-                        )
-                        .padding(.horizontal, 20)
-                        .padding(.top, geo.safeAreaInsets.top + 8)
-                        .padding(.bottom, max(geo.safeAreaInsets.bottom, 24))
+                        durationSettingCard
+
+                        Spacer(minLength: 0)
                     }
-                    .scrollBounceBehavior(.basedOnSize)
+                    .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
+                    .padding(.horizontal, 20)
+                    .padding(.top, topPadding)
+                    .padding(.bottom, bottomPadding)
+                    .offset(y: contentVerticalOffset)
                 }
             }
             .navigationBarHidden(true)
@@ -97,32 +90,21 @@ struct WorkTimerPreparationView: View {
     }
 
     private var focusSummaryCard: some View {
-        VStack(spacing: 14) {
-            Text("集中時間")
-                .font(.system(size: 18, weight: .bold))
-                .foregroundStyle(.white)
+        HStack(spacing: 12) {
+            focusSummaryBlock(
+                title: "今日",
+                value: viewModel.todayFocusedDisplayText
+            )
 
-            HStack(spacing: 14) {
-                focusSummaryBlock(
-                    title: "今日",
-                    value: viewModel.todayFocusedDisplayText,
-                    caption: "日付が変わるとリセット"
-                )
-
-                focusSummaryBlock(
-                    title: "累計",
-                    value: viewModel.totalFocusedDisplayText,
-                    caption: "これまでの合計"
-                )
-            }
+            focusSummaryBlock(
+                title: "累計",
+                value: viewModel.totalFocusedDisplayText
+            )
         }
-        .padding(18)
-        .frame(maxWidth: .infinity)
-        .background(.ultraThinMaterial, in: RoundedRectangle(cornerRadius: 22, style: .continuous))
     }
 
-    private func focusSummaryBlock(title: String, value: String, caption: String) -> some View {
-        VStack(spacing: 8) {
+    private func focusSummaryBlock(title: String, value: String) -> some View {
+        VStack(spacing: 6) {
             Text(title)
                 .font(.system(size: 14, weight: .semibold))
                 .foregroundStyle(.white.opacity(0.86))
@@ -133,49 +115,56 @@ struct WorkTimerPreparationView: View {
                 .multilineTextAlignment(.center)
                 .minimumScaleFactor(0.75)
                 .lineLimit(1)
-
-            Text(caption)
-                .font(.system(size: 12, weight: .medium))
-                .foregroundStyle(.white.opacity(0.72))
-                .multilineTextAlignment(.center)
         }
         .frame(maxWidth: .infinity)
-        .padding(.vertical, 14)
-        .background(Color.black.opacity(0.18), in: RoundedRectangle(cornerRadius: 18, style: .continuous))
+        .padding(.vertical, 16)
+        .padding(.horizontal, 10)
+        .background(
+            RoundedRectangle(cornerRadius: 18, style: .continuous)
+                .fill(Color.black.opacity(0.20))
+        )
+    }
+
+    private func situationSelectionCard(cardWidth: CGFloat) -> some View {
+        WorkSituationCarousel(
+            options: viewModel.situationOptions,
+            selectedSituation: viewModel.selectedSituation,
+            cardWidth: cardWidth,
+            onSelect: { situation in
+                viewModel.start(with: situation)
+            }
+        )
     }
 
     private var durationSettingCard: some View {
-        VStack(spacing: 18) {
+        VStack(spacing: 12) {
             Text("作業時間を設定")
                 .font(.system(size: 18, weight: .bold))
                 .foregroundStyle(.white)
 
-            Text("5分単位で設定できます。180分の次は「無制限」です。")
-                .font(.system(size: 14, weight: .medium))
-                .foregroundStyle(.white.opacity(0.86))
-                .multilineTextAlignment(.center)
-
             Text(viewModel.selectedDurationDisplayTitle)
-                .font(.system(size: 38, weight: .heavy, design: .rounded))
+                .font(.system(size: 34, weight: .heavy, design: .rounded))
                 .foregroundStyle(.white)
                 .monospacedDigit()
 
-            DurationSelectionCarousel(
+            DurationSelectionSlider(
                 options: viewModel.durationOptions,
-                selectedOption: $viewModel.selectedDurationOption,
-                onMoveSelection: { delta in
-                    viewModel.moveSelection(by: delta)
+                selectedIndex: viewModel.selectedDurationIndex,
+                onSelectIndex: { index in
+                    viewModel.selectDuration(at: index)
                 }
             )
+            .padding(.top, 4)
 
-            Text("デフォルトは25分")
-                .font(.system(size: 13, weight: .semibold))
-                .foregroundStyle(.white.opacity(0.72))
+            HStack {
+                Text("5分")
+                Spacer()
+                Text("無制限")
+            }
+            .font(.system(size: 12, weight: .semibold))
+            .foregroundStyle(.white.opacity(0.70))
         }
-        .padding(.horizontal, 18)
-        .padding(.vertical, 20)
-        .frame(maxWidth: .infinity)
-        .background(.ultraThinMaterial, in: RoundedRectangle(cornerRadius: 24, style: .continuous))
+        .padding(.horizontal, 4)
     }
 }
 
@@ -183,11 +172,13 @@ struct WorkTimerPreparationView: View {
 
 @MainActor
 final class WorkTimerPreparationViewModel: ObservableObject {
+    @Published var selectedSituation: WorkSituationOption = .workClay
     @Published var selectedDurationOption: WorkSessionDurationOption = .minutes(25)
     @Published var activeSession: WorkTimerSession?
     @Published private(set) var todayFocusedSeconds: Int = 0
     @Published private(set) var totalFocusedSeconds: Int = 0
 
+    let situationOptions: [WorkSituationOption] = WorkSituationOption.defaultOptions
     let durationOptions: [WorkSessionDurationOption] = WorkSessionDurationOption.defaultOptions
 
     private let focusTodaySecondsKey = "memo.work.focus.todaySeconds"
@@ -203,6 +194,10 @@ final class WorkTimerPreparationViewModel: ObservableObject {
         selectedDurationOption.displayTitle
     }
 
+    var selectedDurationIndex: Int {
+        durationOptions.firstIndex(of: selectedDurationOption) ?? 0
+    }
+
     var todayFocusedDisplayText: String {
         Self.formatSummary(seconds: todayFocusedSeconds)
     }
@@ -212,17 +207,21 @@ final class WorkTimerPreparationViewModel: ObservableObject {
     }
 
     func start() {
-        activeSession = WorkTimerSession(durationOption: selectedDurationOption)
+        start(with: selectedSituation)
     }
 
-    func moveSelection(by delta: Int) {
-        guard delta != 0 else { return }
-        guard let currentIndex = durationOptions.firstIndex(of: selectedDurationOption) else { return }
+    func start(with situation: WorkSituationOption) {
+        selectedSituation = situation
+        activeSession = WorkTimerSession(
+            situation: situation,
+            durationOption: selectedDurationOption
+        )
+    }
 
-        let nextIndex = min(max(0, currentIndex + delta), durationOptions.count - 1)
-        guard nextIndex != currentIndex else { return }
-
-        selectedDurationOption = durationOptions[nextIndex]
+    func selectDuration(at index: Int) {
+        guard !durationOptions.isEmpty else { return }
+        let clampedIndex = min(max(0, index), durationOptions.count - 1)
+        selectedDurationOption = durationOptions[clampedIndex]
     }
 
     func refreshFocusSummaryIfNeeded() {
@@ -295,6 +294,24 @@ final class WorkTimerPreparationViewModel: ObservableObject {
 
 // MARK: - Models
 
+struct WorkSituationOption: Identifiable, Equatable, Hashable {
+    let id: String
+    let title: String
+    let cardAssetName: String
+    let runningBackgroundResourceName: String
+
+    static let workClay = WorkSituationOption(
+        id: "work_clay",
+        title: "ワーク",
+        cardAssetName: "work_clay",
+        runningBackgroundResourceName: "work"
+    )
+
+    static let defaultOptions: [WorkSituationOption] = [
+        .workClay
+    ]
+}
+
 enum WorkSessionDurationOption: Hashable, Identifiable {
     case minutes(Int)
     case unlimited
@@ -343,10 +360,11 @@ enum WorkSessionDurationOption: Hashable, Identifiable {
 }
 
 struct WorkTimerSession: Identifiable, Equatable {
+    let situation: WorkSituationOption
     let durationOption: WorkSessionDurationOption
 
     var id: String {
-        durationOption.id
+        "\(situation.id)_\(durationOption.id)"
     }
 }
 
@@ -364,7 +382,7 @@ private struct WorkTimerRunningView: View {
     var body: some View {
         GeometryReader { geo in
             ZStack {
-                WorkRunningBackgroundLayer(resourceName: "work")
+                WorkRunningBackgroundLayer(resourceName: viewModel.backgroundResourceName)
 
                 LinearGradient(
                     colors: [
@@ -500,6 +518,10 @@ private final class WorkTimerRunningViewModel: ObservableObject {
         configureInitialState()
     }
 
+    var backgroundResourceName: String {
+        session.situation.runningBackgroundResourceName
+    }
+
     deinit {
         timerTask?.cancel()
     }
@@ -579,92 +601,166 @@ private final class WorkTimerRunningViewModel: ObservableObject {
     }
 }
 
-// MARK: - Duration Picker
+// MARK: - Situation Card
 
-private struct DurationSelectionCarousel: View {
-    let options: [WorkSessionDurationOption]
-    @Binding var selectedOption: WorkSessionDurationOption
-    let onMoveSelection: (Int) -> Void
+private struct WorkSituationCarousel: View {
+    let options: [WorkSituationOption]
+    let selectedSituation: WorkSituationOption
+    let cardWidth: CGFloat
+    let onSelect: (WorkSituationOption) -> Void
 
     var body: some View {
-        VStack(spacing: 14) {
-            HStack(spacing: 14) {
-                Button {
-                    onMoveSelection(-1)
-                } label: {
-                    Image(systemName: "chevron.left")
-                        .font(.system(size: 20, weight: .bold))
-                        .foregroundStyle(.white)
-                        .frame(width: 44, height: 44)
-                        .background(Color.black.opacity(0.28), in: Circle())
+        Group {
+            if options.count <= 1, let single = options.first {
+                HStack {
+                    Spacer(minLength: 0)
+                    WorkSituationCard(
+                        situation: single,
+                        cardWidth: cardWidth,
+                        isSelected: single == selectedSituation,
+                        action: {
+                            onSelect(single)
+                        }
+                    )
+                    Spacer(minLength: 0)
                 }
-                .buttonStyle(.plain)
-
-                ScrollViewReader { proxy in
-                    ScrollView(.horizontal, showsIndicators: false) {
-                        HStack(spacing: 10) {
-                            ForEach(options) { option in
-                                DurationOptionChip(
-                                    title: option.displayTitle,
-                                    isSelected: option == selectedOption
-                                )
-                                .id(option.id)
-                                .onTapGesture {
-                                    withAnimation(.spring(response: 0.28, dampingFraction: 0.84)) {
-                                        selectedOption = option
-                                    }
+            } else {
+                ScrollView(.horizontal, showsIndicators: false) {
+                    HStack(spacing: 14) {
+                        ForEach(options) { option in
+                            WorkSituationCard(
+                                situation: option,
+                                cardWidth: cardWidth,
+                                isSelected: option == selectedSituation,
+                                action: {
+                                    onSelect(option)
                                 }
-                            }
-                        }
-                        .padding(.horizontal, 6)
-                    }
-                    .onAppear {
-                        proxy.scrollTo(selectedOption.id, anchor: .center)
-                    }
-                    .onChange(of: selectedOption) { _, newValue in
-                        withAnimation(.spring(response: 0.28, dampingFraction: 0.84)) {
-                            proxy.scrollTo(newValue.id, anchor: .center)
+                            )
                         }
                     }
+                    .padding(.horizontal, 2)
                 }
-
-                Button {
-                    onMoveSelection(1)
-                } label: {
-                    Image(systemName: "chevron.right")
-                        .font(.system(size: 20, weight: .bold))
-                        .foregroundStyle(.white)
-                        .frame(width: 44, height: 44)
-                        .background(Color.black.opacity(0.28), in: Circle())
-                }
-                .buttonStyle(.plain)
             }
-
-            Text("左右に切り替えて時間を選択")
-                .font(.system(size: 12, weight: .medium))
-                .foregroundStyle(.white.opacity(0.72))
         }
     }
 }
 
-private struct DurationOptionChip: View {
-    let title: String
+private struct WorkSituationCard: View {
+    let situation: WorkSituationOption
+    let cardWidth: CGFloat
     let isSelected: Bool
+    let action: () -> Void
+
+    private var cardHeight: CGFloat {
+        cardWidth / MemoryPhotoCardMetrics.aspectRatio
+    }
 
     var body: some View {
-        Text(title)
-            .font(.system(size: 15, weight: .bold))
-            .foregroundStyle(.white)
-            .padding(.horizontal, 18)
-            .padding(.vertical, 12)
-            .background(
-                RoundedRectangle(cornerRadius: 16, style: .continuous)
-                    .fill(isSelected ? Color.black.opacity(0.72) : Color.white.opacity(0.12))
+        Button(action: action) {
+            Image(situation.cardAssetName)
+                .resizable()
+                .scaledToFill()
+                .frame(width: cardWidth, height: cardHeight)
+                .clipShape(
+                    RoundedRectangle(
+                        cornerRadius: MemoryPhotoCardMetrics.cornerRadius,
+                        style: .continuous
+                    )
+                )
+                .shadow(
+                    color: .black.opacity(isSelected ? 0.28 : 0.18),
+                    radius: MemoryPhotoCardMetrics.shadowRadius,
+                    x: 0,
+                    y: MemoryPhotoCardMetrics.shadowYOffset
+                )
+                .scaleEffect(isSelected ? 1.0 : 0.985)
+                .contentShape(
+                    RoundedRectangle(
+                        cornerRadius: MemoryPhotoCardMetrics.cornerRadius,
+                        style: .continuous
+                    )
+                )
+        }
+        .buttonStyle(.plain)
+    }
+}
+
+// MARK: - Duration Slider
+
+private struct DurationSelectionSlider: View {
+    let options: [WorkSessionDurationOption]
+    let selectedIndex: Int
+    let onSelectIndex: (Int) -> Void
+
+    private let thumbSize: CGFloat = 34
+
+    var body: some View {
+        GeometryReader { geo in
+            let usableWidth = max(geo.size.width - thumbSize, 1)
+            let maxIndex = max(options.count - 1, 1)
+            let stepWidth = usableWidth / CGFloat(maxIndex)
+            let clampedIndex = min(max(0, selectedIndex), options.count - 1)
+            let thumbOffset = CGFloat(clampedIndex) * stepWidth
+
+            ZStack(alignment: .leading) {
+                Capsule()
+                    .fill(Color.white.opacity(0.18))
+                    .frame(height: 12)
+
+                Capsule()
+                    .fill(Color.white.opacity(0.34))
+                    .frame(width: thumbOffset + (thumbSize * 0.5), height: 12)
+
+                Circle()
+                    .fill(Color.white)
+                    .frame(width: thumbSize, height: thumbSize)
+                    .shadow(color: .black.opacity(0.18), radius: 8, x: 0, y: 4)
+                    .overlay(
+                        Circle()
+                            .stroke(Color.black.opacity(0.08), lineWidth: 1)
+                    )
+                    .offset(x: thumbOffset)
+            }
+            .frame(height: thumbSize)
+            .contentShape(Rectangle())
+            .gesture(
+                DragGesture(minimumDistance: 0)
+                    .onChanged { value in
+                        updateSelection(
+                            for: value.location.x,
+                            usableWidth: usableWidth,
+                            maxIndex: maxIndex
+                        )
+                    }
+                    .onEnded { value in
+                        updateSelection(
+                            for: value.location.x,
+                            usableWidth: usableWidth,
+                            maxIndex: maxIndex
+                        )
+                    }
             )
-            .overlay(
-                RoundedRectangle(cornerRadius: 16, style: .continuous)
-                    .stroke(Color.white.opacity(isSelected ? 0.18 : 0.08), lineWidth: 1)
+            .simultaneousGesture(
+                SpatialTapGesture()
+                    .onEnded { value in
+                        updateSelection(
+                            for: value.location.x,
+                            usableWidth: usableWidth,
+                            maxIndex: maxIndex
+                        )
+                    }
             )
+        }
+        .frame(height: 44)
+    }
+
+    private func updateSelection(for xPosition: CGFloat, usableWidth: CGFloat, maxIndex: Int) {
+        guard !options.isEmpty else { return }
+
+        let clampedX = min(max(0, xPosition - (thumbSize * 0.5)), usableWidth)
+        let ratio = clampedX / max(usableWidth, 1)
+        let resolvedIndex = Int(round(ratio * CGFloat(maxIndex)))
+        onSelectIndex(min(max(0, resolvedIndex), options.count - 1))
     }
 }
 
