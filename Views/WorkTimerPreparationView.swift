@@ -2,7 +2,7 @@
 //  WorkTimerPreparationView.swift
 //  MeMo
 //
-//  Updated for running view layout alignment.
+//  Updated to keep the preparation screen layout within the visible area.
 //
 
 import SwiftUI
@@ -15,24 +15,26 @@ struct WorkTimerPreparationView: View {
     @StateObject private var viewModel = WorkTimerPreparationViewModel()
 
     var body: some View {
-        NavigationStack {
-            GeometryReader { geo in
-                let availableHeight = geo.size.height - geo.safeAreaInsets.top - geo.safeAreaInsets.bottom
-                let sectionSpacing = min(18, max(12, availableHeight * 0.018))
-                let topPadding = geo.safeAreaInsets.top + 8
-                let bottomPadding = max(geo.safeAreaInsets.bottom, 18)
-                let situationCardWidth = min(geo.size.width - 40, 332)
-                let contentVerticalOffset: CGFloat = -70
+        GeometryReader { geo in
+            let horizontalPadding: CGFloat = 20
+            let availableHeight = geo.size.height - geo.safeAreaInsets.top - geo.safeAreaInsets.bottom
+            let sectionSpacing = min(18, max(10, availableHeight * 0.016))
+            let topPadding = geo.safeAreaInsets.top + 80
+            let bottomPadding = max(geo.safeAreaInsets.bottom, 24)
+            let contentWidth = max(geo.size.width - (horizontalPadding * 2), 1)
+            let maxSituationCardHeight = min(availableHeight * 0.52, 470)
+            let situationCardWidth = min(contentWidth, maxSituationCardHeight * MemoryPhotoCardMetrics.aspectRatio)
 
-                ZStack {
-                    Image("Home_background")
-                        .resizable()
-                        .scaledToFill()
-                        .ignoresSafeArea()
+            ZStack {
+                Image("Home_background")
+                    .resizable()
+                    .scaledToFill()
+                    .ignoresSafeArea()
 
-                    Color.black.opacity(0.22)
-                        .ignoresSafeArea()
+                Color.black.opacity(0.22)
+                    .ignoresSafeArea()
 
+                VStack(spacing: 0) {
                     VStack(spacing: sectionSpacing) {
                         headerView
 
@@ -41,25 +43,26 @@ struct WorkTimerPreparationView: View {
                         situationSelectionCard(cardWidth: situationCardWidth)
 
                         durationSettingCard
-
-                        Spacer(minLength: 0)
                     }
-                    .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
-                    .padding(.horizontal, 20)
-                    .padding(.top, topPadding)
-                    .padding(.bottom, bottomPadding)
-                    .offset(y: contentVerticalOffset)
+                    .frame(maxWidth: .infinity)
+
+                    Spacer(minLength: 0)
                 }
+                .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
+                .padding(.horizontal, horizontalPadding)
+                .padding(.top, topPadding)
+                .padding(.bottom, bottomPadding)
             }
-            .navigationBarHidden(true)
-            .onAppear {
-                viewModel.refreshFocusSummaryIfNeeded()
-            }
-            .fullScreenCover(item: $viewModel.activeSession) { session in
-                WorkTimerRunningView(session: session) { focusedSeconds in
-                    viewModel.recordFocusedTime(seconds: focusedSeconds)
-                    viewModel.activeSession = nil
-                }
+            .frame(maxWidth: .infinity, maxHeight: .infinity)
+        }
+        .ignoresSafeArea()
+        .onAppear {
+            viewModel.refreshFocusSummaryIfNeeded()
+        }
+        .fullScreenCover(item: $viewModel.activeSession) { session in
+            WorkTimerRunningView(session: session) { focusedSeconds in
+                viewModel.recordFocusedTime(seconds: focusedSeconds)
+                viewModel.activeSession = nil
             }
         }
     }
@@ -138,11 +141,7 @@ struct WorkTimerPreparationView: View {
     }
 
     private var durationSettingCard: some View {
-        VStack(spacing: 12) {
-            Text("作業時間を設定")
-                .font(.system(size: 18, weight: .bold))
-                .foregroundStyle(.white)
-
+        VStack(spacing: 10) {
             Text(viewModel.selectedDurationDisplayTitle)
                 .font(.system(size: 34, weight: .heavy, design: .rounded))
                 .foregroundStyle(.white)
@@ -155,16 +154,16 @@ struct WorkTimerPreparationView: View {
                     viewModel.selectDuration(at: index)
                 }
             )
-            .padding(.top, 4)
 
             HStack {
                 Text("5分")
                 Spacer()
                 Text("無制限")
             }
-            .font(.system(size: 12, weight: .semibold))
+            .font(.system(size: 18, weight: .semibold))
             .foregroundStyle(.white.opacity(0.70))
         }
+        .padding(.top, -6)
         .padding(.horizontal, 4)
     }
 }
@@ -278,15 +277,16 @@ final class WorkTimerPreparationViewModel: ObservableObject {
 
     private static func formatSummary(seconds: Int) -> String {
         let safeSeconds = max(0, seconds)
-        let hours = safeSeconds / 3600
-        let minutes = (safeSeconds % 3600) / 60
+        let totalMinutes = safeSeconds / 60
 
-        if hours > 0 {
+        if safeSeconds >= 3600 {
+            let hours = totalMinutes / 60
+            let minutes = totalMinutes % 60
             return "\(hours)時間\(minutes)分"
         }
 
-        if minutes > 0 {
-            return "\(minutes)分"
+        if totalMinutes > 0 {
+            return "\(totalMinutes)分"
         }
 
         return "0分"
@@ -934,7 +934,10 @@ private struct DurationSelectionSlider: View {
     let selectedIndex: Int
     let onSelectIndex: (Int) -> Void
 
-    private let thumbSize: CGFloat = 34
+    private let thumbSize: CGFloat = 42
+    private let trackHeight: CGFloat = 12
+    private let trackBackgroundColor = Color(red: 0.39, green: 0.31, blue: 0.11).opacity(0.70)
+    private let trackFillColor = Color(red: 0.73, green: 0.59, blue: 0.19)
 
     var body: some View {
         GeometryReader { geo in
@@ -946,21 +949,18 @@ private struct DurationSelectionSlider: View {
 
             ZStack(alignment: .leading) {
                 Capsule()
-                    .fill(Color.white.opacity(0.18))
-                    .frame(height: 12)
+                    .fill(trackBackgroundColor)
+                    .frame(height: trackHeight)
 
                 Capsule()
-                    .fill(Color.white.opacity(0.34))
-                    .frame(width: thumbOffset + (thumbSize * 0.5), height: 12)
+                    .fill(trackFillColor)
+                    .frame(width: thumbOffset + (thumbSize * 0.5), height: trackHeight)
 
-                Circle()
-                    .fill(Color.white)
+                Image("clock")
+                    .resizable()
+                    .scaledToFit()
                     .frame(width: thumbSize, height: thumbSize)
-                    .shadow(color: .black.opacity(0.18), radius: 8, x: 0, y: 4)
-                    .overlay(
-                        Circle()
-                            .stroke(Color.black.opacity(0.08), lineWidth: 1)
-                    )
+                    .shadow(color: .black.opacity(0.22), radius: 8, x: 0, y: 4)
                     .offset(x: thumbOffset)
             }
             .frame(height: thumbSize)
@@ -993,7 +993,7 @@ private struct DurationSelectionSlider: View {
                     }
             )
         }
-        .frame(height: 44)
+        .frame(height: 50)
     }
 
     private func updateSelection(for xPosition: CGFloat, usableWidth: CGFloat, maxIndex: Int) {
