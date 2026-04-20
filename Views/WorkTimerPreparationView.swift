@@ -2,12 +2,13 @@
 //  WorkTimerPreparationView.swift
 //  MeMo
 //
-//  Updated for compact no-scroll work preparation UI adjustment.
+//  Updated for running view layout alignment.
 //
 
 import SwiftUI
 import UIKit
 import Combine
+import AVFoundation
 
 struct WorkTimerPreparationView: View {
     @Environment(\.dismiss) private var dismiss
@@ -371,7 +372,9 @@ struct WorkTimerSession: Identifiable, Equatable {
 // MARK: - Running View
 
 private struct WorkTimerRunningView: View {
+    @EnvironmentObject private var bgmManager: BGMManager
     @StateObject private var viewModel: WorkTimerRunningViewModel
+
     let onFinish: (Int) -> Void
 
     init(session: WorkTimerSession, onFinish: @escaping (Int) -> Void) {
@@ -381,118 +384,169 @@ private struct WorkTimerRunningView: View {
 
     var body: some View {
         GeometryReader { geo in
+            let horizontalPadding: CGFloat = 24
+            let topPadding = geo.safeAreaInsets.top + 18
+            let bottomInset = max(geo.safeAreaInsets.bottom, 24)
+            let availableHeight = geo.size.height - geo.safeAreaInsets.top - bottomInset
+
+            let timerToVideoSpacing: CGFloat = 12
+            let desiredVideoHeight = min(max(availableHeight * 0.64, 340), 660)
+            let maxVideoHeight = max(130, availableHeight - 130)
+            let videoHeight = min(desiredVideoHeight, maxVideoHeight)
+            let videoToButtonsSpacing: CGFloat = 16
+
             ZStack {
-                WorkRunningBackgroundLayer(resourceName: viewModel.backgroundResourceName)
+                Image("Home_background")
+                    .resizable()
+                    .scaledToFill()
+                    .ignoresSafeArea()
 
-                LinearGradient(
-                    colors: [
-                        Color.black.opacity(0.18),
-                        Color.black.opacity(0.28),
-                        Color.black.opacity(0.36)
-                    ],
-                    startPoint: .top,
-                    endPoint: .bottom
-                )
-                .ignoresSafeArea()
+                Color.black.opacity(0.18)
+                    .ignoresSafeArea()
 
-                VStack(spacing: 24) {
-                    Spacer(minLength: 0)
+                VStack(spacing: 0) {
+                    timerDisplay
+                        .padding(.horizontal, horizontalPadding)
+                        .padding(.top, topPadding)
 
-                    VStack(spacing: 14) {
-                        runningTextCard(text: viewModel.phaseTitle, fontSize: 22, horizontalPadding: 24)
+                    Color.clear
+                        .frame(height: timerToVideoSpacing)
 
-                        runningTextCard(text: viewModel.timeText, fontSize: 54, horizontalPadding: 28, weight: .heavy)
-
-                        runningTextCard(
-                            text: viewModel.subtitleText,
-                            fontSize: 16,
-                            horizontalPadding: 20,
-                            opacity: 0.20
-                        )
-                    }
+                    WorkRunningVideoCard(
+                        resourceName: viewModel.backgroundResourceName,
+                        shouldPlay: viewModel.shouldPlayMedia
+                    )
                     .frame(maxWidth: .infinity)
+                    .frame(height: videoHeight)
+                    .padding(.horizontal, horizontalPadding)
 
-                    Spacer(minLength: 0)
-
-                    HStack(spacing: 16) {
-                        if !viewModel.isCompleted {
-                            Button {
-                                viewModel.togglePause()
-                            } label: {
-                                Text(viewModel.isPaused ? "再開" : "一時停止")
-                                    .font(.system(size: 18, weight: .bold))
-                                    .foregroundStyle(.white)
-                                    .frame(maxWidth: .infinity)
-                                    .frame(height: 54)
-                                    .background(
-                                        RoundedRectangle(cornerRadius: 18, style: .continuous)
-                                            .fill(Color.black.opacity(0.60))
-                                    )
-                                    .overlay(
-                                        RoundedRectangle(cornerRadius: 18, style: .continuous)
-                                            .stroke(Color.white.opacity(0.12), lineWidth: 1)
-                                    )
-                            }
-                            .buttonStyle(.plain)
-                        }
-
-                        Button {
-                            onFinish(viewModel.finish())
-                        } label: {
-                            Text(viewModel.isCompleted ? "閉じる" : "終了")
-                                .font(.system(size: 18, weight: .bold))
-                                .foregroundStyle(.white)
-                                .frame(maxWidth: .infinity)
-                                .frame(height: 54)
-                                .background(
-                                    RoundedRectangle(cornerRadius: 18, style: .continuous)
-                                        .fill(Color.black.opacity(0.68))
-                                )
-                                .overlay(
-                                    RoundedRectangle(cornerRadius: 18, style: .continuous)
-                                        .stroke(Color.white.opacity(0.12), lineWidth: 1)
-                                )
-                        }
-                        .buttonStyle(.plain)
-                    }
+                    controlButtons
+                        .padding(.horizontal, horizontalPadding)
+                        .padding(.top, videoToButtonsSpacing)
                 }
-                .padding(.horizontal, 24)
-                .padding(.top, geo.safeAreaInsets.top + 24)
-                .padding(.bottom, max(geo.safeAreaInsets.bottom, 28))
+                .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
             }
             .ignoresSafeArea()
         }
         .interactiveDismissDisabled()
         .onAppear {
+            bgmManager.stop()
             viewModel.startIfNeeded()
         }
         .onDisappear {
             viewModel.stop()
+            bgmManager.startIfNeeded()
         }
     }
 
-    private func runningTextCard(
-        text: String,
-        fontSize: CGFloat,
-        horizontalPadding: CGFloat,
-        weight: Font.Weight = .bold,
-        opacity: Double = 0.26
-    ) -> some View {
-        Text(text)
-            .font(.system(size: fontSize, weight: weight, design: .rounded))
+    private var timerDisplay: some View {
+        Text(viewModel.timeText)
+            .font(.system(size: 72, weight: .black, design: .rounded))
             .monospacedDigit()
             .foregroundStyle(.white)
-            .multilineTextAlignment(.center)
-            .padding(.horizontal, horizontalPadding)
-            .padding(.vertical, 14)
+            .minimumScaleFactor(0.55)
+            .lineLimit(1)
+            .frame(maxWidth: .infinity)
+            .padding(.horizontal, 20)
+            .padding(.vertical, 18)
             .background(
-                RoundedRectangle(cornerRadius: 22, style: .continuous)
-                    .fill(Color.black.opacity(opacity))
+                RoundedRectangle(cornerRadius: 28, style: .continuous)
+                    .fill(Color.black.opacity(0.28))
             )
             .overlay(
-                RoundedRectangle(cornerRadius: 22, style: .continuous)
+                RoundedRectangle(cornerRadius: 28, style: .continuous)
+                    .stroke(Color.white.opacity(0.08), lineWidth: 1)
+            )
+            .shadow(color: .black.opacity(0.18), radius: 14, x: 0, y: 8)
+    }
+
+    private var controlButtons: some View {
+        HStack(spacing: 16) {
+            if !viewModel.isCompleted {
+                runningControlButton(
+                    title: viewModel.isPaused ? "再開" : "一時停止",
+                    backgroundColor: Color.black.opacity(0.48)
+                ) {
+                    viewModel.togglePause()
+                }
+            }
+
+            runningControlButton(
+                title: "終了",
+                backgroundColor: Color(red: 0.82, green: 0.18, blue: 0.20).opacity(0.92)
+            ) {
+                onFinish(viewModel.finish())
+            }
+        }
+    }
+
+    private func runningControlButton(
+        title: String,
+        backgroundColor: Color,
+        action: @escaping () -> Void
+    ) -> some View {
+        Button(action: action) {
+            Text(title)
+                .font(.system(size: 18, weight: .bold))
+                .foregroundStyle(.white)
+                .frame(maxWidth: .infinity)
+                .frame(height: 58)
+                .background(
+                    RoundedRectangle(cornerRadius: 20, style: .continuous)
+                        .fill(backgroundColor)
+                )
+                .overlay(
+                    RoundedRectangle(cornerRadius: 20, style: .continuous)
+                        .stroke(Color.white.opacity(0.10), lineWidth: 1)
+                )
+                .shadow(color: .black.opacity(0.14), radius: 10, x: 0, y: 6)
+        }
+        .buttonStyle(.plain)
+    }
+}
+
+private struct WorkRunningVideoCard: View {
+    let resourceName: String
+    let shouldPlay: Bool
+
+    private let cornerRadius: CGFloat = 32
+
+    var body: some View {
+        ZStack {
+            RoundedRectangle(cornerRadius: cornerRadius + 8, style: .continuous)
+                .fill(Color.black.opacity(0.22))
+                .blur(radius: 22)
+                .padding(10)
+
+            WorkRunningBackgroundLayer(
+                resourceName: resourceName,
+                shouldPlay: shouldPlay
+            )
+            .clipShape(
+                RoundedRectangle(cornerRadius: cornerRadius, style: .continuous)
+            )
+            .overlay(
+                RoundedRectangle(cornerRadius: cornerRadius, style: .continuous)
+                    .fill(
+                        LinearGradient(
+                            colors: [
+                                Color.white.opacity(0.08),
+                                Color.clear,
+                                Color.black.opacity(0.14)
+                            ],
+                            startPoint: .top,
+                            endPoint: .bottom
+                        )
+                    )
+                    .blendMode(.screen)
+            )
+            .overlay(
+                RoundedRectangle(cornerRadius: cornerRadius, style: .continuous)
                     .stroke(Color.white.opacity(0.10), lineWidth: 1)
             )
+        }
+        .compositingGroup()
+        .shadow(color: .black.opacity(0.26), radius: 22, x: 0, y: 14)
     }
 }
 
@@ -501,12 +555,12 @@ private struct WorkTimerRunningView: View {
 @MainActor
 private final class WorkTimerRunningViewModel: ObservableObject {
     @Published private(set) var timeText: String = "00:00:00"
-    @Published private(set) var phaseTitle: String = ""
-    @Published private(set) var subtitleText: String = ""
     @Published private(set) var isPaused: Bool = false
     @Published private(set) var isCompleted: Bool = false
 
     private let session: WorkTimerSession
+    private let ambientAudioController = WorkSessionAmbientAudioController(assetName: "takibi")
+
     private var timerTask: Task<Void, Never>?
     private var focusedSeconds: Int = 0
     private var remainingSeconds: Int?
@@ -522,11 +576,17 @@ private final class WorkTimerRunningViewModel: ObservableObject {
         session.situation.runningBackgroundResourceName
     }
 
+    var shouldPlayMedia: Bool {
+        !isPaused && !isCompleted
+    }
+
     deinit {
         timerTask?.cancel()
     }
 
     func startIfNeeded() {
+        ambientAudioController.playLoopIfNeeded(fadeDuration: 0.8)
+
         guard timerTask == nil else { return }
 
         timerTask = Task { @MainActor in
@@ -544,11 +604,19 @@ private final class WorkTimerRunningViewModel: ObservableObject {
     func stop() {
         timerTask?.cancel()
         timerTask = nil
+        ambientAudioController.stopImmediately()
     }
 
     func togglePause() {
         guard !isCompleted else { return }
+
         isPaused.toggle()
+
+        if isPaused {
+            ambientAudioController.fadeOutAndPause(duration: 0.45)
+        } else {
+            ambientAudioController.playLoopIfNeeded(fadeDuration: 0.65)
+        }
     }
 
     func finish() -> Int {
@@ -561,13 +629,8 @@ private final class WorkTimerRunningViewModel: ObservableObject {
     private func configureInitialState() {
         switch session.durationOption {
         case .minutes:
-            phaseTitle = "のこり時間"
-            subtitleText = session.durationOption.subtitleText
             timeText = Self.formatAsClock(remainingSeconds ?? 0)
-
         case .unlimited:
-            phaseTitle = "経過時間"
-            subtitleText = session.durationOption.subtitleText
             timeText = Self.formatAsClock(0)
         }
     }
@@ -583,13 +646,17 @@ private final class WorkTimerRunningViewModel: ObservableObject {
             if nextRemaining == 0 {
                 isCompleted = true
                 isPaused = true
-                phaseTitle = "作業完了"
-                subtitleText = "時間になりました。閉じると集中時間が保存されます。"
-                stop()
+                ambientAudioController.fadeOutAndPause(duration: 0.55)
+                stopTimerTask()
             }
         } else {
             timeText = Self.formatAsClock(focusedSeconds)
         }
+    }
+
+    private func stopTimerTask() {
+        timerTask?.cancel()
+        timerTask = nil
     }
 
     private static func formatAsClock(_ totalSeconds: Int) -> String {
@@ -598,6 +665,181 @@ private final class WorkTimerRunningViewModel: ObservableObject {
         let minutes = (safe % 3600) / 60
         let seconds = safe % 60
         return String(format: "%02d:%02d:%02d", hours, minutes, seconds)
+    }
+}
+
+private final class WorkSessionAmbientAudioController {
+    private let assetName: String
+    private let targetVolume: Float = 0.72
+
+    private var player: AVAudioPlayer?
+    private var fadeTask: Task<Void, Never>?
+    private var cachedBundleURL: URL?
+    private var cachedAssetData: Data?
+
+    init(assetName: String) {
+        self.assetName = assetName
+    }
+
+    deinit {
+        fadeTask?.cancel()
+        player?.stop()
+    }
+
+    @MainActor
+    func playLoopIfNeeded(fadeDuration: TimeInterval) {
+        do {
+            try configureAudioSessionIfNeeded()
+            try preparePlayerIfNeeded()
+        } catch {
+            print("❌ Work ambient audio prepare failed: \(error.localizedDescription)")
+            return
+        }
+
+        guard let player else { return }
+
+        fadeTask?.cancel()
+
+        if !player.isPlaying {
+            if player.currentTime >= player.duration {
+                player.currentTime = 0
+            }
+            player.play()
+        }
+
+        let startVolume = max(0, min(targetVolume, player.volume))
+        player.volume = startVolume
+        scheduleFade(from: startVolume, to: targetVolume, duration: fadeDuration)
+    }
+
+    @MainActor
+    func fadeOutAndPause(duration: TimeInterval) {
+        guard let player else { return }
+
+        fadeTask?.cancel()
+        let currentVolume = max(0, min(targetVolume, player.volume))
+        scheduleFade(from: currentVolume, to: 0, duration: duration) {
+            player.pause()
+            player.volume = 0
+        }
+    }
+
+    @MainActor
+    func fadeOutAndStop(duration: TimeInterval) {
+        guard let player else { return }
+
+        fadeTask?.cancel()
+        let currentVolume = max(0, min(targetVolume, player.volume))
+        scheduleFade(from: currentVolume, to: 0, duration: duration) {
+            player.stop()
+            player.currentTime = 0
+            player.volume = 0
+        }
+    }
+
+    @MainActor
+    func stopImmediately() {
+        fadeTask?.cancel()
+        player?.stop()
+        player?.currentTime = 0
+        player?.volume = 0
+    }
+
+    @MainActor
+    private func preparePlayerIfNeeded() throws {
+        if player != nil { return }
+
+        let resolvedPlayer = try makeAudioPlayer(named: assetName)
+        resolvedPlayer.numberOfLoops = -1
+        resolvedPlayer.volume = 0
+        resolvedPlayer.prepareToPlay()
+        player = resolvedPlayer
+    }
+
+    @MainActor
+    private func scheduleFade(
+        from startVolume: Float,
+        to endVolume: Float,
+        duration: TimeInterval,
+        completion: (() -> Void)? = nil
+    ) {
+        fadeTask?.cancel()
+
+        guard let player else {
+            completion?()
+            return
+        }
+
+        let safeDuration = max(0.01, duration)
+        let stepCount = max(1, Int((safeDuration / 0.05).rounded(.up)))
+        let sleepNanoseconds = UInt64((safeDuration / Double(stepCount)) * 1_000_000_000)
+
+        fadeTask = Task { @MainActor in
+            for step in 0...stepCount {
+                guard !Task.isCancelled else { return }
+
+                let progress = Float(step) / Float(stepCount)
+                let nextVolume = startVolume + ((endVolume - startVolume) * progress)
+                player.volume = max(0, min(targetVolume, nextVolume))
+
+                if step < stepCount {
+                    try? await Task.sleep(nanoseconds: sleepNanoseconds)
+                }
+            }
+
+            completion?()
+            fadeTask = nil
+        }
+    }
+
+    private func configureAudioSessionIfNeeded() throws {
+        let session = AVAudioSession.sharedInstance()
+        try session.setCategory(.ambient, mode: .default, options: [])
+        try session.setActive(true)
+    }
+
+    private func makeAudioPlayer(named name: String) throws -> AVAudioPlayer {
+        if let url = findAudioFileURLInBundle(named: name) {
+            return try AVAudioPlayer(contentsOf: url)
+        }
+
+        if let data = findAudioDataAsset(named: name) {
+            return try AVAudioPlayer(data: data)
+        }
+
+        throw NSError(
+            domain: "WorkSessionAmbientAudioController",
+            code: 404,
+            userInfo: [NSLocalizedDescriptionKey: "音源が見つかりません: \(name)"]
+        )
+    }
+
+    private func findAudioFileURLInBundle(named name: String) -> URL? {
+        if let cachedBundleURL {
+            return cachedBundleURL
+        }
+
+        let candidates = ["m4a", "mp3", "wav", "aif", "aiff", "caf"]
+        for ext in candidates {
+            if let url = Bundle.main.url(forResource: name, withExtension: ext) {
+                cachedBundleURL = url
+                return url
+            }
+        }
+        return nil
+    }
+
+    private func findAudioDataAsset(named name: String) -> Data? {
+        if let cachedAssetData {
+            return cachedAssetData
+        }
+
+        if let data = NSDataAsset(name: name)?.data {
+            cachedAssetData = data
+            return data
+        }
+
+        return nil
     }
 }
 
@@ -768,26 +1010,41 @@ private struct DurationSelectionSlider: View {
 
 private struct WorkRunningBackgroundLayer: View {
     let resourceName: String
+    let shouldPlay: Bool
+
     @StateObject private var controller = LoopingVideoPlayerController()
 
     var body: some View {
         Group {
             if hasVideoAsset {
                 LoopingVideoPlayer(controller: controller)
-                    .ignoresSafeArea()
                     .onAppear {
                         controller.prepare(assetName: resourceName)
-                        controller.play()
+                        updatePlaybackState()
                     }
                     .onDisappear {
                         controller.pause()
+                    }
+                    .onChange(of: resourceName) { _, newValue in
+                        controller.prepare(assetName: newValue)
+                        updatePlaybackState()
+                    }
+                    .onChange(of: shouldPlay) { _, _ in
+                        updatePlaybackState()
                     }
             } else {
                 Image("Home_background")
                     .resizable()
                     .scaledToFill()
-                    .ignoresSafeArea()
             }
+        }
+    }
+
+    private func updatePlaybackState() {
+        if shouldPlay {
+            controller.play()
+        } else {
+            controller.pause()
         }
     }
 
