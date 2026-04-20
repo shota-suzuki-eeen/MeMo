@@ -106,8 +106,14 @@ final class AppState {
 
     // MARK: - Step Enjoy
     var stepEnjoyLastCheckedAt: Date? = nil
+
+    // HomeView の「総歩数」表示に使う累計獲得量。
+    // 通貨の消費では減らさず、獲得でのみ増やす。
     var stepEnjoyTotalSteps: Int = 0
+
+    // 直近で獲得した差分。補助的な記録用途として保持。
     var stepEnjoyLastDeltaSteps: Int = 0
+
     var stepEnjoyLogsData: Data? = nil
     var stepEnjoyDailyCycleStart: Date = Date()
     var stepEnjoyDailyRewardCount: Int = 0
@@ -232,12 +238,12 @@ final class AppState {
         self.mojaFusionEndAt = mojaFusionEndAt
 
         self.stepEnjoyLastCheckedAt = stepEnjoyLastCheckedAt
-        self.stepEnjoyTotalSteps = stepEnjoyTotalSteps
-        self.stepEnjoyLastDeltaSteps = stepEnjoyLastDeltaSteps
+        self.stepEnjoyTotalSteps = max(0, stepEnjoyTotalSteps)
+        self.stepEnjoyLastDeltaSteps = max(0, stepEnjoyLastDeltaSteps)
         self.stepEnjoyLogsData = stepEnjoyLogsData
         self.stepEnjoyDailyCycleStart = stepEnjoyDailyCycleStart
-        self.stepEnjoyDailyRewardCount = stepEnjoyDailyRewardCount
-        self.stepEnjoyDailyRewardStepBank = stepEnjoyDailyRewardStepBank
+        self.stepEnjoyDailyRewardCount = max(0, stepEnjoyDailyRewardCount)
+        self.stepEnjoyDailyRewardStepBank = max(0, stepEnjoyDailyRewardStepBank)
         self.stepEnjoyLastRewardAt = stepEnjoyLastRewardAt
 
         _ = normalizeFixedDailyStepGoal()
@@ -267,15 +273,36 @@ extension AppState {
     static let toiletPoopSpawnIntervalSeconds: TimeInterval = 15 * 60
 
     /// 歩数通貨の所持数
+    /// 増加したぶんだけ累計獲得歩数にも反映する。
+    /// 消費などで減少した場合は累計側を減らさない。
     var walletSteps: Int {
         get { max(0, walletKcal) }
-        set { walletKcal = max(0, newValue) }
+        set {
+            let previousValue = max(0, walletKcal)
+            let sanitizedNewValue = max(0, newValue)
+            walletKcal = sanitizedNewValue
+
+            let gainedSteps = sanitizedNewValue - previousValue
+            if gainedSteps > 0 {
+                cumulativeEarnedSteps += gainedSteps
+                stepEnjoyLastDeltaSteps = gainedSteps
+            } else if gainedSteps < 0 {
+                stepEnjoyLastDeltaSteps = 0
+            }
+        }
     }
 
     /// 未反映の歩数通貨
     var pendingSteps: Int {
         get { max(0, pendingKcal) }
         set { pendingKcal = max(0, newValue) }
+    }
+
+    /// HomeView の「総歩数」に表示する累計獲得歩数。
+    /// 通貨の残高とは別管理で、消費では減らさない。
+    var cumulativeEarnedSteps: Int {
+        get { max(0, stepEnjoyTotalSteps) }
+        set { stepEnjoyTotalSteps = max(0, newValue) }
     }
 
     /// 1日の固定目標歩数（変更不可）
