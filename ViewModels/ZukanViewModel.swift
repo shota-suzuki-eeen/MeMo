@@ -29,10 +29,11 @@ final class ZukanViewModel: ObservableObject {
     /// ✅ 1ページあたり 3 x 3 = 9マス
     let pageSize: Int = 9
 
-    /// ✅ pet_011 は未実装のため図鑑表示から除外
-    /// - 正本は AppState.initialZukanPetIDs
+    /// ✅ 図鑑に表示する対象ID
+    /// - PetMaster を正本にして、幸せ報酬の特別キャラも図鑑対象に含める
+    /// - pet_011 は未実装のため従来どおり除外
     var initialPetIDs: [String] {
-        AppState.initialZukanPetIDs.filter { $0 != "pet_011" }
+        PetMaster.all.map(\.id).filter { $0 != "pet_011" }
     }
 
     /// 既存：所持キャラ一覧（現状UIで使っているので残す）

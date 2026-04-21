@@ -91,7 +91,9 @@ fileprivate enum GachaCatalog {
 
     static func remainingCharacters(state: AppState) -> [PetMasterItem] {
         let owned = Set(state.ownedPetIDs())
-        return PetMaster.all.filter { !owned.contains($0.id) }
+        return PetMaster.all.filter {
+            !owned.contains($0.id) && !PetMaster.isHappinessRewardPetID($0.id)
+        }
     }
 
     static func makeReward(for rarity: GachaRarity, state: AppState) -> GachaReward? {

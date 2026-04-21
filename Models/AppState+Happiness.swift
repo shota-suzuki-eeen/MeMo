@@ -18,6 +18,7 @@ extension AppState {
 
     struct HappinessRewardDefinition: Identifiable, Equatable {
         let level: Int
+        let petID: String
         let assetName: String
         let characterName: String
 
@@ -25,10 +26,10 @@ extension AppState {
     }
 
     static let happinessRewardDefinitions: [HappinessRewardDefinition] = [
-        .init(level: 5, assetName: "person_room", characterName: "部屋着"),
-        .init(level: 10, assetName: "person_chef", characterName: "シェフ"),
-        .init(level: 15, assetName: "girl_onePiece", characterName: "ワンピース"),
-        .init(level: 20, assetName: "person_skate", characterName: "スケボー")
+        .init(level: 5, petID: "reward_000", assetName: "person_room", characterName: "部屋着"),
+        .init(level: 10, petID: "reward_001", assetName: "person_chef", characterName: "シェフ"),
+        .init(level: 15, petID: "reward_002", assetName: "girl_onePiece", characterName: "ワンピース"),
+        .init(level: 20, petID: "reward_003", assetName: "person_skate", characterName: "スケボー")
     ]
 
     struct HappinessGainResult: Equatable {
@@ -50,6 +51,7 @@ extension AppState {
 
     struct HappinessRewardClaimResult: Equatable {
         let level: Int
+        let petID: String
         let assetName: String
         let characterName: String
     }
@@ -389,6 +391,19 @@ extension AppState {
         claimed.insert(level)
         setClaimedHappinessRewardLevels(claimed)
 
-        return .init(level: level, assetName: reward.assetName, characterName: reward.characterName)
+        if PetMaster.all.contains(where: { $0.id == reward.petID }) {
+            var owned = ownedPetIDs()
+            if !owned.contains(reward.petID) {
+                owned.append(reward.petID)
+                setOwnedPetIDs(owned)
+            }
+        }
+
+        return .init(
+            level: level,
+            petID: reward.petID,
+            assetName: reward.assetName,
+            characterName: reward.characterName
+        )
     }
 }

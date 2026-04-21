@@ -36,6 +36,17 @@ enum FriendshipSpec {
 
 enum PetMaster {
 
+    static let happinessRewardPetIDs: [String] = [
+        "reward_000",
+        "reward_001",
+        "reward_002",
+        "reward_003"
+    ]
+
+    static func isHappinessRewardPetID(_ petID: String) -> Bool {
+        happinessRewardPetIDs.contains(petID)
+    }
+
     static let all: [PetMasterItem] = [
         .init(id: "pet_000", name: "パーソン"),
         .init(id: "pet_001", name: "イヌ"),
@@ -86,6 +97,10 @@ enum PetMaster {
         .init(id: "pet_046", name: "ホワイトタイガー"),
         .init(id: "pet_047", name: "シマウマ"),
         .init(id: "pet_048", name: "オオカミ"),
+        .init(id: "reward_000", name: "ヘヤギ"),
+        .init(id: "reward_001", name: "シェフ"),
+        .init(id: "reward_002", name: "ワンピース"),
+        .init(id: "reward_003", name: "スケボー"),
     ]
 
     // ✅ ペットID → アセット名（修正版）
@@ -140,6 +155,10 @@ enum PetMaster {
         case "pet_046": return "whiteTiger"
         case "pet_047": return "zebra"
         case "pet_048": return "wolf"
+        case "reward_000": return "person_room"
+        case "reward_001": return "person_chef"
+        case "reward_002": return "girl_onePiece"
+        case "reward_003": return "person_skate"
         default:
             return "purpor" // 安全フォールバック
         }
@@ -170,6 +189,14 @@ enum PetMaster {
             return "*"
         case "pet_010":
             return "*"
+        case "reward_000":
+            return "幸せLv.5の報酬で仲間になる特別なキャラクター。"
+        case "reward_001":
+            return "幸せLv.10の報酬で仲間になる特別なキャラクター。"
+        case "reward_002":
+            return "幸せLv.15の報酬で仲間になる特別なキャラクター。"
+        case "reward_003":
+            return "幸せLv.20の報酬で仲間になる特別なキャラクター。"
         default:
             return "今後記載予定"
         }
