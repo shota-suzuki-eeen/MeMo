@@ -336,7 +336,7 @@ struct HomeView: View {
         static let friendshipTextFont: CGFloat = 11
 
         static let fullnessGaugeTop: CGFloat = 32
-        static let fullnessGaugeTrailing: CGFloat = 18
+        static let fullnessGaugeTrailing: CGFloat = 28
         static let fullnessGaugeOuterSize: CGFloat = 135
         static let fullnessGaugeInnerSize: CGFloat = 115
 
@@ -4169,8 +4169,10 @@ private struct FoodCarouselCard: View {
 
     var body: some View {
         ZStack {
-            RoundedRectangle(cornerRadius: 26, style: .continuous)
-                .fill(Color.black.opacity(backgroundOpacity))
+            Image("dish")
+                .resizable()
+                .scaledToFit()
+                .frame(width: cardSize.width, height: cardSize.height)
 
             FoodRarityBackdropGlow(tab: rarityTab, size: cardSize.width * 0.72)
 
@@ -4237,8 +4239,10 @@ private struct PendingFoodSelectionCard: View {
                 : CGFloat(sin(phase)) * HomeView.Layout.floatingBubbleAmplitude
 
             ZStack {
-                RoundedRectangle(cornerRadius: 34, style: .continuous)
-                    .fill(Color.black.opacity(0.26))
+                Image("dish")
+                    .resizable()
+                    .scaledToFit()
+                    .frame(width: 188, height: 188)
 
                 FoodRarityBackdropGlow(tab: rarityTab, size: 138)
 
