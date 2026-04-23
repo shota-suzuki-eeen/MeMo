@@ -2,8 +2,8 @@
 //  WorkTimerPreparationView.swift
 //  MeMo
 //
-//  Updated to keep the preparation screen layout within the visible area
-//  and to cooperate with per-screen BGM transitions.
+//  Updated to add work focus rewards, a reward list screen,
+//  and the dedicated work background across the work flow.
 //
 
 import SwiftUI
@@ -15,6 +15,8 @@ struct WorkTimerPreparationView: View {
     @Environment(\.dismiss) private var dismiss
     @EnvironmentObject private var bgmManager: BGMManager
     @StateObject private var viewModel = WorkTimerPreparationViewModel()
+
+    @State private var showRewardsView: Bool = false
 
     var body: some View {
         GeometryReader { geo in
@@ -28,7 +30,7 @@ struct WorkTimerPreparationView: View {
             let situationCardWidth = min(contentWidth, maxSituationCardHeight * MemoryPhotoCardMetrics.aspectRatio)
 
             ZStack {
-                Image("Home_background")
+                Image("work_background")
                     .resizable()
                     .scaledToFill()
                     .ignoresSafeArea()
@@ -67,6 +69,10 @@ struct WorkTimerPreparationView: View {
                 bgmManager.restoreDefaultBackground()
             }
         }
+        .fullScreenCover(isPresented: $showRewardsView) {
+            WorkFocusRewardsView(viewModel: viewModel)
+                .environmentObject(bgmManager)
+        }
         .fullScreenCover(item: $viewModel.activeSession) { session in
             WorkTimerRunningView(session: session) { focusedSeconds in
                 viewModel.recordFocusedTime(seconds: focusedSeconds)
@@ -96,9 +102,36 @@ struct WorkTimerPreparationView: View {
 
             Spacer()
 
-            Color.clear
-                .frame(width: 40, height: 40)
+            rewardListEntryButton
         }
+    }
+
+    private var rewardListEntryButton: some View {
+        Button {
+            showRewardsView = true
+        } label: {
+            ZStack(alignment: .topTrailing) {
+                Image("presentBox")
+                    .resizable()
+                    .scaledToFit()
+                    .frame(width: 40, height: 40)
+
+                if viewModel.hasClaimableRewards {
+                    Circle()
+                        .fill(Color(red: 0.20, green: 0.90, blue: 0.38))
+                        .frame(width: 12, height: 12)
+                        .overlay(
+                            Circle()
+                                .stroke(Color.white.opacity(0.95), lineWidth: 2)
+                        )
+                        .shadow(color: Color.black.opacity(0.18), radius: 4, x: 0, y: 2)
+                        .offset(x: 4, y: -4)
+                }
+            }
+            .frame(width: 40, height: 40)
+        }
+        .buttonStyle(.plain)
+        .accessibilityLabel("報酬一覧")
     }
 
     private var focusSummaryCard: some View {
@@ -176,6 +209,321 @@ struct WorkTimerPreparationView: View {
     }
 }
 
+private struct WorkFocusRewardsView: View {
+    @Environment(\.dismiss) private var dismiss
+    @ObservedObject var viewModel: WorkTimerPreparationViewModel
+
+    @State private var didInitialScrollToBottom: Bool = false
+
+    private let rewardRowHeight: CGFloat = 128
+    private let rewardRowSpacing: CGFloat = 28
+    private let bottomAnchorID = "work.reward.bottom.anchor"
+
+    var body: some View {
+        GeometryReader { geo in
+            let horizontalPadding: CGFloat = 20
+            let topPadding = geo.safeAreaInsets.top + 72
+            let bottomPadding = max(geo.safeAreaInsets.bottom, 24)
+
+            ZStack {
+                Image("work_background")
+                    .resizable()
+                    .scaledToFill()
+                    .ignoresSafeArea()
+
+                Color.black.opacity(0.26)
+                    .ignoresSafeArea()
+
+                VStack(spacing: 18) {
+                    headerView
+
+                    summaryCard
+
+                    rewardsScrollView
+                }
+                .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
+                .padding(.horizontal, horizontalPadding)
+                .padding(.top, topPadding)
+                .padding(.bottom, bottomPadding)
+            }
+        }
+        .ignoresSafeArea()
+        .onAppear {
+            viewModel.refreshFocusSummaryIfNeeded()
+        }
+    }
+
+    private var headerView: some View {
+        HStack {
+            Button {
+                dismiss()
+            } label: {
+                Image(systemName: "chevron.left")
+                    .font(.system(size: 18, weight: .bold))
+                    .foregroundStyle(.white)
+                    .frame(width: 40, height: 40)
+                    .background(Color.black.opacity(0.55), in: Circle())
+            }
+            .buttonStyle(.plain)
+
+            Spacer()
+
+            Text("報酬一覧")
+                .font(.system(size: 22, weight: .bold))
+                .foregroundStyle(.white)
+
+            Spacer()
+
+            Color.clear
+                .frame(width: 40, height: 40)
+        }
+    }
+
+    private var summaryCard: some View {
+        VStack(alignment: .leading, spacing: 10) {
+            Text("累計集中時間")
+                .font(.system(size: 14, weight: .semibold))
+                .foregroundStyle(.white.opacity(0.82))
+
+            Text(viewModel.totalFocusedDisplayText)
+                .font(.system(size: 34, weight: .heavy, design: .rounded))
+                .monospacedDigit()
+                .foregroundStyle(.white)
+                .lineLimit(1)
+                .minimumScaleFactor(0.65)
+
+            Text(viewModel.nextRewardSummaryText)
+                .font(.system(size: 14, weight: .medium))
+                .foregroundStyle(.white.opacity(0.86))
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .padding(.horizontal, 18)
+        .padding(.vertical, 18)
+        .background(
+            RoundedRectangle(cornerRadius: 24, style: .continuous)
+                .fill(Color.black.opacity(0.24))
+        )
+        .overlay(
+            RoundedRectangle(cornerRadius: 24, style: .continuous)
+                .stroke(Color.white.opacity(0.08), lineWidth: 1)
+        )
+    }
+
+    private var rewardsScrollView: some View {
+        let descendingRewards = Array(viewModel.rewards.reversed())
+        let contentHeight = WorkRewardsProgressColumn.contentHeight(
+            rewardCount: descendingRewards.count,
+            rowHeight: rewardRowHeight,
+            spacing: rewardRowSpacing
+        )
+
+        return ScrollViewReader { proxy in
+            ScrollView(.vertical, showsIndicators: false) {
+                HStack(alignment: .top, spacing: 18) {
+                    WorkRewardsProgressColumn(
+                        rewards: descendingRewards,
+                        totalFocusedSeconds: viewModel.totalFocusedSeconds,
+                        highestRewardSeconds: viewModel.highestRewardSeconds,
+                        rowHeight: rewardRowHeight,
+                        spacing: rewardRowSpacing
+                    )
+                    .frame(width: 32, height: contentHeight)
+
+                    LazyVStack(spacing: rewardRowSpacing) {
+                        ForEach(descendingRewards) { reward in
+                            WorkRewardRow(
+                                reward: reward,
+                                canClaim: viewModel.canClaim(reward),
+                                isClaimed: viewModel.isRewardClaimed(reward),
+                                remainingText: viewModel.remainingTimeText(for: reward),
+                                onClaim: {
+                                    withAnimation(.spring(response: 0.26, dampingFraction: 0.88)) {
+                                        viewModel.claim(reward)
+                                    }
+                                }
+                            )
+                            .frame(height: rewardRowHeight)
+                        }
+
+                        Color.clear
+                            .frame(height: 1)
+                            .id(bottomAnchorID)
+                    }
+                }
+                .padding(.top, 10)
+                .padding(.bottom, 12)
+            }
+            .onAppear {
+                guard !didInitialScrollToBottom else { return }
+                didInitialScrollToBottom = true
+
+                DispatchQueue.main.async {
+                    proxy.scrollTo(bottomAnchorID, anchor: .bottom)
+                }
+            }
+        }
+    }
+}
+
+private struct WorkRewardRow: View {
+    let reward: WorkFocusReward
+    let canClaim: Bool
+    let isClaimed: Bool
+    let remainingText: String
+    let onClaim: () -> Void
+
+    var body: some View {
+        HStack(spacing: 14) {
+            Image(reward.rewardAssetName)
+                .resizable()
+                .scaledToFill()
+                .frame(width: 92, height: 92)
+                .clipShape(RoundedRectangle(cornerRadius: 20, style: .continuous))
+                .overlay(
+                    RoundedRectangle(cornerRadius: 20, style: .continuous)
+                        .stroke(Color.white.opacity(0.12), lineWidth: 1)
+                )
+
+            VStack(alignment: .leading, spacing: 6) {
+                Text(reward.milestoneDisplayText)
+                    .font(.system(size: 20, weight: .heavy, design: .rounded))
+                    .foregroundStyle(.white)
+
+                Text("背景報酬")
+                    .font(.system(size: 13, weight: .semibold))
+                    .foregroundStyle(.white.opacity(0.72))
+
+                Text(reward.rewardAssetName)
+                    .font(.system(size: 13, weight: .medium, design: .monospaced))
+                    .foregroundStyle(.white.opacity(0.88))
+                    .lineLimit(1)
+                    .minimumScaleFactor(0.7)
+            }
+
+            Spacer(minLength: 8)
+
+            trailingStatusView
+        }
+        .padding(.horizontal, 16)
+        .padding(.vertical, 16)
+        .frame(maxWidth: .infinity)
+        .background(
+            RoundedRectangle(cornerRadius: 28, style: .continuous)
+                .fill(Color.black.opacity(0.24))
+        )
+        .overlay(
+            RoundedRectangle(cornerRadius: 28, style: .continuous)
+                .stroke(Color.white.opacity(0.08), lineWidth: 1)
+        )
+    }
+
+    @ViewBuilder
+    private var trailingStatusView: some View {
+        if isClaimed {
+            statusCapsule(
+                title: "受取済み",
+                foregroundColor: .white,
+                backgroundColor: Color.white.opacity(0.14)
+            )
+        } else if canClaim {
+            Button(action: onClaim) {
+                statusCapsule(
+                    title: "受け取る",
+                    foregroundColor: .white,
+                    backgroundColor: Color(red: 0.16, green: 0.76, blue: 0.33)
+                )
+            }
+            .buttonStyle(.plain)
+        } else {
+            VStack(alignment: .trailing, spacing: 6) {
+                Text("未達成")
+                    .font(.system(size: 12, weight: .bold))
+                    .foregroundStyle(.white.opacity(0.76))
+
+                Text("あと\(remainingText)")
+                    .font(.system(size: 12, weight: .semibold))
+                    .foregroundStyle(.white.opacity(0.90))
+                    .multilineTextAlignment(.trailing)
+            }
+        }
+    }
+
+    private func statusCapsule(
+        title: String,
+        foregroundColor: Color,
+        backgroundColor: Color
+    ) -> some View {
+        Text(title)
+            .font(.system(size: 13, weight: .bold))
+            .foregroundStyle(foregroundColor)
+            .padding(.horizontal, 14)
+            .padding(.vertical, 10)
+            .background(
+                RoundedRectangle(cornerRadius: 16, style: .continuous)
+                    .fill(backgroundColor)
+            )
+    }
+}
+
+private struct WorkRewardsProgressColumn: View {
+    let rewards: [WorkFocusReward]
+    let totalFocusedSeconds: Int
+    let highestRewardSeconds: Int
+    let rowHeight: CGFloat
+    let spacing: CGFloat
+
+    var body: some View {
+        GeometryReader { geo in
+            let fullHeight = geo.size.height
+            let progressRatio = min(1, max(0, Double(totalFocusedSeconds) / Double(max(highestRewardSeconds, 1))))
+            let fillHeight = max(0, fullHeight * progressRatio)
+
+            ZStack(alignment: .bottom) {
+                Capsule()
+                    .fill(Color.white.opacity(0.16))
+                    .frame(width: 10)
+
+                Capsule()
+                    .fill(
+                        LinearGradient(
+                            colors: [
+                                Color(red: 0.21, green: 0.95, blue: 0.42),
+                                Color(red: 0.91, green: 0.96, blue: 0.58)
+                            ],
+                            startPoint: .bottom,
+                            endPoint: .top
+                        )
+                    )
+                    .frame(width: 10, height: fillHeight)
+
+                ForEach(Array(rewards.enumerated()), id: \.element.id) { index, reward in
+                    Circle()
+                        .fill(totalFocusedSeconds >= reward.milestoneSeconds ? Color(red: 0.22, green: 0.95, blue: 0.42) : Color.white.opacity(0.78))
+                        .frame(width: 18, height: 18)
+                        .overlay(
+                            Circle()
+                                .stroke(Color.black.opacity(0.18), lineWidth: 1)
+                        )
+                        .position(
+                            x: geo.size.width * 0.5,
+                            y: Self.nodeCenterY(index: index, rowHeight: rowHeight, spacing: spacing)
+                        )
+                }
+            }
+        }
+    }
+
+    static func contentHeight(rewardCount: Int, rowHeight: CGFloat, spacing: CGFloat) -> CGFloat {
+        let rowsHeight = CGFloat(max(rewardCount, 0)) * rowHeight
+        let spacingHeight = CGFloat(max(rewardCount - 1, 0)) * spacing
+        return max(rowsHeight + spacingHeight, 1)
+    }
+
+    private static func nodeCenterY(index: Int, rowHeight: CGFloat, spacing: CGFloat) -> CGFloat {
+        (rowHeight * 0.5) + (CGFloat(index) * (rowHeight + spacing))
+    }
+}
+
 // MARK: - ViewModel
 
 @MainActor
@@ -185,17 +533,22 @@ final class WorkTimerPreparationViewModel: ObservableObject {
     @Published var activeSession: WorkTimerSession?
     @Published private(set) var todayFocusedSeconds: Int = 0
     @Published private(set) var totalFocusedSeconds: Int = 0
+    @Published private(set) var claimedRewardIDs: Set<String> = []
 
     let situationOptions: [WorkSituationOption] = WorkSituationOption.defaultOptions
     let durationOptions: [WorkSessionDurationOption] = WorkSessionDurationOption.defaultOptions
+    let rewards: [WorkFocusReward] = WorkFocusReward.defaultRewards
 
     private let focusTodaySecondsKey = "memo.work.focus.todaySeconds"
     private let focusTotalSecondsKey = "memo.work.focus.totalSeconds"
     private let focusTodayDayKey = "memo.work.focus.todayDayKey"
+    private let focusClaimedRewardIDsKey = "memo.work.focus.claimedRewardIDs"
+    private let focusUnlockedRewardAssetNamesKey = "memo.work.focus.unlockedRewardAssetNames"
 
     init() {
         normalizeFocusSummaryIfNeeded()
         loadFocusSummary()
+        loadRewardStates()
     }
 
     var selectedDurationDisplayTitle: String {
@@ -212,6 +565,30 @@ final class WorkTimerPreparationViewModel: ObservableObject {
 
     var totalFocusedDisplayText: String {
         Self.formatSummary(seconds: totalFocusedSeconds)
+    }
+
+    var highestRewardSeconds: Int {
+        rewards.map(\.milestoneSeconds).max() ?? (5 * 60 * 60)
+    }
+
+    var hasClaimableRewards: Bool {
+        rewards.contains(where: canClaim(_:))
+    }
+
+    var nextRewardSummaryText: String {
+        if let nextReward = rewards.first(where: { !isRewardClaimed($0) && totalFocusedSeconds < $0.milestoneSeconds }) {
+            return "次は \(nextReward.milestoneDisplayText) 報酬まであと \(remainingTimeText(for: nextReward))"
+        }
+
+        if hasClaimableRewards {
+            return "受け取れる報酬があります"
+        }
+
+        if rewards.allSatisfy({ isRewardClaimed($0) }) {
+            return "現在の報酬はすべて受け取り済みです"
+        }
+
+        return "報酬は累計5時間ごとに受け取れます"
     }
 
     func start() {
@@ -235,12 +612,14 @@ final class WorkTimerPreparationViewModel: ObservableObject {
     func refreshFocusSummaryIfNeeded() {
         normalizeFocusSummaryIfNeeded()
         loadFocusSummary()
+        loadRewardStates()
     }
 
     func recordFocusedTime(seconds: Int) {
         let safeSeconds = max(0, seconds)
         guard safeSeconds > 0 else {
             loadFocusSummary()
+            loadRewardStates()
             return
         }
 
@@ -255,6 +634,35 @@ final class WorkTimerPreparationViewModel: ObservableObject {
         defaults.set(Self.makeDayKey(Date()), forKey: focusTodayDayKey)
 
         loadFocusSummary()
+        loadRewardStates()
+    }
+
+    func isRewardClaimed(_ reward: WorkFocusReward) -> Bool {
+        claimedRewardIDs.contains(reward.id)
+    }
+
+    func canClaim(_ reward: WorkFocusReward) -> Bool {
+        totalFocusedSeconds >= reward.milestoneSeconds && !isRewardClaimed(reward)
+    }
+
+    func remainingTimeText(for reward: WorkFocusReward) -> String {
+        let remainingSeconds = max(0, reward.milestoneSeconds - totalFocusedSeconds)
+        return Self.formatSummary(seconds: remainingSeconds)
+    }
+
+    func claim(_ reward: WorkFocusReward) {
+        guard canClaim(reward) else { return }
+
+        var nextClaimedIDs = claimedRewardIDs
+        nextClaimedIDs.insert(reward.id)
+        claimedRewardIDs = nextClaimedIDs
+
+        let defaults = UserDefaults.standard
+        defaults.set(Array(nextClaimedIDs).sorted(), forKey: focusClaimedRewardIDsKey)
+
+        var unlockedAssets = Set(defaults.stringArray(forKey: focusUnlockedRewardAssetNamesKey) ?? [])
+        unlockedAssets.insert(reward.rewardAssetName)
+        defaults.set(Array(unlockedAssets).sorted(), forKey: focusUnlockedRewardAssetNamesKey)
     }
 
     private func normalizeFocusSummaryIfNeeded(now: Date = Date()) {
@@ -272,6 +680,12 @@ final class WorkTimerPreparationViewModel: ObservableObject {
         let defaults = UserDefaults.standard
         todayFocusedSeconds = max(0, defaults.integer(forKey: focusTodaySecondsKey))
         totalFocusedSeconds = max(0, defaults.integer(forKey: focusTotalSecondsKey))
+    }
+
+    private func loadRewardStates() {
+        let defaults = UserDefaults.standard
+        let storedIDs = defaults.stringArray(forKey: focusClaimedRewardIDsKey) ?? []
+        claimedRewardIDs = Set(storedIDs)
     }
 
     private static func makeDayKey(_ date: Date) -> String {
@@ -302,6 +716,29 @@ final class WorkTimerPreparationViewModel: ObservableObject {
 }
 
 // MARK: - Models
+
+struct WorkFocusReward: Identifiable, Equatable, Hashable {
+    let id: String
+    let milestoneHours: Int
+    let rewardAssetName: String
+
+    var milestoneSeconds: Int {
+        milestoneHours * 60 * 60
+    }
+
+    var milestoneDisplayText: String {
+        "\(milestoneHours)時間"
+    }
+
+    static let defaultRewards: [WorkFocusReward] = [
+        WorkFocusReward(id: "work.reward.5h", milestoneHours: 5, rewardAssetName: "concrete_background"),
+        WorkFocusReward(id: "work.reward.10h", milestoneHours: 10, rewardAssetName: "field_background"),
+        WorkFocusReward(id: "work.reward.15h", milestoneHours: 15, rewardAssetName: "beach_background"),
+        WorkFocusReward(id: "work.reward.20h", milestoneHours: 20, rewardAssetName: "office_background"),
+        WorkFocusReward(id: "work.reward.25h", milestoneHours: 25, rewardAssetName: "bath_background"),
+        WorkFocusReward(id: "work.reward.30h", milestoneHours: 30, rewardAssetName: "japanese_background")
+    ]
+}
 
 struct WorkSituationOption: Identifiable, Equatable, Hashable {
     let id: String
@@ -404,7 +841,7 @@ private struct WorkTimerRunningView: View {
             let videoToButtonsSpacing: CGFloat = 16
 
             ZStack {
-                Image("Home_background")
+                Image("work_background")
                     .resizable()
                     .scaledToFill()
                     .ignoresSafeArea()
@@ -1041,7 +1478,7 @@ private struct WorkRunningBackgroundLayer: View {
                         updatePlaybackState()
                     }
             } else {
-                Image("Home_background")
+                Image("work_background")
                     .resizable()
                     .scaledToFill()
             }
