@@ -74,7 +74,7 @@ struct ZukanView: View {
         }
         .background(
             ZStack {
-                Image("Zukan_background")
+                Image("zukan_background")
                     .resizable()
                     .scaledToFill()
                     .ignoresSafeArea()

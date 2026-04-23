@@ -148,54 +148,16 @@ struct StepView: View {
 
     @ViewBuilder
     private var surfaceBackground: some View {
-        switch viewModel.sessionState {
-        case .idle, .waitingForPermission, .countingDown:
-            switch selectedScreen {
-            case .run:
-                LinearGradient(
-                    colors: [
-                        Color(red: 0.98, green: 0.98, blue: 0.99),
-                        Color(red: 0.95, green: 0.96, blue: 0.98),
-                        Color(red: 0.93, green: 0.94, blue: 0.97)
-                    ],
-                    startPoint: .top,
-                    endPoint: .bottom
-                )
-            case .activity:
-                if colorScheme == .dark {
-                    LinearGradient(
-                        colors: [
-                            Color(red: 0.10, green: 0.11, blue: 0.14),
-                            Color(red: 0.08, green: 0.09, blue: 0.11),
-                            Color(red: 0.06, green: 0.07, blue: 0.09)
-                        ],
-                        startPoint: .top,
-                        endPoint: .bottom
-                    )
-                } else {
-                    Color(red: 0.96, green: 0.96, blue: 0.97)
-                }
+        ZStack {
+            Image("step_background")
+                .resizable()
+                .scaledToFill()
+                .ignoresSafeArea()
+
+            if colorScheme == .dark && selectedScreen == .activity {
+                Color.black.opacity(0.18)
+                    .ignoresSafeArea()
             }
-        case .running, .paused:
-            LinearGradient(
-                colors: [
-                    Color(red: 0.91, green: 0.93, blue: 0.96),
-                    Color(red: 0.86, green: 0.88, blue: 0.92),
-                    Color(red: 0.80, green: 0.83, blue: 0.89)
-                ],
-                startPoint: .top,
-                endPoint: .bottom
-            )
-        case .finished:
-            LinearGradient(
-                colors: [
-                    Color(red: 0.87, green: 0.90, blue: 0.94),
-                    Color(red: 0.79, green: 0.83, blue: 0.89),
-                    Color(red: 0.70, green: 0.74, blue: 0.82)
-                ],
-                startPoint: .top,
-                endPoint: .bottom
-            )
         }
     }
 
