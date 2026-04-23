@@ -2,7 +2,7 @@
 //  ZukanView.swift
 //  MeMo
 //
-//  Created by shota suzuki on 2026/03/20.
+//  Updated for screen BGM switching.
 //
 
 import SwiftUI
@@ -27,10 +27,6 @@ struct ZukanView: View {
         repeating: GridItem(.flexible(), spacing: 10),
         count: 3
     )
-
-    // ✅ 追加：インタースティシャル（キャラ切替用）
-    // 一旦 AdMob 周りを止めるためコメントアウト
-    // @ObservedObject private var interstitial = AdMobManager.shared.interstitialCharacterSet
 
     var body: some View {
         ZStack {
@@ -106,14 +102,15 @@ struct ZukanView: View {
         .navigationTitle("図鑑")
         .navigationBarTitleDisplayMode(.inline)
         .onAppear {
+            bgmManager.switchBackground(to: .zukan)
             guard let state else { return }
 
             state.ensureInitialPetsIfNeeded()
             syncSelectionAndPage(state: state)
             updateWidgetSnapshot(state: state, forceReload: true)
-
-            // ✅ AdMob のロードは一旦停止
-            // interstitial.load()
+        }
+        .onDisappear {
+            bgmManager.restoreDefaultBackground()
         }
         .onChange(of: state?.normalizedCurrentPetID) { _, _ in
             guard let state else { return }
@@ -124,8 +121,6 @@ struct ZukanView: View {
             syncSelectionAndPage(state: state)
         }
     }
-
-    // MARK: - Train Action
 
     private func handleTrainTapped(state: AppState, id: String) {
         bgmManager.playSE(.push)
@@ -148,7 +143,6 @@ struct ZukanView: View {
             print("----- switchPet end -----")
         }
 
-        // ✅ AdMob を一旦停止中のため、そのまま切替
         switchPet()
     }
 
@@ -177,8 +171,6 @@ struct ZukanView: View {
         currentPage = min(max(0, pageIndex), max(0, pageCount - 1))
     }
 
-    // MARK: - Persistence
-
     private func save(state: AppState, forceWidgetReload: Bool = false) {
         do {
             try modelContext.save()
@@ -206,10 +198,7 @@ struct ZukanView: View {
     }
 }
 
-// MARK: - Widget Bridge
-
 private enum ZukanWidgetBridge {
-    // ⚠️ HomeView / Widget 側と同じ App Group ID を設定してください
     static let appGroupID = "group.com.shota.CalPet"
     static let widgetKind = "CalPetMediumWidget"
 
@@ -254,8 +243,6 @@ private enum ZukanWidgetBridge {
         return previousSignature != signature
     }
 }
-
-// MARK: - Grid
 
 private struct ZukanGrid: View {
     @EnvironmentObject private var bgmManager: BGMManager
@@ -373,8 +360,6 @@ private struct ZukanCell: View {
         .disabled(!isOwned)
     }
 }
-
-// MARK: - Detail (Lower half)
 
 private struct ZukanDetailPanel: View {
     let selectedPetID: String

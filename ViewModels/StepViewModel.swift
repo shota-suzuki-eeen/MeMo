@@ -75,6 +75,10 @@ final class StepViewModel: ObservableObject {
 
     deinit {
         timer?.invalidate()
+        NotificationCenter.default.post(
+            name: BGMManager.stepSessionDidExitWorkoutNotification,
+            object: nil
+        )
     }
 
     var isRunning: Bool {
@@ -183,6 +187,7 @@ final class StepViewModel: ObservableObject {
         switch locationAuthorizationState {
         case .authorizedAlways, .authorizedWhenInUse:
             sessionState = .countingDown
+            notifyStepWorkoutBGMShouldStop()
             return .startCountdown
         case .notDetermined:
             sessionState = .waitingForPermission
@@ -190,6 +195,7 @@ final class StepViewModel: ObservableObject {
             return .waitingForPermission
         case .denied, .restricted:
             sessionState = .idle
+            notifyStepWorkoutBGMShouldResumeMain()
             return .blocked
         }
     }
@@ -197,18 +203,22 @@ final class StepViewModel: ObservableObject {
     func beginCountdown() {
         guard locationAuthorizationState.isAuthorized else { return }
         sessionState = .countingDown
+        notifyStepWorkoutBGMShouldStop()
     }
 
     func cancelCountdownIfNeeded() {
         guard sessionState == .countingDown else { return }
         sessionState = .idle
+        notifyStepWorkoutBGMShouldResumeMain()
     }
 
     func beginWorkoutAfterCountdown() {
         guard locationAuthorizationState.isAuthorized else {
             sessionState = .idle
+            notifyStepWorkoutBGMShouldResumeMain()
             return
         }
+        notifyStepWorkoutBGMShouldStop()
         startNewWorkout()
     }
 
@@ -242,6 +252,7 @@ final class StepViewModel: ObservableObject {
         saveState = .idle
         saveMessage = nil
         sessionState = .finished
+        notifyStepWorkoutBGMShouldResumeMain()
     }
 
     func saveFinishedWorkout(
@@ -288,6 +299,7 @@ final class StepViewModel: ObservableObject {
         saveMessage = nil
         locationTrackingManager.reset()
         sessionState = .idle
+        notifyStepWorkoutBGMShouldResumeMain()
     }
 
     func handleScenePhase(_ phase: ScenePhase) {
@@ -313,6 +325,7 @@ final class StepViewModel: ObservableObject {
 
                 if !newValue.isAuthorized, self.sessionState == .countingDown {
                     self.sessionState = .idle
+                    self.notifyStepWorkoutBGMShouldResumeMain()
                 }
             }
             .store(in: &cancellables)
@@ -343,6 +356,7 @@ final class StepViewModel: ObservableObject {
         locationTrackingManager.startTracking()
         startTimer()
         refreshElapsedTime()
+        notifyStepWorkoutBGMShouldStop()
     }
 
     private func pauseWorkout() {
@@ -366,6 +380,7 @@ final class StepViewModel: ObservableObject {
         sessionState = .running
         refreshElapsedTime()
         startTimer()
+        notifyStepWorkoutBGMShouldStop()
     }
 
     private func startTimer() {
@@ -401,5 +416,19 @@ final class StepViewModel: ObservableObject {
 
         let activeInterval = effectiveReferenceDate.timeIntervalSince(startedAt) - accumulatedPausedTime
         return max(0, Int(activeInterval.rounded(.down)))
+    }
+
+    private func notifyStepWorkoutBGMShouldStop() {
+        NotificationCenter.default.post(
+            name: BGMManager.stepSessionDidEnterWorkoutNotification,
+            object: nil
+        )
+    }
+
+    private func notifyStepWorkoutBGMShouldResumeMain() {
+        NotificationCenter.default.post(
+            name: BGMManager.stepSessionDidExitWorkoutNotification,
+            object: nil
+        )
     }
 }

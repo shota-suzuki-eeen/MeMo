@@ -2,7 +2,7 @@
 //  MemoriesView.swift
 //  MeMo
 //
-//  Created by shota suzuki on 2026/03/20.
+//  Updated for screen BGM switching.
 //
 
 import SwiftUI
@@ -208,6 +208,12 @@ struct MemoriesView: View {
         }
         .task {
             scheduleNextMidnightRefresh()
+        }
+        .onAppear {
+            bgmManager.switchBackground(to: .main)
+        }
+        .onDisappear {
+            bgmManager.restoreDefaultBackground()
         }
         .onChange(of: now) { _, _ in
             if mode == .day {

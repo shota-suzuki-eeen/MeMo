@@ -2,10 +2,7 @@
 //  GachaView.swift
 //  MeMo
 //
-//  Updated for the step-based gacha specification.
-//  NOTE:
-//  - 排出率は現行 main の 66 / 33 / 1 をベースに維持しています。
-//  - 広告視聴は SDK 接続前提のため、このファイルでは「視聴成功後に呼ばれる処理」を直接実行します。
+//  Updated for the step-based gacha specification with screen BGM switching.
 //
 
 import SwiftUI
@@ -156,6 +153,7 @@ fileprivate enum GachaCatalog {
 struct GachaView: View {
     @Environment(\.dismiss) private var dismiss
     @Environment(\.modelContext) private var modelContext
+    @EnvironmentObject private var bgmManager: BGMManager
     @Query private var states: [AppState]
 
     @State private var phase: Phase = .idle
@@ -343,6 +341,7 @@ struct GachaView: View {
         }
         .statusBarHidden()
         .onAppear {
+            bgmManager.switchBackground(to: .gacha)
             tapPromptAnimating = true
             state?.ensureInitialPetsIfNeeded()
             state?.gachaResetIfNeeded(now: Date())
@@ -350,6 +349,7 @@ struct GachaView: View {
         .onDisappear {
             rollTask?.cancel()
             rollTask = nil
+            bgmManager.restoreDefaultBackground()
         }
     }
 
@@ -376,6 +376,7 @@ struct GachaView: View {
         HStack {
             Button {
                 if phase == .idle {
+                    bgmManager.playSE(.push)
                     dismiss()
                 }
             } label: {
@@ -555,7 +556,6 @@ struct GachaView: View {
     }
 
     private func performRewardedAdThenFreeTenDraw() {
-        // TODO: 実アプリでは RewardedAd の完了コールバック後に beginFreeTenDraw() を呼ぶ。
         beginFreeTenDraw()
     }
 
@@ -1174,7 +1174,7 @@ private struct ToastView: View {
             .foregroundStyle(.white)
             .padding(.horizontal, 18)
             .padding(.vertical, 12)
-            .background(Color.black.opacity(0.72), in: Capsule())
-            .shadow(radius: 8)
+            .background(Color.black.opacity(0.82), in: Capsule())
+            .shadow(color: .black.opacity(0.18), radius: 10, x: 0, y: 6)
     }
 }

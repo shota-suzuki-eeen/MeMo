@@ -2,7 +2,8 @@
 //  WorkTimerPreparationView.swift
 //  MeMo
 //
-//  Updated to keep the preparation screen layout within the visible area.
+//  Updated to keep the preparation screen layout within the visible area
+//  and to cooperate with per-screen BGM transitions.
 //
 
 import SwiftUI
@@ -12,6 +13,7 @@ import AVFoundation
 
 struct WorkTimerPreparationView: View {
     @Environment(\.dismiss) private var dismiss
+    @EnvironmentObject private var bgmManager: BGMManager
     @StateObject private var viewModel = WorkTimerPreparationViewModel()
 
     var body: some View {
@@ -57,7 +59,13 @@ struct WorkTimerPreparationView: View {
         }
         .ignoresSafeArea()
         .onAppear {
+            bgmManager.switchBackground(to: .main)
             viewModel.refreshFocusSummaryIfNeeded()
+        }
+        .onDisappear {
+            if viewModel.activeSession == nil {
+                bgmManager.restoreDefaultBackground()
+            }
         }
         .fullScreenCover(item: $viewModel.activeSession) { session in
             WorkTimerRunningView(session: session) { focusedSeconds in
@@ -430,12 +438,12 @@ private struct WorkTimerRunningView: View {
         }
         .interactiveDismissDisabled()
         .onAppear {
-            bgmManager.stop()
+            bgmManager.stop(fadeDuration: 0.35)
             viewModel.startIfNeeded()
         }
         .onDisappear {
             viewModel.stop()
-            bgmManager.startIfNeeded()
+            bgmManager.restoreDefaultBackground(fadeDuration: 0.45)
         }
     }
 

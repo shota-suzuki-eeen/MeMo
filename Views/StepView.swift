@@ -2,7 +2,7 @@
 //  StepView.swift
 //  MeMo
 //
-//  Created by shota suzuki on 2026/03/20.
+//  Updated for run-screen BGM control.
 //
 
 import SwiftUI
@@ -91,14 +91,21 @@ struct StepView: View {
             viewModel.configureIfNeeded()
             _ = hk.todaySteps
         }
+        .onAppear {
+            bgmManager.switchBackground(to: .main)
+        }
         .onChange(of: scenePhase) { _, newValue in
             viewModel.handleScenePhase(newValue)
         }
         .onChange(of: viewModel.locationAuthorizationState) { _, newValue in
             handleAuthorizationChanged(newValue)
         }
+        .onChange(of: viewModel.sessionState) { _, newValue in
+            handleSessionStateChanged(newValue)
+        }
         .onDisappear {
             cancelCountdownFlow()
+            bgmManager.restoreDefaultBackground()
         }
     }
 
@@ -575,6 +582,7 @@ struct StepView: View {
         selectedScreen = .run
         isActivityPickerPresented = false
         bgmManager.playSE(.push)
+        bgmManager.stop(fadeDuration: 0.35)
 
         switch viewModel.prepareWorkoutStart() {
         case .startCountdown:
@@ -583,6 +591,7 @@ struct StepView: View {
             shouldStartAfterPermission = true
         case .blocked:
             shouldStartAfterPermission = false
+            bgmManager.restoreDefaultBackground(fadeDuration: 0.35)
         }
     }
 
@@ -595,6 +604,16 @@ struct StepView: View {
             startCountdownFlow()
         } else if newValue == .denied || newValue == .restricted {
             shouldStartAfterPermission = false
+            bgmManager.restoreDefaultBackground(fadeDuration: 0.35)
+        }
+    }
+
+    private func handleSessionStateChanged(_ newValue: StepViewModel.SessionState) {
+        switch newValue {
+        case .idle, .waitingForPermission, .countingDown, .finished:
+            break
+        case .running, .paused:
+            bgmManager.stop(fadeDuration: 0.3)
         }
     }
 
@@ -655,6 +674,7 @@ struct StepView: View {
         countdownTask = nil
         clearCountdownOverlay()
         viewModel.cancelCountdownIfNeeded()
+        bgmManager.restoreDefaultBackground(fadeDuration: 0.35)
     }
 
     private func cancelCountdownFlow() {
@@ -663,6 +683,7 @@ struct StepView: View {
         countdownTask = nil
         clearCountdownOverlay()
         viewModel.cancelCountdownIfNeeded()
+        bgmManager.restoreDefaultBackground(fadeDuration: 0.35)
     }
 }
 
@@ -1010,17 +1031,21 @@ private extension StepBackdropMapView {
         }
 
         func mapView(_ mapView: MKMapView, viewFor annotation: MKAnnotation) -> MKAnnotationView? {
-            if annotation is MKUserLocation {
-                return nil
-            }
+            guard !(annotation is MKUserLocation) else { return nil }
 
-            let identifier = "StepBackdropMapAnnotationView"
-            let view = mapView.dequeueReusableAnnotationView(withIdentifier: identifier) ?? MKMarkerAnnotationView(annotation: annotation, reuseIdentifier: identifier)
+            let identifier = "StepBackdropAnnotationView"
+            let view = mapView.dequeueReusableAnnotationView(withIdentifier: identifier)
+                ?? MKMarkerAnnotationView(annotation: annotation, reuseIdentifier: identifier)
+
             view.annotation = annotation
             view.canShowCallout = false
 
             if let markerView = view as? MKMarkerAnnotationView {
-                if annotation.title ?? "" == "START" {
+                markerView.displayPriority = .required
+                markerView.titleVisibility = .hidden
+                markerView.subtitleVisibility = .hidden
+
+                if annotation.title == "START" {
                     markerView.markerTintColor = .systemGreen
                     markerView.glyphText = "S"
                 } else {
@@ -1039,49 +1064,23 @@ private extension StepBackdropMapView {
         ) {
             Self.cachedUserCoordinate = coordinate
 
+            let shouldRecenter: Bool
             if forceRegionRefresh || !hasAppliedInitialUserRegion {
-                hasAppliedInitialUserRegion = true
-                lastUserCoordinate = coordinate
-                mapView.setRegion(
-                    MKCoordinateRegion(center: coordinate, span: followSpan),
-                    animated: false
-                )
-                return
+                shouldRecenter = true
+            } else if let lastUserCoordinate {
+                let currentLocation = CLLocation(latitude: coordinate.latitude, longitude: coordinate.longitude)
+                let previousLocation = CLLocation(latitude: lastUserCoordinate.latitude, longitude: lastUserCoordinate.longitude)
+                shouldRecenter = currentLocation.distance(from: previousLocation) >= recenterDistanceThreshold
+            } else {
+                shouldRecenter = true
             }
 
-            guard shouldRecenter(for: coordinate) else { return }
+            guard shouldRecenter else { return }
 
             lastUserCoordinate = coordinate
-            mapView.setCenter(coordinate, animated: false)
+            hasAppliedInitialUserRegion = true
+            let region = MKCoordinateRegion(center: coordinate, span: followSpan)
+            mapView.setRegion(region, animated: false)
         }
-
-        private func shouldRecenter(for coordinate: CLLocationCoordinate2D) -> Bool {
-            guard let lastUserCoordinate else { return true }
-
-            let previousLocation = CLLocation(
-                latitude: lastUserCoordinate.latitude,
-                longitude: lastUserCoordinate.longitude
-            )
-            let newLocation = CLLocation(
-                latitude: coordinate.latitude,
-                longitude: coordinate.longitude
-            )
-
-            return newLocation.distance(from: previousLocation) >= recenterDistanceThreshold
-        }
-    }
-}
-
-private extension Calendar {
-    static var memoActivity: Calendar {
-        var calendar = Calendar(identifier: .gregorian)
-        calendar.locale = Locale(identifier: "ja_JP")
-        calendar.firstWeekday = 2
-        return calendar
-    }
-
-    func startOfWeek(for date: Date) -> Date {
-        let components = dateComponents([.yearForWeekOfYear, .weekOfYear], from: date)
-        return self.date(from: components) ?? startOfDay(for: date)
     }
 }
