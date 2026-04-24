@@ -2,7 +2,7 @@
 //  ZukanView.swift
 //  MeMo
 //
-//  Updated for screen BGM switching.
+//  Updated for character / wallpaper switching UI.
 //
 
 import SwiftUI
@@ -16,9 +16,13 @@ struct ZukanView: View {
     @Environment(\.modelContext) private var modelContext
     @EnvironmentObject private var bgmManager: BGMManager
     @AppStorage("isDeveloperMode") private var isDeveloperMode: Bool = false
+    @AppStorage(WallpaperCatalog.selectedHomeWallpaperAssetNameKey)
+    private var currentHomeWallpaperAssetName: String = WallpaperCatalog.defaultWallpaper.assetName
 
     @StateObject private var viewModel = ZukanViewModel()
     @State private var selectedPetID: String? = nil
+    @State private var selectedWallpaperAssetName: String? = nil
+    @State private var selectedSection: ZukanSection = .character
     @State private var currentPage: Int = 0
 
     private var state: AppState? { appStates.first }
@@ -28,49 +32,55 @@ struct ZukanView: View {
         count: 3
     )
 
+    private var ownedWallpapers: [WallpaperCatalog.WallpaperItem] {
+        WallpaperCatalog.ownedWallpapers()
+    }
+
+    private var effectiveCurrentHomeWallpaperAssetName: String {
+        let ownedAssetNames = Set(ownedWallpapers.map(\.assetName))
+        if ownedAssetNames.contains(currentHomeWallpaperAssetName) {
+            return currentHomeWallpaperAssetName
+        }
+        return WallpaperCatalog.defaultWallpaper.assetName
+    }
+
+    private var selectedWallpaper: WallpaperCatalog.WallpaperItem? {
+        let preferredAssetName = selectedWallpaperAssetName ?? effectiveCurrentHomeWallpaperAssetName
+        return WallpaperCatalog.item(for: preferredAssetName) ?? ownedWallpapers.first
+    }
+
     var body: some View {
         ZStack {
             Color.clear.ignoresSafeArea()
 
-            VStack(spacing: 14) {
-                if let state {
-                    let slots = viewModel.slotsForPage(state: state, page: currentPage)
-                    let pageCount = viewModel.pageCount(state: state)
-
-                    ZukanGrid(
-                        slots: slots,
-                        columns: columns,
-                        currentPage: currentPage,
-                        pageCount: pageCount,
-                        selectedPetID: selectedPetID,
-                        onPreviousPage: {
-                            guard currentPage > 0 else { return }
+            if let state {
+                VStack(spacing: 16) {
+                    ZukanSectionTabs(
+                        selectedSection: selectedSection,
+                        onSelect: { section in
+                            guard selectedSection != section else { return }
                             bgmManager.playSE(.push)
-                            currentPage -= 1
-                        },
-                        onNextPage: {
-                            guard currentPage < pageCount - 1 else { return }
-                            bgmManager.playSE(.push)
-                            currentPage += 1
-                        },
-                        onSelect: { id in
-                            selectedPetID = id
+                            selectedSection = section
+                            updateCurrentPageForActiveSection(state: state)
                         }
                     )
-                    .padding(.top, 6)
 
-                    Spacer(minLength: 0)
-                } else {
-                    Spacer(minLength: 0)
-
-                    Text("（準備中）")
-                        .foregroundStyle(.secondary)
+                    currentSelectionCard(state: state)
+                    ownedItemsPanel(state: state)
 
                     Spacer(minLength: 0)
                 }
+                .padding(.horizontal, 16)
+                .padding(.top, 10)
+                .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
+            } else {
+                VStack {
+                    Spacer(minLength: 0)
+                    Text("（準備中）")
+                        .foregroundStyle(.secondary)
+                    Spacer(minLength: 0)
+                }
             }
-            .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
-            .padding(.horizontal, 16)
         }
         .background(
             ZStack {
@@ -79,26 +89,10 @@ struct ZukanView: View {
                     .scaledToFill()
                     .ignoresSafeArea()
 
-                Color.black.opacity(0.25)
+                Color.black.opacity(0.18)
                     .ignoresSafeArea()
             }
         )
-        .safeAreaInset(edge: .bottom, spacing: 0) {
-            if let state {
-                ZukanDetailPanel(
-                    selectedPetID: selectedPetID ?? state.normalizedCurrentPetID,
-                    onTrain: { id in
-                        handleTrainTapped(state: state, id: id)
-                    },
-                    isDeveloperMode: isDeveloperMode,
-                    isCurrentPet: state.normalizedCurrentPetID == (selectedPetID ?? state.normalizedCurrentPetID)
-                )
-                .padding(.horizontal, 16)
-                .padding(.top, 6)
-                .padding(.bottom, 16)
-                .background(Color.clear)
-            }
-        }
         .navigationTitle("図鑑")
         .navigationBarTitleDisplayMode(.inline)
         .onAppear {
@@ -106,7 +100,9 @@ struct ZukanView: View {
             guard let state else { return }
 
             state.ensureInitialPetsIfNeeded()
-            syncSelectionAndPage(state: state)
+            syncCharacterSelectionAndPage(state: state)
+            syncWallpaperSelectionAndPage()
+            updateCurrentPageForActiveSection(state: state)
             updateWidgetSnapshot(state: state, forceReload: true)
         }
         .onDisappear {
@@ -114,11 +110,220 @@ struct ZukanView: View {
         }
         .onChange(of: state?.normalizedCurrentPetID) { _, _ in
             guard let state else { return }
-            syncSelectionAndPage(state: state)
+            syncCharacterSelectionAndPage(state: state)
         }
         .onChange(of: state?.ownedPetIDsData) { _, _ in
             guard let state else { return }
-            syncSelectionAndPage(state: state)
+            syncCharacterSelectionAndPage(state: state)
+        }
+        .onChange(of: currentHomeWallpaperAssetName) { _, _ in
+            syncWallpaperSelectionAndPage()
+        }
+    }
+
+    @ViewBuilder
+    private func currentSelectionCard(state: AppState) -> some View {
+        switch selectedSection {
+        case .character:
+            let selectedPetID = selectedPetID ?? state.normalizedCurrentPetID
+            let selectedName = PetMaster.all.first(where: { $0.id == selectedPetID })?.name ?? selectedPetID
+            let selectedImageName = PetMaster.assetName(for: selectedPetID)
+            let descriptionText = PetMaster.description(for: selectedPetID)
+            let isCurrentPet = state.normalizedCurrentPetID == selectedPetID
+
+            VStack(alignment: .leading, spacing: 12) {
+                Text("現在選択中のキャラクター")
+                    .font(.headline.weight(.bold))
+                    .foregroundStyle(.primary)
+
+                HStack(spacing: 14) {
+                    ZStack {
+                        RoundedRectangle(cornerRadius: 18)
+                            .fill(Color.blue.opacity(0.14))
+
+                        Image(selectedImageName)
+                            .resizable()
+                            .scaledToFit()
+                            .padding(18)
+                    }
+                    .frame(maxWidth: .infinity, minHeight: 200, maxHeight: 240)
+
+                    VStack(alignment: .leading, spacing: 10) {
+                        Text(selectedName)
+                            .font(.title3.weight(.bold))
+
+                        Text(descriptionText)
+                            .font(.subheadline)
+                            .foregroundStyle(.secondary)
+                            .frame(maxWidth: .infinity, alignment: .leading)
+
+                        Spacer(minLength: 0)
+
+                        Button {
+                            handleTrainTapped(state: state, id: selectedPetID)
+                        } label: {
+                            Text(
+                                isCurrentPet
+                                ? "\(selectedName) をお世話中"
+                                : (
+                                    isDeveloperMode
+                                    ? "\(selectedName) をお世話する（広告なし）"
+                                    : "\(selectedName) をお世話する"
+                                )
+                            )
+                            .font(.headline)
+                            .frame(maxWidth: .infinity)
+                            .padding(.vertical, 12)
+                        }
+                        .buttonStyle(.borderedProminent)
+                        .disabled(isCurrentPet)
+                        .opacity(isCurrentPet ? 0.65 : 1.0)
+                    }
+                    .frame(maxWidth: .infinity, minHeight: 200, maxHeight: 240, alignment: .topLeading)
+                }
+            }
+            .padding(16)
+            .background(.thinMaterial)
+            .clipShape(RoundedRectangle(cornerRadius: 20))
+
+        case .wallpaper:
+            let selectedWallpaper = selectedWallpaper ?? WallpaperCatalog.defaultWallpaper
+            let isCurrentWallpaper = selectedWallpaper.assetName == effectiveCurrentHomeWallpaperAssetName
+
+            VStack(alignment: .leading, spacing: 12) {
+                Text("現在選択中の壁紙")
+                    .font(.headline.weight(.bold))
+                    .foregroundStyle(.primary)
+
+                VStack(spacing: 14) {
+                    ZStack(alignment: .bottomLeading) {
+                        Image(selectedWallpaper.assetName)
+                            .resizable()
+                            .scaledToFill()
+                            .frame(maxWidth: .infinity, minHeight: 210, maxHeight: 240)
+                            .clipShape(RoundedRectangle(cornerRadius: 18))
+
+                        LinearGradient(
+                            colors: [.clear, .black.opacity(0.46)],
+                            startPoint: .top,
+                            endPoint: .bottom
+                        )
+                        .clipShape(RoundedRectangle(cornerRadius: 18))
+
+                        VStack(alignment: .leading, spacing: 4) {
+                            Text(selectedWallpaper.name)
+                                .font(.title3.weight(.bold))
+                                .foregroundStyle(.white)
+
+                            Text(isCurrentWallpaper ? "現在設定中" : "プレビュー中")
+                                .font(.subheadline.weight(.semibold))
+                                .foregroundStyle(.white.opacity(0.9))
+                        }
+                        .padding(16)
+                    }
+
+                    Button {
+                        handleWallpaperSetTapped()
+                    } label: {
+                        Text(
+                            isCurrentWallpaper
+                            ? "\(selectedWallpaper.name) を設定中"
+                            : "\(selectedWallpaper.name) を設定する"
+                        )
+                        .font(.headline)
+                        .frame(maxWidth: .infinity)
+                        .padding(.vertical, 12)
+                    }
+                    .buttonStyle(.borderedProminent)
+                    .disabled(isCurrentWallpaper)
+                    .opacity(isCurrentWallpaper ? 0.65 : 1.0)
+                }
+            }
+            .padding(16)
+            .background(.thinMaterial)
+            .clipShape(RoundedRectangle(cornerRadius: 20))
+        }
+    }
+
+    private func ownedItemsPanel(state: AppState) -> some View {
+        VStack(alignment: .leading, spacing: 12) {
+            HStack {
+                Text(selectedSection == .character ? "所持しているキャラクター" : "所持している壁紙")
+                    .font(.headline.weight(.bold))
+
+                Spacer()
+
+                ZukanPageControl(
+                    currentPage: currentPage,
+                    pageCount: activePageCount(state: state),
+                    onPrevious: {
+                        guard currentPage > 0 else { return }
+                        bgmManager.playSE(.push)
+                        currentPage -= 1
+                    },
+                    onNext: {
+                        let pageCount = activePageCount(state: state)
+                        guard currentPage < pageCount - 1 else { return }
+                        bgmManager.playSE(.push)
+                        currentPage += 1
+                    }
+                )
+            }
+
+            if selectedSection == .character {
+                let slots = viewModel.slotsForPage(state: state, page: currentPage)
+
+                LazyVGrid(columns: columns, spacing: 10) {
+                    ForEach(slots) { slot in
+                        ZukanCharacterCell(
+                            petID: slot.id,
+                            isCurrent: slot.isCurrentPet,
+                            isSelected: (selectedPetID == slot.id),
+                            onTap: {
+                                bgmManager.playSE(.push)
+                                selectedPetID = slot.id
+                            }
+                        )
+                    }
+                }
+            } else {
+                let wallpaperItems = viewModel.itemsForPage(ownedWallpapers, page: currentPage)
+
+                LazyVGrid(columns: columns, spacing: 10) {
+                    ForEach(wallpaperItems) { item in
+                        ZukanWallpaperCell(
+                            wallpaper: item,
+                            isCurrent: item.assetName == effectiveCurrentHomeWallpaperAssetName,
+                            isSelected: item.assetName == selectedWallpaperAssetName,
+                            onTap: {
+                                bgmManager.playSE(.push)
+                                selectedWallpaperAssetName = item.assetName
+                            }
+                        )
+                    }
+                }
+            }
+        }
+        .padding(16)
+        .background(.thinMaterial)
+        .clipShape(RoundedRectangle(cornerRadius: 20))
+    }
+
+    private func activePageCount(state: AppState) -> Int {
+        switch selectedSection {
+        case .character:
+            return viewModel.pageCount(state: state)
+        case .wallpaper:
+            return viewModel.pageCount(for: ownedWallpapers)
+        }
+    }
+
+    private func updateCurrentPageForActiveSection(state: AppState) {
+        switch selectedSection {
+        case .character:
+            syncCharacterSelectionAndPage(state: state)
+        case .wallpaper:
+            syncWallpaperSelectionAndPage()
         }
     }
 
@@ -126,32 +331,30 @@ struct ZukanView: View {
         bgmManager.playSE(.push)
 
         let switchPet: () -> Void = {
-            print("----- switchPet start -----")
-            print("✅ tapped id:", id)
-            print("✅ before state.currentPetID:", state.currentPetID)
-            print("✅ before state.normalizedCurrentPetID:", state.normalizedCurrentPetID)
-
             state.currentPetID = id
             selectedPetID = id
             currentPage = viewModel.pageIndex(for: id, state: state)
-
-            print("✅ after state.currentPetID:", state.currentPetID)
-            print("✅ after state.normalizedCurrentPetID:", state.normalizedCurrentPetID)
-
             save(state: state, forceWidgetReload: true)
-
-            print("----- switchPet end -----")
         }
 
         switchPet()
     }
 
-    private func syncSelectionAndPage(state: AppState) {
+    private func handleWallpaperSetTapped() {
+        guard let selectedWallpaperAssetName else { return }
+        bgmManager.playSE(.push)
+        currentHomeWallpaperAssetName = selectedWallpaperAssetName
+        syncWallpaperSelectionAndPage()
+    }
+
+    private func syncCharacterSelectionAndPage(state: AppState) {
         let visiblePetIDs = viewModel.visiblePetIDs(state: state)
 
         guard !visiblePetIDs.isEmpty else {
             selectedPetID = nil
-            currentPage = 0
+            if selectedSection == .character {
+                currentPage = 0
+            }
             return
         }
 
@@ -164,11 +367,44 @@ struct ZukanView: View {
             preferredPetID = visiblePetIDs[0]
         }
 
-        self.selectedPetID = preferredPetID
+        selectedPetID = preferredPetID
 
-        let pageCount = viewModel.pageCount(state: state)
-        let pageIndex = viewModel.pageIndex(for: preferredPetID, state: state)
-        currentPage = min(max(0, pageIndex), max(0, pageCount - 1))
+        if selectedSection == .character {
+            let pageCount = viewModel.pageCount(state: state)
+            let pageIndex = viewModel.pageIndex(for: preferredPetID, state: state)
+            currentPage = min(max(0, pageIndex), max(0, pageCount - 1))
+        }
+    }
+
+    private func syncWallpaperSelectionAndPage() {
+        guard !ownedWallpapers.isEmpty else {
+            selectedWallpaperAssetName = nil
+            if selectedSection == .wallpaper {
+                currentPage = 0
+            }
+            return
+        }
+
+        let ownedAssetNames = Set(ownedWallpapers.map(\.assetName))
+        let preferredAssetName: String
+        if let selectedWallpaperAssetName, ownedAssetNames.contains(selectedWallpaperAssetName) {
+            preferredAssetName = selectedWallpaperAssetName
+        } else if ownedAssetNames.contains(effectiveCurrentHomeWallpaperAssetName) {
+            preferredAssetName = effectiveCurrentHomeWallpaperAssetName
+        } else {
+            preferredAssetName = ownedWallpapers[0].assetName
+        }
+
+        selectedWallpaperAssetName = preferredAssetName
+
+        if selectedSection == .wallpaper {
+            let pageCount = viewModel.pageCount(for: ownedWallpapers)
+            let pageIndex = viewModel.pageIndex(
+                for: preferredAssetName,
+                in: ownedWallpapers.map(\.assetName)
+            )
+            currentPage = min(max(0, pageIndex), max(0, pageCount - 1))
+        }
     }
 
     private func save(state: AppState, forceWidgetReload: Bool = false) {
@@ -182,20 +418,21 @@ struct ZukanView: View {
 
     private func updateWidgetSnapshot(state: AppState, forceReload: Bool = false) {
         let widgetState = state.makeWidgetStateSnapshot()
-        print("✅ updateWidgetSnapshot currentPetID:", widgetState.currentPetID)
-        print("✅ updateWidgetSnapshot todaySteps:", widgetState.todaySteps)
-
         let changed = ZukanWidgetBridge.save(widgetState: widgetState)
 
         #if canImport(WidgetKit)
         if forceReload || changed {
             WidgetCenter.shared.reloadAllTimelines()
-            print("✅ WidgetCenter.reloadAllTimelines called")
-        } else {
-            print("ℹ️ Widget snapshot unchanged, reload skipped")
         }
         #endif
     }
+}
+
+private enum ZukanSection: String, CaseIterable, Identifiable {
+    case character = "キャラクター"
+    case wallpaper = "壁紙"
+
+    var id: String { rawValue }
 }
 
 private enum ZukanWidgetBridge {
@@ -218,11 +455,6 @@ private enum ZukanWidgetBridge {
         let safePetID = normalizedPetID.isEmpty ? "pet_000" : normalizedPetID
         let safeSteps = max(0, widgetState.todaySteps)
 
-        print("----- ZukanWidgetBridge.save start -----")
-        print("✅ widgetState.currentPetID:", widgetState.currentPetID)
-        print("✅ safePetID:", safePetID)
-        print("✅ widgetState.todaySteps:", widgetState.todaySteps)
-
         let signature = "\(widgetState.toiletFlag)|\(widgetState.bathFlag)|\(safePetID)|\(safeSteps)"
         let previousSignature = defaults.string(forKey: lastSignatureKey)
 
@@ -234,201 +466,154 @@ private enum ZukanWidgetBridge {
 
         defaults.synchronize()
 
-        print("✅ saved currentPetID:", defaults.string(forKey: currentPetIDKey) ?? "nil")
-        print("✅ saved todaySteps:", defaults.object(forKey: todayStepsKey) ?? "nil")
-        print("✅ previousSignature:", previousSignature ?? "nil")
-        print("✅ newSignature:", signature)
-        print("----- ZukanWidgetBridge.save end -----")
-
         return previousSignature != signature
     }
 }
 
-private struct ZukanGrid: View {
-    @EnvironmentObject private var bgmManager: BGMManager
-
-    let slots: [ZukanPetSlot]
-    let columns: [GridItem]
-    let currentPage: Int
-    let pageCount: Int
-    let selectedPetID: String?
-    let onPreviousPage: () -> Void
-    let onNextPage: () -> Void
-    let onSelect: (String) -> Void
+private struct ZukanSectionTabs: View {
+    let selectedSection: ZukanSection
+    let onSelect: (ZukanSection) -> Void
 
     var body: some View {
-        VStack(spacing: 10) {
-            HStack {
-                Button(action: onPreviousPage) {
-                    Text("<")
+        HStack(spacing: 12) {
+            ForEach(ZukanSection.allCases) { section in
+                Button {
+                    onSelect(section)
+                } label: {
+                    Text(section.rawValue)
                         .font(.headline.weight(.bold))
-                        .frame(width: 36, height: 36)
-                        .background(.thinMaterial)
-                        .clipShape(Circle())
+                        .foregroundStyle(selectedSection == section ? .white : .primary)
+                        .frame(maxWidth: .infinity)
+                        .padding(.vertical, 12)
+                        .background(
+                            RoundedRectangle(cornerRadius: 16)
+                                .fill(selectedSection == section ? Color.accentColor : Color.white.opacity(0.72))
+                        )
                 }
                 .buttonStyle(.plain)
-                .disabled(currentPage <= 0)
-                .opacity(currentPage <= 0 ? 0.35 : 1.0)
-
-                Spacer()
-
-                Text("\(currentPage + 1) / \(pageCount)")
-                    .font(.subheadline.weight(.semibold))
-                    .foregroundStyle(.primary)
-
-                Spacer()
-
-                Button(action: onNextPage) {
-                    Text(">")
-                        .font(.headline.weight(.bold))
-                        .frame(width: 36, height: 36)
-                        .background(.thinMaterial)
-                        .clipShape(Circle())
-                }
-                .buttonStyle(.plain)
-                .disabled(currentPage >= pageCount - 1)
-                .opacity(currentPage >= pageCount - 1 ? 0.35 : 1.0)
-            }
-
-            LazyVGrid(columns: columns, spacing: 10) {
-                ForEach(slots) { slot in
-                    ZukanCell(
-                        petID: slot.id,
-                        isOwned: slot.isOwned,
-                        isCurrent: slot.isCurrentPet,
-                        isSelected: (selectedPetID == slot.id),
-                        onTap: {
-                            guard slot.isOwned else { return }
-                            bgmManager.playSE(.push)
-                            onSelect(slot.id)
-                        }
-                    )
-                }
             }
         }
-        .frame(maxWidth: .infinity)
+        .padding(6)
+        .background(.thinMaterial)
+        .clipShape(RoundedRectangle(cornerRadius: 20))
     }
 }
 
-private struct ZukanCell: View {
+private struct ZukanPageControl: View {
+    let currentPage: Int
+    let pageCount: Int
+    let onPrevious: () -> Void
+    let onNext: () -> Void
+
+    var body: some View {
+        HStack(spacing: 8) {
+            Button(action: onPrevious) {
+                Image(systemName: "chevron.left")
+                    .font(.subheadline.weight(.bold))
+                    .frame(width: 32, height: 32)
+                    .background(Color.white.opacity(0.75))
+                    .clipShape(Circle())
+            }
+            .buttonStyle(.plain)
+            .disabled(currentPage <= 0)
+            .opacity(currentPage <= 0 ? 0.35 : 1.0)
+
+            Text("\(currentPage + 1) / \(max(1, pageCount))")
+                .font(.subheadline.weight(.semibold))
+                .monospacedDigit()
+
+            Button(action: onNext) {
+                Image(systemName: "chevron.right")
+                    .font(.subheadline.weight(.bold))
+                    .frame(width: 32, height: 32)
+                    .background(Color.white.opacity(0.75))
+                    .clipShape(Circle())
+            }
+            .buttonStyle(.plain)
+            .disabled(currentPage >= pageCount - 1)
+            .opacity(currentPage >= pageCount - 1 ? 0.35 : 1.0)
+        }
+    }
+}
+
+private struct ZukanCharacterCell: View {
     let petID: String
-    let isOwned: Bool
     let isCurrent: Bool
     let isSelected: Bool
     let onTap: () -> Void
 
     private var displayName: String {
-        guard isOwned else { return "？？？" }
-        return PetMaster.all.first(where: { $0.id == petID })?.name ?? petID
+        PetMaster.all.first(where: { $0.id == petID })?.name ?? petID
     }
 
     private var imageName: String {
-        isOwned ? PetMaster.assetName(for: petID) : "CalPet_secret"
+        PetMaster.assetName(for: petID)
     }
 
     var body: some View {
         Button(action: onTap) {
-            VStack(spacing: 6) {
+            VStack(spacing: 8) {
                 Image(imageName)
                     .resizable()
                     .scaledToFit()
-                    .frame(height: 52)
-                    .padding(.top, 10)
+                    .frame(height: 58)
+                    .padding(.top, 12)
 
                 Text(displayName)
                     .font(.caption.weight(.semibold))
                     .lineLimit(1)
                     .minimumScaleFactor(0.8)
-                    .foregroundStyle(isOwned ? .primary : .secondary)
-                    .padding(.bottom, 10)
+                    .padding(.horizontal, 6)
+                    .padding(.bottom, 12)
             }
             .frame(maxWidth: .infinity)
-            .background(.thinMaterial)
-            .clipShape(RoundedRectangle(cornerRadius: 14))
-            .overlay {
-                if isCurrent {
-                    RoundedRectangle(cornerRadius: 14)
-                        .stroke(.black, lineWidth: 3)
-                } else if isSelected {
-                    RoundedRectangle(cornerRadius: 14)
-                        .stroke(.black.opacity(0.18), lineWidth: 1)
-                }
-            }
-            .opacity(isOwned ? 1.0 : 0.7)
+            .background(
+                RoundedRectangle(cornerRadius: 16)
+                    .fill(isCurrent ? Color.blue.opacity(0.22) : Color.white.opacity(0.72))
+            )
+            .overlay(
+                RoundedRectangle(cornerRadius: 16)
+                    .stroke(isSelected ? Color.orange : (isCurrent ? Color.blue : Color.clear), lineWidth: isSelected ? 3 : 2)
+            )
         }
         .buttonStyle(.plain)
-        .disabled(!isOwned)
     }
 }
 
-private struct ZukanDetailPanel: View {
-    let selectedPetID: String
-    let onTrain: (String) -> Void
-    let isDeveloperMode: Bool
-    let isCurrentPet: Bool
-
-    private var selectedName: String {
-        PetMaster.all.first(where: { $0.id == selectedPetID })?.name ?? selectedPetID
-    }
-
-    private var selectedImageName: String {
-        PetMaster.assetName(for: selectedPetID)
-    }
-
-    private var descriptionText: String {
-        PetMaster.description(for: selectedPetID)
-    }
+private struct ZukanWallpaperCell: View {
+    let wallpaper: WallpaperCatalog.WallpaperItem
+    let isCurrent: Bool
+    let isSelected: Bool
+    let onTap: () -> Void
 
     var body: some View {
-        VStack(spacing: 12) {
-            Button {
-                onTrain(selectedPetID)
-            } label: {
-                Text(
-                    isCurrentPet
-                    ? "\(selectedName) をお世話中"
-                    : (
-                        isDeveloperMode
-                        ? "\(selectedName) をお世話する（広告なし）"
-                        : "\(selectedName) をお世話する"
-                    )
-                )
-                .font(.headline)
-                .frame(maxWidth: .infinity)
-                .padding(.vertical, 12)
+        Button(action: onTap) {
+            VStack(spacing: 8) {
+                Image(wallpaper.assetName)
+                    .resizable()
+                    .scaledToFill()
+                    .frame(height: 68)
+                    .clipShape(RoundedRectangle(cornerRadius: 12))
+                    .padding(.top, 10)
+                    .padding(.horizontal, 10)
+
+                Text(wallpaper.name)
+                    .font(.caption.weight(.semibold))
+                    .lineLimit(1)
+                    .minimumScaleFactor(0.8)
+                    .padding(.horizontal, 6)
+                    .padding(.bottom, 12)
             }
-            .buttonStyle(.borderedProminent)
-            .disabled(isCurrentPet)
-            .opacity(isCurrentPet ? 0.6 : 1.0)
-
-            HStack(spacing: 12) {
-                VStack {
-                    Image(selectedImageName)
-                        .resizable()
-                        .scaledToFit()
-                        .padding(18)
-                }
-                .frame(maxWidth: .infinity, minHeight: 220, maxHeight: 260)
-                .background(.thinMaterial)
-                .clipShape(RoundedRectangle(cornerRadius: 16))
-
-                VStack(alignment: .leading, spacing: 8) {
-                    Text(selectedName)
-                        .font(.headline)
-
-                    Text(descriptionText)
-                        .font(.subheadline)
-                        .foregroundStyle(.secondary)
-                        .frame(maxWidth: .infinity, alignment: .leading)
-
-                    Spacer(minLength: 0)
-                }
-                .padding(14)
-                .frame(maxWidth: .infinity, minHeight: 220, maxHeight: 260, alignment: .topLeading)
-                .background(.thinMaterial)
-                .clipShape(RoundedRectangle(cornerRadius: 16))
-            }
+            .frame(maxWidth: .infinity)
+            .background(
+                RoundedRectangle(cornerRadius: 16)
+                    .fill(isCurrent ? Color.blue.opacity(0.22) : Color.white.opacity(0.72))
+            )
+            .overlay(
+                RoundedRectangle(cornerRadius: 16)
+                    .stroke(isSelected ? Color.orange : (isCurrent ? Color.blue : Color.clear), lineWidth: isSelected ? 3 : 2)
+            )
         }
-        .frame(maxWidth: .infinity)
+        .buttonStyle(.plain)
     }
 }

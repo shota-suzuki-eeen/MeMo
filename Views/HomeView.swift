@@ -16,6 +16,8 @@ struct HomeView: View {
     @Environment(\.modelContext) private var modelContext
     @Environment(\.scenePhase) private var scenePhase
     @EnvironmentObject private var bgmManager: BGMManager
+    @AppStorage(WallpaperCatalog.selectedHomeWallpaperAssetNameKey)
+    private var selectedHomeWallpaperAssetName: String = WallpaperCatalog.defaultWallpaper.assetName
 
     let state: AppState
     @ObservedObject var hk: HealthKitManager
@@ -240,6 +242,11 @@ struct HomeView: View {
     private var captureMetricValues: (steps: Int, activeKcal: Int, totalKcal: Int) {
         let steps = max(todaySteps, hk.todaySteps)
         return (steps: steps, activeKcal: 0, totalKcal: steps)
+    }
+
+    private var effectiveCurrentHomeWallpaperAssetName: String {
+        WallpaperCatalog.item(for: selectedHomeWallpaperAssetName)?.assetName
+        ?? WallpaperCatalog.defaultWallpaper.assetName
     }
 
     fileprivate enum TopInfoPopup: Int, Identifiable {
@@ -661,7 +668,7 @@ struct HomeView: View {
                     todaySteps: captureMetricValues.steps,
                     todayActiveKcal: captureMetricValues.activeKcal,
                     todayTotalKcal: captureMetricValues.totalKcal,
-                    plainBackgroundAssetName: Layout.homeBackgroundAssetName,
+                    plainBackgroundAssetName: effectiveCurrentHomeWallpaperAssetName,
                     characterAssetName: PetMaster.assetName(for: state.normalizedCurrentPetID),
                     metricValueProvider: {
                         let values = captureMetricValues
@@ -711,7 +718,7 @@ struct HomeView: View {
     }
 
     private var homeBackgroundView: some View {
-        Image(Layout.homeBackgroundAssetName)
+        Image(effectiveCurrentHomeWallpaperAssetName)
             .resizable()
             .scaledToFill()
             .ignoresSafeArea()
