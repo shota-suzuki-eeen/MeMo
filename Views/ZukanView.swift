@@ -79,6 +79,7 @@ struct ZukanView: View {
                             clampPages(state: state)
                         }
                     )
+                    .zIndex(1)
 
                     currentSelectionCard(state: state)
                     ownedItemsPanel(state: state)
@@ -236,6 +237,7 @@ struct ZukanView: View {
                         }
                         .padding(16)
                     }
+                    .allowsHitTesting(false)
 
                     Button {
                         handleWallpaperSetTapped()
@@ -499,6 +501,8 @@ private struct ZukanSectionTabs: View {
                                 .fill(selectedSection == section ? Color.accentColor : Color.white.opacity(0.72))
                         )
                 }
+                .frame(maxWidth: .infinity)
+                .contentShape(RoundedRectangle(cornerRadius: 16))
                 .buttonStyle(.plain)
             }
         }
