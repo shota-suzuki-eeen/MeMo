@@ -23,11 +23,17 @@ struct ZukanView: View {
     @State private var selectedPetID: String? = nil
     @State private var selectedWallpaperAssetName: String? = nil
     @State private var selectedSection: ZukanSection = .character
-    @State private var currentPage: Int = 0
+    @State private var characterCurrentPage: Int = 0
+    @State private var wallpaperCurrentPage: Int = 0
 
     private var state: AppState? { appStates.first }
 
-    private let columns: [GridItem] = Array(
+    private let characterColumns: [GridItem] = Array(
+        repeating: GridItem(.flexible(), spacing: 10),
+        count: 3
+    )
+
+    private let wallpaperColumns: [GridItem] = Array(
         repeating: GridItem(.flexible(), spacing: 10),
         count: 3
     )
@@ -49,6 +55,15 @@ struct ZukanView: View {
         return WallpaperCatalog.item(for: preferredAssetName) ?? ownedWallpapers.first
     }
 
+    private var activeCurrentPage: Int {
+        switch selectedSection {
+        case .character:
+            return characterCurrentPage
+        case .wallpaper:
+            return wallpaperCurrentPage
+        }
+    }
+
     var body: some View {
         ZStack {
             Color.clear.ignoresSafeArea()
@@ -61,7 +76,7 @@ struct ZukanView: View {
                             guard selectedSection != section else { return }
                             bgmManager.playSE(.push)
                             selectedSection = section
-                            updateCurrentPageForActiveSection(state: state)
+                            clampPages(state: state)
                         }
                     )
 
@@ -102,7 +117,7 @@ struct ZukanView: View {
             state.ensureInitialPetsIfNeeded()
             syncCharacterSelectionAndPage(state: state)
             syncWallpaperSelectionAndPage()
-            updateCurrentPageForActiveSection(state: state)
+            clampPages(state: state)
             updateWidgetSnapshot(state: state, forceReload: true)
         }
         .onDisappear {
@@ -254,31 +269,31 @@ struct ZukanView: View {
                 Spacer()
 
                 ZukanPageControl(
-                    currentPage: currentPage,
+                    currentPage: activeCurrentPage,
                     pageCount: activePageCount(state: state),
                     onPrevious: {
-                        guard currentPage > 0 else { return }
+                        guard activeCurrentPage > 0 else { return }
                         bgmManager.playSE(.push)
-                        currentPage -= 1
+                        updateActivePage(activeCurrentPage - 1)
                     },
                     onNext: {
                         let pageCount = activePageCount(state: state)
-                        guard currentPage < pageCount - 1 else { return }
+                        guard activeCurrentPage < pageCount - 1 else { return }
                         bgmManager.playSE(.push)
-                        currentPage += 1
+                        updateActivePage(activeCurrentPage + 1)
                     }
                 )
             }
 
             if selectedSection == .character {
-                let slots = viewModel.slotsForPage(state: state, page: currentPage)
+                let slots = viewModel.slotsForPage(state: state, page: characterCurrentPage)
 
-                LazyVGrid(columns: columns, spacing: 10) {
+                LazyVGrid(columns: characterColumns, spacing: 10) {
                     ForEach(slots) { slot in
                         ZukanCharacterCell(
                             petID: slot.id,
                             isCurrent: slot.isCurrentPet,
-                            isSelected: (selectedPetID == slot.id),
+                            isSelected: selectedPetID == slot.id,
                             onTap: {
                                 bgmManager.playSE(.push)
                                 selectedPetID = slot.id
@@ -287,9 +302,9 @@ struct ZukanView: View {
                     }
                 }
             } else {
-                let wallpaperItems = viewModel.itemsForPage(ownedWallpapers, page: currentPage)
+                let wallpaperItems = viewModel.wallpaperItemsForPage(ownedWallpapers, page: wallpaperCurrentPage)
 
-                LazyVGrid(columns: columns, spacing: 10) {
+                LazyVGrid(columns: wallpaperColumns, spacing: 10) {
                     ForEach(wallpaperItems) { item in
                         ZukanWallpaperCell(
                             wallpaper: item,
@@ -314,30 +329,34 @@ struct ZukanView: View {
         case .character:
             return viewModel.pageCount(state: state)
         case .wallpaper:
-            return viewModel.pageCount(for: ownedWallpapers)
+            return viewModel.wallpaperPageCount(for: ownedWallpapers)
         }
     }
 
-    private func updateCurrentPageForActiveSection(state: AppState) {
+    private func updateActivePage(_ nextPage: Int) {
         switch selectedSection {
         case .character:
-            syncCharacterSelectionAndPage(state: state)
+            characterCurrentPage = max(0, nextPage)
         case .wallpaper:
-            syncWallpaperSelectionAndPage()
+            wallpaperCurrentPage = max(0, nextPage)
         }
+    }
+
+    private func clampPages(state: AppState) {
+        let characterMaxPage = max(0, viewModel.pageCount(state: state) - 1)
+        characterCurrentPage = min(max(0, characterCurrentPage), characterMaxPage)
+
+        let wallpaperMaxPage = max(0, viewModel.wallpaperPageCount(for: ownedWallpapers) - 1)
+        wallpaperCurrentPage = min(max(0, wallpaperCurrentPage), wallpaperMaxPage)
     }
 
     private func handleTrainTapped(state: AppState, id: String) {
         bgmManager.playSE(.push)
 
-        let switchPet: () -> Void = {
-            state.currentPetID = id
-            selectedPetID = id
-            currentPage = viewModel.pageIndex(for: id, state: state)
-            save(state: state, forceWidgetReload: true)
-        }
-
-        switchPet()
+        state.currentPetID = id
+        selectedPetID = id
+        characterCurrentPage = viewModel.pageIndex(for: id, state: state)
+        save(state: state, forceWidgetReload: true)
     }
 
     private func handleWallpaperSetTapped() {
@@ -352,9 +371,7 @@ struct ZukanView: View {
 
         guard !visiblePetIDs.isEmpty else {
             selectedPetID = nil
-            if selectedSection == .character {
-                currentPage = 0
-            }
+            characterCurrentPage = 0
             return
         }
 
@@ -368,20 +385,15 @@ struct ZukanView: View {
         }
 
         selectedPetID = preferredPetID
-
-        if selectedSection == .character {
-            let pageCount = viewModel.pageCount(state: state)
-            let pageIndex = viewModel.pageIndex(for: preferredPetID, state: state)
-            currentPage = min(max(0, pageIndex), max(0, pageCount - 1))
-        }
+        let pageCount = viewModel.pageCount(state: state)
+        let pageIndex = viewModel.pageIndex(for: preferredPetID, state: state)
+        characterCurrentPage = min(max(0, pageIndex), max(0, pageCount - 1))
     }
 
     private func syncWallpaperSelectionAndPage() {
         guard !ownedWallpapers.isEmpty else {
             selectedWallpaperAssetName = nil
-            if selectedSection == .wallpaper {
-                currentPage = 0
-            }
+            wallpaperCurrentPage = 0
             return
         }
 
@@ -396,15 +408,12 @@ struct ZukanView: View {
         }
 
         selectedWallpaperAssetName = preferredAssetName
-
-        if selectedSection == .wallpaper {
-            let pageCount = viewModel.pageCount(for: ownedWallpapers)
-            let pageIndex = viewModel.pageIndex(
-                for: preferredAssetName,
-                in: ownedWallpapers.map(\.assetName)
-            )
-            currentPage = min(max(0, pageIndex), max(0, pageCount - 1))
-        }
+        let pageCount = viewModel.wallpaperPageCount(for: ownedWallpapers)
+        let pageIndex = viewModel.wallpaperPageIndex(
+            for: preferredAssetName,
+            in: ownedWallpapers.map(\.assetName)
+        )
+        wallpaperCurrentPage = min(max(0, pageIndex), max(0, pageCount - 1))
     }
 
     private func save(state: AppState, forceWidgetReload: Bool = false) {

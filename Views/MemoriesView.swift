@@ -257,15 +257,29 @@ struct MemoriesView: View {
             .font(.title3)
             .padding(.horizontal, 2)
 
-            Picker("表示", selection: $mode) {
+            HStack(spacing: 8) {
                 ForEach(DisplayMode.allCases) { displayMode in
-                    Text(displayMode.rawValue).tag(displayMode)
+                    Button {
+                        guard mode != displayMode else { return }
+                        mode = displayMode
+                        bgmManager.playSE(.push)
+                    } label: {
+                        Text(displayMode.rawValue)
+                            .font(.subheadline.weight(.bold))
+                            .foregroundStyle(mode == displayMode ? .white : .primary)
+                            .frame(maxWidth: .infinity)
+                            .padding(.vertical, 10)
+                            .background(
+                                RoundedRectangle(cornerRadius: 12, style: .continuous)
+                                    .fill(mode == displayMode ? Color.accentColor : Color.white.opacity(0.78))
+                            )
+                    }
+                    .buttonStyle(.plain)
                 }
             }
-            .pickerStyle(.segmented)
-            .onChange(of: mode) { _, _ in
-                bgmManager.playSE(.push)
-            }
+            .padding(4)
+            .background(.thinMaterial)
+            .clipShape(RoundedRectangle(cornerRadius: 14, style: .continuous))
         }
         .padding(.top, 8)
     }

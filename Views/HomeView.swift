@@ -1053,7 +1053,9 @@ struct HomeView: View {
                 rewardDefinitions: AppState.happinessRewardDefinitions,
                 claimedRewardLevels: currentClaimedHappinessRewardLevels,
                 onClose: { closeTopInfoPopup() },
-                onClaim: { claimCurrentHappinessRewardFromPopup() }
+                onClaim: { level in
+                    claimHappinessReward(level: level)
+                }
             )
             .frame(maxWidth: Layout.topInfoPopupMaxWidth)
             .padding(.horizontal, Layout.topInfoPopupScreenHorizontalPadding)
@@ -3276,6 +3278,7 @@ private struct StatusIconButton: View {
 }
 
 
+
 private struct HomeTopInfoPopup: View {
     let popup: HomeView.TopInfoPopup
     let walletCoinCount: Int
@@ -3289,7 +3292,7 @@ private struct HomeTopInfoPopup: View {
     let rewardDefinitions: [AppState.HappinessRewardDefinition]
     let claimedRewardLevels: Set<Int>
     let onClose: () -> Void
-    let onClaim: () -> Void
+    let onClaim: (Int) -> Void
 
     private var titleText: String {
         switch popup {
@@ -3297,37 +3300,6 @@ private struct HomeTopInfoPopup: View {
         case .todaySteps: return "今日の歩数"
         case .happinessRewards: return "幸せ報酬"
         }
-    }
-
-    private var displayReward: AppState.HappinessRewardDefinition? {
-        if let claimableLevel,
-           let reward = rewardDefinitions.first(where: { $0.level == claimableLevel }) {
-            return reward
-        }
-        if let nextRewardLevel,
-           let reward = rewardDefinitions.first(where: { $0.level == nextRewardLevel }) {
-            return reward
-        }
-        return nil
-    }
-
-    private func remainingLevelsText(nextRewardLevel: Int) -> String {
-        let remaining = max(0, nextRewardLevel - happinessLevel)
-        return "あと \(remaining) Lvで次の報酬です"
-    }
-
-    private func isRewardClaimed(_ reward: AppState.HappinessRewardDefinition) -> Bool {
-        claimedRewardLevels.contains(reward.level)
-    }
-
-    private func isRewardClaimable(_ reward: AppState.HappinessRewardDefinition) -> Bool {
-        !isRewardClaimed(reward) && happinessLevel >= reward.level
-    }
-
-    private func rewardStatusText(for reward: AppState.HappinessRewardDefinition) -> String {
-        if isRewardClaimed(reward) { return "獲得済み" }
-        if isRewardClaimable(reward) { return "受取可能" }
-        return "Lv.\(reward.level)で解放"
     }
 
     var body: some View {
@@ -3357,7 +3329,12 @@ private struct HomeTopInfoPopup: View {
         .padding(.top, HomeView.Layout.topInfoPopupVerticalPadding)
         .padding(.bottom, HomeView.Layout.topInfoPopupVerticalPadding)
         .frame(maxWidth: .infinity, alignment: .leading)
-        .fixedSize(horizontal: false, vertical: true)
+        .frame(
+            maxHeight: popup == .happinessRewards
+            ? HomeView.Layout.topInfoPopupContentMaxHeight
+            : nil,
+            alignment: .top
+        )
         .background {
             Image(HomeView.Layout.topInfoPopupBackgroundAssetName)
                 .resizable()
@@ -3395,108 +3372,352 @@ private struct HomeTopInfoPopup: View {
             }
 
         case .happinessRewards:
-            VStack(alignment: .leading, spacing: 14) {
-                HomeTopInfoValueBlock(
-                    label: "現在の幸せLv.",
-                    valueText: "Lv.\(happinessLevel)",
-                    caption: "現在の幸せ度 \(happinessPoint)/\(happinessMaxPoints)"
-                )
-
-                if let displayReward {
-                    VStack(alignment: .leading, spacing: 8) {
-                        Text("獲得キャラクター")
-                            .font(.system(size: 13, weight: .semibold))
-                            .foregroundStyle(.black.opacity(0.55))
-
-                        Text("Lv.\(displayReward.level) で \(displayReward.characterName) を獲得")
-                            .font(.system(size: 15, weight: .bold))
-                            .foregroundStyle(.black)
-                    }
-
-                    HappinessRewardPreviewCard(
-                        reward: displayReward,
-                        statusText: rewardStatusText(for: displayReward)
-                    )
-
-                    if isRewardClaimable(displayReward) {
-                        Text("今すぐ受け取れます")
-                            .font(.system(size: 13, weight: .medium))
-                            .foregroundStyle(.black.opacity(0.42))
-                    } else {
-                        Text(remainingLevelsText(nextRewardLevel: displayReward.level))
-                            .font(.system(size: 13, weight: .medium))
-                            .foregroundStyle(.black.opacity(0.42))
-                    }
-                } else {
-                    HomeTopInfoDescriptionRow(
-                        title: "報酬状況",
-                        detail: "すべての幸せ報酬を受け取り済みです"
-                    )
-                }
-
-                if let claimableLevel,
-                   let claimableReward = rewardDefinitions.first(where: { $0.level == claimableLevel }) {
-                    Button(action: onClaim) {
-                        Text("Lv.\(claimableLevel)報酬で\(claimableReward.characterName)を受け取る")
-                            .font(.system(size: 15, weight: .bold))
-                            .foregroundStyle(.white)
-                            .frame(maxWidth: .infinity)
-                            .padding(.vertical, 12)
-                            .background(
-                                Color(red: 0.85, green: 0.20, blue: 0.28).opacity(0.95),
-                                in: RoundedRectangle(cornerRadius: 14, style: .continuous)
-                            )
-                    }
-                    .buttonStyle(.plain)
-                }
-            }
+            HomeHappinessRewardsContent(
+                happinessLevel: happinessLevel,
+                happinessPoint: happinessPoint,
+                happinessMaxPoints: happinessMaxPoints,
+                claimableLevel: claimableLevel,
+                nextRewardLevel: nextRewardLevel,
+                rewardDefinitions: rewardDefinitions,
+                claimedRewardLevels: claimedRewardLevels,
+                onClaim: onClaim
+            )
         }
     }
 }
 
-private struct HappinessRewardPreviewCard: View {
-    let reward: AppState.HappinessRewardDefinition
-    let statusText: String
+private struct HomeHappinessRewardsContent: View {
+    let happinessLevel: Int
+    let happinessPoint: Int
+    let happinessMaxPoints: Int
+    let claimableLevel: Int?
+    let nextRewardLevel: Int?
+    let rewardDefinitions: [AppState.HappinessRewardDefinition]
+    let claimedRewardLevels: Set<Int>
+    let onClaim: (Int) -> Void
+
+    private let rewardRowHeight: CGFloat = 108
+    private let rewardRowSpacing: CGFloat = 20
+
+    private var descendingRewards: [AppState.HappinessRewardDefinition] {
+        Array(rewardDefinitions.reversed())
+    }
+
+    private var currentProgressLevel: Double {
+        let safeMaxPoints = max(happinessMaxPoints, 1)
+        let fractionalLevel = Double(max(0, min(happinessPoint, safeMaxPoints - 1))) / Double(safeMaxPoints)
+        let highestRewardLevel = rewardDefinitions.map(\.level).max() ?? 0
+        return min(Double(highestRewardLevel), Double(max(0, happinessLevel)) + fractionalLevel)
+    }
+
+    private var summaryText: String {
+        if let claimableLevel,
+           let reward = rewardDefinitions.first(where: { $0.level == claimableLevel }) {
+            return "Lv.\(claimableLevel) の \(reward.characterName) を受け取れます"
+        }
+
+        if let nextRewardLevel,
+           let reward = rewardDefinitions.first(where: { $0.level == nextRewardLevel }) {
+            let remaining = max(0, nextRewardLevel - happinessLevel)
+            return "次は Lv.\(nextRewardLevel) の \(reward.characterName) まであと \(remaining) Lv"
+        }
+
+        return "現在の幸せ報酬はすべて受け取り済みです"
+    }
 
     var body: some View {
-        HStack(alignment: .center, spacing: 14) {
-            ZStack {
-                Image(HomeView.Layout.menuPopupButtonBackgroundAssetName)
-                    .resizable()
-                    .scaledToFill()
+        VStack(alignment: .leading, spacing: 14) {
+            summaryCard
 
-                Image(reward.assetName)
-                    .resizable()
-                    .scaledToFit()
-                    .frame(width: 112, height: 112)
-                    .padding(10)
+            ScrollView(.vertical, showsIndicators: false) {
+                HStack(alignment: .top, spacing: 18) {
+                    HomeHappinessRewardsProgressColumn(
+                        rewards: descendingRewards,
+                        currentLevelProgress: currentProgressLevel,
+                        rowHeight: rewardRowHeight,
+                        spacing: rewardRowSpacing
+                    )
+                    .frame(
+                        width: 32,
+                        height: HomeHappinessRewardsProgressColumn.contentHeight(
+                            rewardCount: descendingRewards.count,
+                            rowHeight: rewardRowHeight,
+                            spacing: rewardRowSpacing
+                        )
+                    )
+
+                    LazyVStack(spacing: rewardRowSpacing) {
+                        ForEach(descendingRewards) { reward in
+                            HomeHappinessRewardRow(
+                                reward: reward,
+                                isClaimed: claimedRewardLevels.contains(reward.level),
+                                canClaim: !claimedRewardLevels.contains(reward.level) && happinessLevel >= reward.level,
+                                remainingLevels: max(0, reward.level - happinessLevel),
+                                onClaim: {
+                                    onClaim(reward.level)
+                                }
+                            )
+                            .frame(height: rewardRowHeight)
+                        }
+                    }
+                }
+                .padding(.top, 8)
+                .padding(.bottom, 4)
             }
-            .frame(width: 128, height: 128)
-            .clipShape(RoundedRectangle(cornerRadius: 18, style: .continuous))
+        }
+    }
 
-            VStack(alignment: .leading, spacing: 8) {
+    private var summaryCard: some View {
+        VStack(alignment: .leading, spacing: 10) {
+            Text("現在の幸せ度")
+                .font(.system(size: 14, weight: .semibold))
+                .foregroundStyle(.black.opacity(0.62))
+
+            Text("Lv.\(happinessLevel)")
+                .font(.system(size: 34, weight: .heavy, design: .rounded))
+                .foregroundStyle(.black)
+
+            Text("進捗 \(max(0, happinessPoint))/\(max(happinessMaxPoints, 0))")
+                .font(.system(size: 14, weight: .semibold))
+                .foregroundStyle(.black.opacity(0.72))
+
+            Text(summaryText)
+                .font(.system(size: 14, weight: .medium))
+                .foregroundStyle(.black.opacity(0.82))
+                .fixedSize(horizontal: false, vertical: true)
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .padding(.horizontal, 18)
+        .padding(.vertical, 18)
+        .background(
+            RoundedRectangle(cornerRadius: 24, style: .continuous)
+                .fill(Color.white.opacity(0.18))
+        )
+        .overlay(
+            RoundedRectangle(cornerRadius: 24, style: .continuous)
+                .stroke(Color.white.opacity(0.16), lineWidth: 1)
+        )
+    }
+}
+
+private struct HomeHappinessRewardRow: View {
+    let reward: AppState.HappinessRewardDefinition
+    let isClaimed: Bool
+    let canClaim: Bool
+    let remainingLevels: Int
+    let onClaim: () -> Void
+
+    var body: some View {
+        HStack(spacing: 14) {
+            Image(reward.assetName)
+                .resizable()
+                .scaledToFit()
+                .frame(width: 88, height: 88)
+                .padding(6)
+                .background(
+                    RoundedRectangle(cornerRadius: 20, style: .continuous)
+                        .fill(Color.white.opacity(0.14))
+                )
+                .overlay(
+                    RoundedRectangle(cornerRadius: 20, style: .continuous)
+                        .stroke(Color.white.opacity(0.12), lineWidth: 1)
+                )
+
+            VStack(alignment: .leading, spacing: 6) {
                 Text("Lv.\(reward.level)")
-                    .font(.system(size: 14, weight: .bold))
-                    .foregroundStyle(.black)
+                    .font(.system(size: 20, weight: .heavy, design: .rounded))
+                    .foregroundStyle(.white)
+
+                Text("キャラクター報酬")
+                    .font(.system(size: 13, weight: .semibold))
+                    .foregroundStyle(.white.opacity(0.72))
 
                 Text(reward.characterName)
-                    .font(.system(size: 18, weight: .bold))
-                    .foregroundStyle(.black)
-                    .lineLimit(2)
-                    .minimumScaleFactor(0.8)
-
-                Text(statusText)
-                    .font(.system(size: 12, weight: .semibold))
-                    .foregroundStyle(.black.opacity(0.35))
-                    .padding(.horizontal, 10)
-                    .padding(.vertical, 6)
-                    .background(Color.black.opacity(0.06), in: Capsule())
+                    .font(.system(size: 14, weight: .bold))
+                    .foregroundStyle(.white.opacity(0.92))
+                    .lineLimit(1)
+                    .minimumScaleFactor(0.75)
             }
-            .frame(maxWidth: .infinity, alignment: .leading)
+
+            Spacer(minLength: 8)
+
+            trailingStatusView
         }
-        .padding(14)
-        .frame(maxWidth: .infinity, minHeight: 148, alignment: .leading)
-        .background(Color.white.opacity(0.16), in: RoundedRectangle(cornerRadius: 20, style: .continuous))
+        .padding(.horizontal, 16)
+        .padding(.vertical, 14)
+        .frame(maxWidth: .infinity)
+        .background(
+            RoundedRectangle(cornerRadius: 28, style: .continuous)
+                .fill(Color.black.opacity(0.18))
+        )
+        .overlay(
+            RoundedRectangle(cornerRadius: 28, style: .continuous)
+                .stroke(Color.white.opacity(0.10), lineWidth: 1)
+        )
+    }
+
+    @ViewBuilder
+    private var trailingStatusView: some View {
+        if isClaimed {
+            statusCapsule(
+                title: "受取済み",
+                foregroundColor: .white,
+                backgroundColor: Color.white.opacity(0.14)
+            )
+        } else if canClaim {
+            Button(action: onClaim) {
+                statusCapsule(
+                    title: "受け取る",
+                    foregroundColor: .white,
+                    backgroundColor: Color(red: 0.85, green: 0.20, blue: 0.28).opacity(0.95)
+                )
+            }
+            .buttonStyle(.plain)
+        } else {
+            VStack(alignment: .trailing, spacing: 6) {
+                Text("未達成")
+                    .font(.system(size: 12, weight: .bold))
+                    .foregroundStyle(.white.opacity(0.76))
+
+                Text("あと\(remainingLevels)Lv")
+                    .font(.system(size: 12, weight: .semibold))
+                    .foregroundStyle(.white.opacity(0.90))
+                    .multilineTextAlignment(.trailing)
+            }
+        }
+    }
+
+    private func statusCapsule(
+        title: String,
+        foregroundColor: Color,
+        backgroundColor: Color
+    ) -> some View {
+        Text(title)
+            .font(.system(size: 13, weight: .bold))
+            .foregroundStyle(foregroundColor)
+            .padding(.horizontal, 14)
+            .padding(.vertical, 10)
+            .background(
+                RoundedRectangle(cornerRadius: 16, style: .continuous)
+                    .fill(backgroundColor)
+            )
+    }
+}
+
+private struct HomeHappinessRewardsProgressColumn: View {
+    let rewards: [AppState.HappinessRewardDefinition]
+    let currentLevelProgress: Double
+    let rowHeight: CGFloat
+    let spacing: CGFloat
+
+    private var maximumLevelValue: Int {
+        max(rewards.map(\.level).max() ?? 0, 1)
+    }
+
+    var body: some View {
+        GeometryReader { geo in
+            let fullHeight = geo.size.height
+            let fillHeight = resolvedFillHeight(fullHeight: fullHeight)
+
+            ZStack(alignment: .bottom) {
+                Capsule()
+                    .fill(Color.white.opacity(0.16))
+                    .frame(width: 10)
+
+                ForEach(1..<maximumLevelValue, id: \.self) { level in
+                    Capsule()
+                        .fill(level.isMultiple(of: 5) ? Color.white.opacity(0.46) : Color.white.opacity(0.26))
+                        .frame(width: level.isMultiple(of: 5) ? 18 : 12, height: level.isMultiple(of: 5) ? 3 : 2)
+                        .position(
+                            x: geo.size.width * 0.5,
+                            y: yPosition(forLevel: Double(level), fullHeight: fullHeight)
+                        )
+                }
+
+                Capsule()
+                    .fill(
+                        LinearGradient(
+                            colors: [
+                                Color(red: 0.21, green: 0.95, blue: 0.42),
+                                Color(red: 0.91, green: 0.96, blue: 0.58)
+                            ],
+                            startPoint: .bottom,
+                            endPoint: .top
+                        )
+                    )
+                    .frame(width: 10, height: fillHeight)
+
+                ForEach(Array(rewards.enumerated()), id: \.element.id) { index, reward in
+                    Circle()
+                        .fill(currentLevelProgress >= Double(reward.level) ? Color(red: 0.22, green: 0.95, blue: 0.42) : Color.white.opacity(0.78))
+                        .frame(width: 18, height: 18)
+                        .overlay(
+                            Circle()
+                                .stroke(Color.black.opacity(0.18), lineWidth: 1)
+                        )
+                        .position(
+                            x: geo.size.width * 0.5,
+                            y: Self.nodeCenterY(index: index, rowHeight: rowHeight, spacing: spacing)
+                        )
+                }
+            }
+        }
+    }
+
+    static func contentHeight(rewardCount: Int, rowHeight: CGFloat, spacing: CGFloat) -> CGFloat {
+        let rowsHeight = CGFloat(max(rewardCount, 0)) * rowHeight
+        let spacingHeight = CGFloat(max(rewardCount - 1, 0)) * spacing
+        return max(rowsHeight + spacingHeight, 1)
+    }
+
+    private static func nodeCenterY(index: Int, rowHeight: CGFloat, spacing: CGFloat) -> CGFloat {
+        (rowHeight * 0.5) + (CGFloat(index) * (rowHeight + spacing))
+    }
+
+    private func resolvedFillHeight(fullHeight: CGFloat) -> CGFloat {
+        let clampedProgress = max(0, min(currentLevelProgress, Double(maximumLevelValue)))
+        let ascendingRewards = rewards.sorted(by: { $0.level < $1.level })
+
+        let points: [(level: Double, height: CGFloat)] = [(0, 0)] + ascendingRewards.compactMap { reward in
+            guard let descendingIndex = rewards.firstIndex(where: { $0.level == reward.level }) else { return nil }
+            let centerY = Self.nodeCenterY(index: descendingIndex, rowHeight: rowHeight, spacing: spacing)
+            return (Double(reward.level), max(0, fullHeight - centerY))
+        }
+
+        guard let last = points.last else { return 0 }
+
+        if clampedProgress >= last.level {
+            return min(fullHeight, last.height)
+        }
+
+        for index in 1..<points.count {
+            let previous = points[index - 1]
+            let current = points[index]
+
+            guard clampedProgress <= current.level else { continue }
+
+            let span = max(current.level - previous.level, 0.0001)
+            let ratio = (clampedProgress - previous.level) / span
+            let interpolated = previous.height + CGFloat(ratio) * (current.height - previous.height)
+            return max(0, min(fullHeight, interpolated))
+        }
+
+        return 0
+    }
+
+    private func yPosition(forLevel level: Double, fullHeight: CGFloat) -> CGFloat {
+        let fillHeight = resolvedFillHeight(forLevel: level, fullHeight: fullHeight)
+        return max(0, min(fullHeight, fullHeight - fillHeight))
+    }
+
+    private func resolvedFillHeight(forLevel level: Double, fullHeight: CGFloat) -> CGFloat {
+        let proxy = HomeHappinessRewardsProgressColumn(
+            rewards: rewards,
+            currentLevelProgress: level,
+            rowHeight: rowHeight,
+            spacing: spacing
+        )
+        return proxy.resolvedFillHeight(fullHeight: fullHeight)
     }
 }
 
@@ -3539,6 +3760,7 @@ private struct HomeTopInfoDescriptionRow: View {
         }
     }
 }
+
 
 private struct CenterMenuPopup: View {
     let isToiletLocked: Bool

@@ -27,7 +27,7 @@ struct WorkTimerPreparationView: View {
             let bottomPadding = max(geo.safeAreaInsets.bottom, 24)
             let contentWidth = max(geo.size.width - (horizontalPadding * 2), 1)
             let maxSituationCardHeight = min(availableHeight * 0.52, 470)
-            let situationCardWidth = min(contentWidth, maxSituationCardHeight * MemoryPhotoCardMetrics.aspectRatio)
+            let situationCardWidth = min(contentWidth, maxSituationCardHeight * WorkCardMetrics.aspectRatio)
 
             ZStack {
                 Image("work_background")
@@ -41,11 +41,8 @@ struct WorkTimerPreparationView: View {
                 VStack(spacing: 0) {
                     VStack(spacing: sectionSpacing) {
                         headerView
-
                         focusSummaryCard
-
                         situationSelectionCard(cardWidth: situationCardWidth)
-
                         durationSettingCard
                     }
                     .frame(maxWidth: .infinity)
@@ -136,15 +133,8 @@ struct WorkTimerPreparationView: View {
 
     private var focusSummaryCard: some View {
         HStack(spacing: 12) {
-            focusSummaryBlock(
-                title: "今日",
-                value: viewModel.todayFocusedDisplayText
-            )
-
-            focusSummaryBlock(
-                title: "累計",
-                value: viewModel.totalFocusedDisplayText
-            )
+            focusSummaryBlock(title: "今日", value: viewModel.todayFocusedDisplayText)
+            focusSummaryBlock(title: "累計", value: viewModel.totalFocusedDisplayText)
         }
     }
 
@@ -236,9 +226,7 @@ private struct WorkFocusRewardsView: View {
 
                 VStack(spacing: 18) {
                     headerView
-
                     summaryCard
-
                     rewardsScrollView
                 }
                 .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
@@ -401,7 +389,6 @@ private struct WorkRewardRow: View {
             }
 
             Spacer(minLength: 8)
-
             trailingStatusView
         }
         .padding(.horizontal, 16)
@@ -448,11 +435,7 @@ private struct WorkRewardRow: View {
         }
     }
 
-    private func statusCapsule(
-        title: String,
-        foregroundColor: Color,
-        backgroundColor: Color
-    ) -> some View {
+    private func statusCapsule(title: String, foregroundColor: Color, backgroundColor: Color) -> some View {
         Text(title)
             .font(.system(size: 13, weight: .bold))
             .foregroundStyle(foregroundColor)
@@ -475,13 +458,20 @@ private struct WorkRewardsProgressColumn: View {
     var body: some View {
         GeometryReader { geo in
             let fullHeight = geo.size.height
-            let progressRatio = min(1, max(0, Double(totalFocusedSeconds) / Double(max(highestRewardSeconds, 1))))
-            let fillHeight = max(0, fullHeight * progressRatio)
+            let fillHeight = resolvedFillHeight(fullHeight: fullHeight)
+            let ascendingMilestones = rewards.map(\.milestoneHours).sorted()
 
             ZStack(alignment: .bottom) {
                 Capsule()
                     .fill(Color.white.opacity(0.16))
                     .frame(width: 10)
+
+                ForEach(1..<max(1, maximumHourValue), id: \.self) { hour in
+                    Capsule()
+                        .fill(hour.isMultiple(of: 5) ? Color.white.opacity(0.46) : Color.white.opacity(0.26))
+                        .frame(width: hour.isMultiple(of: 5) ? 18 : 12, height: hour.isMultiple(of: 5) ? 3 : 2)
+                        .position(x: geo.size.width * 0.5, y: yPosition(forHour: hour, fullHeight: fullHeight))
+                }
 
                 Capsule()
                     .fill(
@@ -511,6 +501,59 @@ private struct WorkRewardsProgressColumn: View {
                 }
             }
         }
+    }
+
+    private var maximumHourValue: Int {
+        max(rewards.map(\.milestoneHours).max() ?? (highestRewardSeconds / 3600), 1)
+    }
+
+    private func resolvedFillHeight(fullHeight: CGFloat) -> CGFloat {
+        let clampedHours = max(0, min(Double(totalFocusedSeconds) / 3600.0, Double(maximumHourValue)))
+        let milestones = rewards.map(\.milestoneHours).sorted()
+        guard !milestones.isEmpty else { return 0 }
+
+        let points: [(hours: Double, height: CGFloat)] = [(0, 0)] + milestones.enumerated().map { offset, milestone in
+            let descendingIndex = rewards.firstIndex(where: { $0.milestoneHours == milestone }) ?? (rewards.count - 1 - offset)
+            let centerY = Self.nodeCenterY(index: descendingIndex, rowHeight: rowHeight, spacing: spacing)
+            return (Double(milestone), max(0, fullHeight - centerY))
+        }
+
+        guard let last = points.last else { return 0 }
+        if clampedHours >= last.hours {
+            return min(fullHeight, last.height)
+        }
+
+        for index in 1..<points.count {
+            let previous = points[index - 1]
+            let current = points[index]
+            guard clampedHours <= current.hours else { continue }
+
+            let span = max(current.hours - previous.hours, 0.0001)
+            let ratio = (clampedHours - previous.hours) / span
+            let interpolated = previous.height + CGFloat(ratio) * (current.height - previous.height)
+            return max(0, min(fullHeight, interpolated))
+        }
+
+        return 0
+    }
+
+    private func yPosition(forHour hour: Int, fullHeight: CGFloat) -> CGFloat {
+        let fillHeight = resolvedFillHeight(forHour: Double(hour), fullHeight: fullHeight)
+        return max(0, min(fullHeight, fullHeight - fillHeight))
+    }
+
+    private func resolvedFillHeight(forHour hour: Double, fullHeight: CGFloat) -> CGFloat {
+        let safeTotalSeconds = totalFocusedSeconds
+        let proxyTotalSeconds = Int(hour * 3600.0)
+        let proxy = WorkRewardsProgressColumn(
+            rewards: rewards,
+            totalFocusedSeconds: proxyTotalSeconds,
+            highestRewardSeconds: highestRewardSeconds,
+            rowHeight: rowHeight,
+            spacing: spacing
+        )
+        _ = safeTotalSeconds
+        return proxy.resolvedFillHeight(fullHeight: fullHeight)
     }
 
     static func contentHeight(rewardCount: Int, rowHeight: CGFloat, spacing: CGFloat) -> CGFloat {
@@ -597,10 +640,7 @@ final class WorkTimerPreparationViewModel: ObservableObject {
 
     func start(with situation: WorkSituationOption) {
         selectedSituation = situation
-        activeSession = WorkTimerSession(
-            situation: situation,
-            durationOption: selectedDurationOption
-        )
+        activeSession = WorkTimerSession(situation: situation, durationOption: selectedDurationOption)
     }
 
     func selectDuration(at index: Int) {
@@ -753,9 +793,7 @@ struct WorkSituationOption: Identifiable, Equatable, Hashable {
         runningBackgroundResourceName: "work"
     )
 
-    static let defaultOptions: [WorkSituationOption] = [
-        .workClay
-    ]
+    static let defaultOptions: [WorkSituationOption] = [.workClay]
 }
 
 enum WorkSessionDurationOption: Hashable, Identifiable {
@@ -770,37 +808,29 @@ enum WorkSessionDurationOption: Hashable, Identifiable {
 
     var id: String {
         switch self {
-        case .minutes(let minutes):
-            return "minutes_\(minutes)"
-        case .unlimited:
-            return "unlimited"
+        case .minutes(let minutes): return "minutes_\(minutes)"
+        case .unlimited: return "unlimited"
         }
     }
 
     var displayTitle: String {
         switch self {
-        case .minutes(let minutes):
-            return "\(minutes)分"
-        case .unlimited:
-            return "無制限"
+        case .minutes(let minutes): return "\(minutes)分"
+        case .unlimited: return "無制限"
         }
     }
 
     var subtitleText: String {
         switch self {
-        case .minutes(let minutes):
-            return "\(minutes)分集中します"
-        case .unlimited:
-            return "終了するまで集中時間を計測します"
+        case .minutes(let minutes): return "\(minutes)分集中します"
+        case .unlimited: return "終了するまで集中時間を計測します"
         }
     }
 
     var totalSeconds: Int? {
         switch self {
-        case .minutes(let minutes):
-            return minutes * 60
-        case .unlimited:
-            return nil
+        case .minutes(let minutes): return minutes * 60
+        case .unlimited: return nil
         }
     }
 }
@@ -833,7 +863,6 @@ private struct WorkTimerRunningView: View {
             let topPadding = geo.safeAreaInsets.top + 18
             let bottomInset = max(geo.safeAreaInsets.bottom, 24)
             let availableHeight = geo.size.height - geo.safeAreaInsets.top - bottomInset
-
             let timerToVideoSpacing: CGFloat = 12
             let desiredVideoHeight = min(max(availableHeight * 0.64, 340), 660)
             let maxVideoHeight = max(130, availableHeight - 130)
@@ -925,11 +954,7 @@ private struct WorkTimerRunningView: View {
         }
     }
 
-    private func runningControlButton(
-        title: String,
-        backgroundColor: Color,
-        action: @escaping () -> Void
-    ) -> some View {
+    private func runningControlButton(title: String, backgroundColor: Color, action: @escaping () -> Void) -> some View {
         Button(action: action) {
             Text(title)
                 .font(.system(size: 18, weight: .bold))
@@ -963,32 +988,27 @@ private struct WorkRunningVideoCard: View {
                 .blur(radius: 22)
                 .padding(10)
 
-            WorkRunningBackgroundLayer(
-                resourceName: resourceName,
-                shouldPlay: shouldPlay
-            )
-            .clipShape(
-                RoundedRectangle(cornerRadius: cornerRadius, style: .continuous)
-            )
-            .overlay(
-                RoundedRectangle(cornerRadius: cornerRadius, style: .continuous)
-                    .fill(
-                        LinearGradient(
-                            colors: [
-                                Color.white.opacity(0.08),
-                                Color.clear,
-                                Color.black.opacity(0.14)
-                            ],
-                            startPoint: .top,
-                            endPoint: .bottom
+            WorkRunningBackgroundLayer(resourceName: resourceName, shouldPlay: shouldPlay)
+                .clipShape(RoundedRectangle(cornerRadius: cornerRadius, style: .continuous))
+                .overlay(
+                    RoundedRectangle(cornerRadius: cornerRadius, style: .continuous)
+                        .fill(
+                            LinearGradient(
+                                colors: [
+                                    Color.white.opacity(0.08),
+                                    Color.clear,
+                                    Color.black.opacity(0.14)
+                                ],
+                                startPoint: .top,
+                                endPoint: .bottom
+                            )
                         )
-                    )
-                    .blendMode(.screen)
-            )
-            .overlay(
-                RoundedRectangle(cornerRadius: cornerRadius, style: .continuous)
-                    .stroke(Color.white.opacity(0.10), lineWidth: 1)
-            )
+                        .blendMode(.screen)
+                )
+                .overlay(
+                    RoundedRectangle(cornerRadius: cornerRadius, style: .continuous)
+                        .stroke(Color.white.opacity(0.10), lineWidth: 1)
+                )
         }
         .compositingGroup()
         .shadow(color: .black.opacity(0.26), radius: 22, x: 0, y: 14)
@@ -1037,10 +1057,8 @@ private final class WorkTimerRunningViewModel: ObservableObject {
         timerTask = Task { @MainActor in
             while !Task.isCancelled {
                 try? await Task.sleep(nanoseconds: 1_000_000_000)
-
                 if Task.isCancelled { break }
                 if isPaused || isCompleted { continue }
-
                 tick()
             }
         }
@@ -1054,7 +1072,6 @@ private final class WorkTimerRunningViewModel: ObservableObject {
 
     func togglePause() {
         guard !isCompleted else { return }
-
         isPaused.toggle()
 
         if isPaused {
@@ -1160,7 +1177,6 @@ private final class WorkSessionAmbientAudioController {
     @MainActor
     func fadeOutAndPause(duration: TimeInterval) {
         guard let player else { return }
-
         fadeTask?.cancel()
         let currentVolume = max(0, min(targetVolume, player.volume))
         scheduleFade(from: currentVolume, to: 0, duration: duration) {
@@ -1172,7 +1188,6 @@ private final class WorkSessionAmbientAudioController {
     @MainActor
     func fadeOutAndStop(duration: TimeInterval) {
         guard let player else { return }
-
         fadeTask?.cancel()
         let currentVolume = max(0, min(targetVolume, player.volume))
         scheduleFade(from: currentVolume, to: 0, duration: duration) {
@@ -1202,12 +1217,7 @@ private final class WorkSessionAmbientAudioController {
     }
 
     @MainActor
-    private func scheduleFade(
-        from startVolume: Float,
-        to endVolume: Float,
-        duration: TimeInterval,
-        completion: (() -> Void)? = nil
-    ) {
+    private func scheduleFade(from startVolume: Float, to endVolume: Float, duration: TimeInterval, completion: (() -> Void)? = nil) {
         fadeTask?.cancel()
 
         guard let player else {
@@ -1222,7 +1232,6 @@ private final class WorkSessionAmbientAudioController {
         fadeTask = Task { @MainActor in
             for step in 0...stepCount {
                 guard !Task.isCancelled else { return }
-
                 let progress = Float(step) / Float(stepCount)
                 let nextVolume = startVolume + ((endVolume - startVolume) * progress)
                 player.volume = max(0, min(targetVolume, nextVolume))
@@ -1260,9 +1269,7 @@ private final class WorkSessionAmbientAudioController {
     }
 
     private func findAudioFileURLInBundle(named name: String) -> URL? {
-        if let cachedBundleURL {
-            return cachedBundleURL
-        }
+        if let cachedBundleURL { return cachedBundleURL }
 
         let candidates = ["m4a", "mp3", "wav", "aif", "aiff", "caf"]
         for ext in candidates {
@@ -1275,9 +1282,7 @@ private final class WorkSessionAmbientAudioController {
     }
 
     private func findAudioDataAsset(named name: String) -> Data? {
-        if let cachedAssetData {
-            return cachedAssetData
-        }
+        if let cachedAssetData { return cachedAssetData }
 
         if let data = NSDataAsset(name: name)?.data {
             cachedAssetData = data
@@ -1305,9 +1310,7 @@ private struct WorkSituationCarousel: View {
                         situation: single,
                         cardWidth: cardWidth,
                         isSelected: single == selectedSituation,
-                        action: {
-                            onSelect(single)
-                        }
+                        action: { onSelect(single) }
                     )
                     Spacer(minLength: 0)
                 }
@@ -1319,9 +1322,7 @@ private struct WorkSituationCarousel: View {
                                 situation: option,
                                 cardWidth: cardWidth,
                                 isSelected: option == selectedSituation,
-                                action: {
-                                    onSelect(option)
-                                }
+                                action: { onSelect(option) }
                             )
                         }
                     }
@@ -1339,7 +1340,7 @@ private struct WorkSituationCard: View {
     let action: () -> Void
 
     private var cardHeight: CGFloat {
-        cardWidth / MemoryPhotoCardMetrics.aspectRatio
+        cardWidth / WorkCardMetrics.aspectRatio
     }
 
     var body: some View {
@@ -1350,20 +1351,20 @@ private struct WorkSituationCard: View {
                 .frame(width: cardWidth, height: cardHeight)
                 .clipShape(
                     RoundedRectangle(
-                        cornerRadius: MemoryPhotoCardMetrics.cornerRadius,
+                        cornerRadius: WorkCardMetrics.cornerRadius,
                         style: .continuous
                     )
                 )
                 .shadow(
                     color: .black.opacity(isSelected ? 0.28 : 0.18),
-                    radius: MemoryPhotoCardMetrics.shadowRadius,
+                    radius: WorkCardMetrics.shadowRadius,
                     x: 0,
-                    y: MemoryPhotoCardMetrics.shadowYOffset
+                    y: WorkCardMetrics.shadowYOffset
                 )
                 .scaleEffect(isSelected ? 1.0 : 0.985)
                 .contentShape(
                     RoundedRectangle(
-                        cornerRadius: MemoryPhotoCardMetrics.cornerRadius,
+                        cornerRadius: WorkCardMetrics.cornerRadius,
                         style: .continuous
                     )
                 )
@@ -1413,28 +1414,16 @@ private struct DurationSelectionSlider: View {
             .gesture(
                 DragGesture(minimumDistance: 0)
                     .onChanged { value in
-                        updateSelection(
-                            for: value.location.x,
-                            usableWidth: usableWidth,
-                            maxIndex: maxIndex
-                        )
+                        updateSelection(for: value.location.x, usableWidth: usableWidth, maxIndex: maxIndex)
                     }
                     .onEnded { value in
-                        updateSelection(
-                            for: value.location.x,
-                            usableWidth: usableWidth,
-                            maxIndex: maxIndex
-                        )
+                        updateSelection(for: value.location.x, usableWidth: usableWidth, maxIndex: maxIndex)
                     }
             )
             .simultaneousGesture(
                 SpatialTapGesture()
                     .onEnded { value in
-                        updateSelection(
-                            for: value.location.x,
-                            usableWidth: usableWidth,
-                            maxIndex: maxIndex
-                        )
+                        updateSelection(for: value.location.x, usableWidth: usableWidth, maxIndex: maxIndex)
                     }
             )
         }
@@ -1498,4 +1487,11 @@ private struct WorkRunningBackgroundLayer: View {
             Bundle.main.url(forResource: resourceName, withExtension: $0) != nil
         }
     }
+}
+
+private enum WorkCardMetrics {
+    static let cornerRadius: CGFloat = 20
+    static let shadowRadius: CGFloat = 16
+    static let shadowYOffset: CGFloat = 10
+    static let aspectRatio: CGFloat = 367.0 / 512.0
 }
