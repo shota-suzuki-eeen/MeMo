@@ -942,7 +942,7 @@ struct GachaView: View {
                     reward: reward,
                     isLarge: false,
                     showsText: false,
-                    showsAccentBorder: false
+                    showsAccentBorder: true
                 )
                 .frame(width: side, height: side)
                 .contentShape(RoundedRectangle(cornerRadius: Layout.gridCornerRadius, style: .continuous))
@@ -1163,56 +1163,78 @@ private struct ResultRewardCard: View {
     let showsText: Bool
     let showsAccentBorder: Bool
 
+    private var cornerRadius: CGFloat {
+        isLarge ? 26 : 16
+    }
+
+    private var backgroundOpacity: Double {
+        isLarge ? 0.92 : 0.88
+    }
+
+    private var rarityGlowSize: CGFloat {
+        isLarge ? 178 : 58
+    }
+
+    private var rarityGlowBlur: CGFloat {
+        isLarge ? 24 : 10
+    }
+
+    private var imagePadding: CGFloat {
+        isLarge ? 18 : 7
+    }
+
     var body: some View {
         ZStack {
-            RoundedRectangle(cornerRadius: isLarge ? 26 : 16, style: .continuous)
-                .fill(Color.white.opacity(isLarge ? 0.92 : 0.88))
-
-            RoundedRectangle(cornerRadius: isLarge ? 26 : 16, style: .continuous)
-                .fill(
-                    LinearGradient(
-                        colors: [
-                            reward.rarity.accentColor.opacity(isLarge ? 0.26 : 0.18),
-                            Color.white.opacity(0.10)
-                        ],
-                        startPoint: .topLeading,
-                        endPoint: .bottomTrailing
-                    )
-                )
+            RoundedRectangle(cornerRadius: cornerRadius, style: .continuous)
+                .fill(Color.black.opacity(backgroundOpacity))
 
             if showsAccentBorder {
-                RoundedRectangle(cornerRadius: isLarge ? 26 : 16, style: .continuous)
-                    .stroke(reward.rarity.accentColor.opacity(0.95), lineWidth: 3)
+                RoundedRectangle(cornerRadius: cornerRadius, style: .continuous)
+                    .stroke(reward.rarity.accentColor.opacity(0.96), lineWidth: isLarge ? 3 : 2.2)
             }
 
             VStack(spacing: isLarge ? 14 : 0) {
-                Image(reward.imageName)
-                    .resizable()
-                    .scaledToFit()
-                    .padding(isLarge ? 18 : 7)
-                    .frame(maxWidth: .infinity, maxHeight: .infinity)
+                ZStack {
+                    Circle()
+                        .fill(reward.rarity.accentColor.opacity(isLarge ? 0.32 : 0.34))
+                        .frame(width: rarityGlowSize, height: rarityGlowSize)
+                        .blur(radius: rarityGlowBlur)
+
+                    Circle()
+                        .fill(reward.rarity.accentColor.opacity(isLarge ? 0.16 : 0.18))
+                        .frame(width: rarityGlowSize * 0.68, height: rarityGlowSize * 0.68)
+                        .blur(radius: rarityGlowBlur * 0.55)
+
+                    Image(reward.imageName)
+                        .resizable()
+                        .scaledToFit()
+                        .padding(imagePadding)
+                        .frame(maxWidth: .infinity, maxHeight: .infinity)
+                }
+                .frame(maxWidth: .infinity, maxHeight: isLarge ? 208 : .infinity)
 
                 if showsText {
                     VStack(spacing: 5) {
                         Text(reward.title)
                             .font(.system(size: 24, weight: .black))
-                            .foregroundStyle(.black.opacity(0.86))
+                            .foregroundStyle(.white.opacity(0.94))
                             .multilineTextAlignment(.center)
                             .lineLimit(2)
                             .minimumScaleFactor(0.72)
 
                         Text(reward.subtitle)
                             .font(.system(size: 14, weight: .bold))
-                            .foregroundStyle(.black.opacity(0.58))
+                            .foregroundStyle(.white.opacity(0.72))
                             .multilineTextAlignment(.center)
                     }
                     .padding(.horizontal, 14)
                     .padding(.bottom, 18)
                 }
             }
+            .padding(isLarge ? 0 : 4)
         }
-        .clipShape(RoundedRectangle(cornerRadius: isLarge ? 26 : 16, style: .continuous))
-        .shadow(color: reward.rarity.accentColor.opacity(isLarge ? 0.35 : 0.0), radius: isLarge ? 20 : 0)
+        .clipShape(RoundedRectangle(cornerRadius: cornerRadius, style: .continuous))
+        .shadow(color: reward.rarity.accentColor.opacity(isLarge ? 0.35 : 0.16), radius: isLarge ? 20 : 8)
     }
 }
 
