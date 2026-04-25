@@ -324,7 +324,9 @@ struct HomeView: View {
         static let topStatusButtonIconSize: CGFloat = 42
 
         static let happinessGaugeTop: CGFloat = 32
-        static let happinessGaugeLeading: CGFloat = 96
+        static let happinessGaugeLeading: CGFloat = 28
+        static let fullnessGaugeLeading: CGFloat = 178
+        static let topStatusButtonsTrailing: CGFloat = 28
         static let happinessGaugeOuterSize: CGFloat = 135
         static let happinessGaugeInnerSize: CGFloat = 115
         static let happinessRewardButtonFont: CGFloat = 12
@@ -791,8 +793,8 @@ struct HomeView: View {
             spacing: Layout.topStatusButtonsSpacing
         )
         .padding(.top, Layout.topStatusButtonsTop)
-        .padding(.leading, Layout.topStatusButtonsLeading)
-        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
+        .padding(.trailing, Layout.topStatusButtonsTrailing)
+        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topTrailing)
         .zIndex(Layout.zBanner + 1)
     }
 
@@ -884,8 +886,8 @@ struct HomeView: View {
             innerSize: Layout.fullnessGaugeInnerSize
         )
         .padding(.top, Layout.fullnessGaugeTop)
-        .padding(.trailing, Layout.fullnessGaugeTrailing)
-        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topTrailing)
+        .padding(.leading, Layout.fullnessGaugeLeading)
+        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
     }
 
     @ViewBuilder
