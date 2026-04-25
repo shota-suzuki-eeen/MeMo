@@ -1,38 +1,49 @@
-////
-////  AdBannerView.swift
-////  MeMo
-////
-////  Created by shota suzuki on 2026/03/20.
-////
 //
-//import SwiftUI
+//  AdBannerView.swift
+//  MeMo
 //
-///// ✅ 使う側はこれを置くだけ
-///// - 例：Home の上部 / 下部など
-//struct AdBannerView: View {
-//    @AppStorage("isDeveloperMode") private var isDeveloperMode: Bool = false
+//  Updated for Home / Work banner selection.
 //
-//    var height: CGFloat = 70
-//    var maxBannerWidth: CGFloat? = 320
-//    var contentHeight: CGFloat = 50
-//
-//    // ✅ 追加：ここで微調整
-//    var topOffset: CGFloat = 10
-//
-//    var body: some View {
-//        Group {
-//            if isDeveloperMode {
-//                EmptyView()
-//            } else {
-//                BannerArea(
-//                    height: height,
-//                    adUnitID: AdUnitID.bannerHome,
-//                    maxWidth: maxBannerWidth,
-//                    contentHeight: contentHeight,
-//                    topOffset: topOffset
-//                )
-//                .frame(height: height)
-//            }
-//        }
-//    }
-//}
+
+import SwiftUI
+
+struct AdBannerView: View {
+    enum Placement {
+        case home
+        case work
+
+        var adUnitID: String {
+            switch self {
+            case .home:
+                return AdUnitID.bannerHome
+            case .work:
+                return AdUnitID.bannerWork
+            }
+        }
+    }
+
+    @AppStorage("isDeveloperMode") private var isDeveloperMode: Bool = false
+
+    var placement: Placement = .home
+    var height: CGFloat = 70
+    var maxBannerWidth: CGFloat? = 320
+    var contentHeight: CGFloat = 50
+    var topOffset: CGFloat = 10
+
+    var body: some View {
+        Group {
+            if isDeveloperMode {
+                EmptyView()
+            } else {
+                BannerArea(
+                    height: height,
+                    adUnitID: placement.adUnitID,
+                    maxWidth: maxBannerWidth,
+                    contentHeight: contentHeight,
+                    topOffset: topOffset
+                )
+                .frame(height: height)
+            }
+        }
+    }
+}

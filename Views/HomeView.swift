@@ -317,13 +317,13 @@ struct HomeView: View {
         static let leftTopPaddingLeading: CGFloat = 18
         static let meterStackSpacing: CGFloat = 18
 
-        static let topStatusButtonsTop: CGFloat = 34
+        static let topStatusButtonsTop: CGFloat = 60
         static let topStatusButtonsLeading: CGFloat = 18
         static let topStatusButtonsSpacing: CGFloat = 10
         static let topStatusButtonSize: CGFloat = 56
         static let topStatusButtonIconSize: CGFloat = 42
 
-        static let happinessGaugeTop: CGFloat = 32
+        static let happinessGaugeTop: CGFloat = 55
         static let happinessGaugeLeading: CGFloat = 28
         static let fullnessGaugeLeading: CGFloat = 178
         static let topStatusButtonsTrailing: CGFloat = 28
@@ -340,7 +340,7 @@ struct HomeView: View {
         static let redMinWidth: CGFloat = 18
 
 
-        static let fullnessGaugeTop: CGFloat = 32
+        static let fullnessGaugeTop: CGFloat = 55
         static let fullnessGaugeTrailing: CGFloat = 28
         static let fullnessGaugeOuterSize: CGFloat = 135
         static let fullnessGaugeInnerSize: CGFloat = 115

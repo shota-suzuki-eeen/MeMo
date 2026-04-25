@@ -2,7 +2,7 @@
 //  ZukanView.swift
 //  MeMo
 //
-//  Updated for character / wallpaper switching UI.
+//  Updated for character / wallpaper switching UI and AdMob interstitial display.
 //
 
 import SwiftUI
@@ -112,7 +112,9 @@ struct ZukanView: View {
         .navigationTitle("図鑑")
         .navigationBarTitleDisplayMode(.inline)
         .onAppear {
+            NotificationCenter.default.post(name: .memoHideHomeBannerAd, object: nil)
             bgmManager.switchBackground(to: .zukan)
+            AdMobManager.shared.prepareInterstitialCharacterSet()
             guard let state else { return }
 
             state.ensureInitialPetsIfNeeded()
@@ -122,6 +124,7 @@ struct ZukanView: View {
             updateWidgetSnapshot(state: state, forceReload: true)
         }
         .onDisappear {
+            NotificationCenter.default.post(name: .memoShowHomeBannerAd, object: nil)
             bgmManager.restoreDefaultBackground()
         }
         .onChange(of: state?.normalizedCurrentPetID) { _, _ in
@@ -355,10 +358,18 @@ struct ZukanView: View {
     private func handleTrainTapped(state: AppState, id: String) {
         bgmManager.playSE(.push)
 
-        state.currentPetID = id
-        selectedPetID = id
-        characterCurrentPage = viewModel.pageIndex(for: id, state: state)
-        save(state: state, forceWidgetReload: true)
+        let applySelection = {
+            state.currentPetID = id
+            selectedPetID = id
+            characterCurrentPage = viewModel.pageIndex(for: id, state: state)
+            save(state: state, forceWidgetReload: true)
+        }
+
+        if isDeveloperMode {
+            applySelection()
+        } else {
+            AdMobManager.shared.showInterstitialCharacterSetThenRun(applySelection)
+        }
     }
 
     private func handleWallpaperSetTapped() {

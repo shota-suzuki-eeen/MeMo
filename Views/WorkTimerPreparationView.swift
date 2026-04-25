@@ -4,6 +4,7 @@
 //
 //  Updated to add work focus rewards, a reward list screen,
 //  and the dedicated work background across the work flow.
+//  Updated to show Banner_Work in the timer screen and Interstitial_Get after reward claims.
 //
 
 import SwiftUI
@@ -60,6 +61,10 @@ struct WorkTimerPreparationView: View {
         .onAppear {
             bgmManager.switchBackground(to: .main)
             viewModel.refreshFocusSummaryIfNeeded()
+            AdMobManager.shared.prepareInterstitialGetIfNeeded(isRewardClaimable: viewModel.hasClaimableRewards)
+        }
+        .onChange(of: viewModel.hasClaimableRewards) { _, canClaim in
+            AdMobManager.shared.prepareInterstitialGetIfNeeded(isRewardClaimable: canClaim)
         }
         .onDisappear {
             if viewModel.activeSession == nil {
@@ -238,6 +243,7 @@ private struct WorkFocusRewardsView: View {
         .ignoresSafeArea()
         .onAppear {
             viewModel.refreshFocusSummaryIfNeeded()
+            AdMobManager.shared.prepareInterstitialGetIfNeeded(isRewardClaimable: viewModel.hasClaimableRewards)
         }
     }
 
@@ -325,8 +331,13 @@ private struct WorkFocusRewardsView: View {
                                 isClaimed: viewModel.isRewardClaimed(reward),
                                 remainingText: viewModel.remainingTimeText(for: reward),
                                 onClaim: {
+                                    let shouldShowInterstitial = viewModel.canClaim(reward)
                                     withAnimation(.spring(response: 0.26, dampingFraction: 0.88)) {
                                         viewModel.claim(reward)
+                                    }
+                                    if shouldShowInterstitial {
+                                        AdMobManager.shared.showInterstitialGetThenRun()
+                                        AdMobManager.shared.prepareInterstitialGetIfNeeded(isRewardClaimable: viewModel.hasClaimableRewards)
                                     }
                                 }
                             )
@@ -865,9 +876,10 @@ private struct WorkTimerRunningView: View {
             let availableHeight = geo.size.height - geo.safeAreaInsets.top - bottomInset
             let timerToVideoSpacing: CGFloat = 12
             let desiredVideoHeight = min(max(availableHeight * 0.64, 340), 660)
-            let maxVideoHeight = max(130, availableHeight - 130)
+            let maxVideoHeight = max(130, availableHeight - 210)
             let videoHeight = min(desiredVideoHeight, maxVideoHeight)
             let videoToButtonsSpacing: CGFloat = 16
+            let bannerTopSpacing: CGFloat = 8
 
             ZStack {
                 Image("work_background")
@@ -897,6 +909,18 @@ private struct WorkTimerRunningView: View {
                     controlButtons
                         .padding(.horizontal, horizontalPadding)
                         .padding(.top, videoToButtonsSpacing)
+
+                    // ✅ Banner_Work
+                    // workタイマー画面の下部（ボタンの下）に表示。
+                    AdBannerView(
+                        placement: .work,
+                        height: 64,
+                        maxBannerWidth: 320,
+                        contentHeight: 50,
+                        topOffset: 6
+                    )
+                    .padding(.horizontal, horizontalPadding)
+                    .padding(.top, bannerTopSpacing)
                 }
                 .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
             }

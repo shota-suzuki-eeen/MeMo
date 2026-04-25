@@ -2,7 +2,7 @@
 //  GachaView.swift
 //  MeMo
 //
-//  Updated for the step-based gacha specification with screen BGM switching.
+//  Updated for the step-based gacha specification with screen BGM switching and AdMob rewarded ads.
 //
 
 import SwiftUI
@@ -155,6 +155,8 @@ struct GachaView: View {
     @Environment(\.modelContext) private var modelContext
     @EnvironmentObject private var bgmManager: BGMManager
     @Query private var states: [AppState]
+
+    @StateObject private var rewardedAdManager = RewardedAdManager(adUnitID: AdUnitID.rewardGacha)
 
     @State private var phase: Phase = .idle
     @State private var drawMode: DrawMode = .single
@@ -348,6 +350,8 @@ struct GachaView: View {
             tapPromptAnimating = true
             state?.ensureInitialPetsIfNeeded()
             state?.gachaResetIfNeeded(now: Date())
+            rewardedAdManager.loadIfNeeded()
+            AdMobManager.shared.prepareRewardGacha()
         }
         .onDisappear {
             rollTask?.cancel()
@@ -562,7 +566,21 @@ struct GachaView: View {
     }
 
     private func performRewardedAdThenFreeTenDraw() {
-        beginFreeTenDraw()
+        guard canFreeTenDraw else {
+            showToast("現在利用できる無料10回はありません")
+            return
+        }
+
+        rewardedAdManager.show(
+            onReward: {
+                beginFreeTenDraw()
+            },
+            onUnavailable: {
+                rewardedAdManager.loadIfNeeded()
+                AdMobManager.shared.prepareRewardGacha()
+                showToast("広告を読み込み中です。少し待ってからもう一度お試しください")
+            }
+        )
     }
 
     private func beginFreeTenDraw() {
@@ -1037,6 +1055,8 @@ struct GachaView: View {
                 rewards = []
                 lastFreeAdSlot = nil
                 lastDrawWasFreeAd = false
+                rewardedAdManager.loadIfNeeded()
+                AdMobManager.shared.prepareRewardGacha()
             }
         }
     }

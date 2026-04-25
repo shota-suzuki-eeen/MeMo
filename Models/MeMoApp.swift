@@ -20,9 +20,7 @@ struct MeMoApp: App {
 
     init() {
         // ✅ AdMob 初期化（アプリ起動時に1回だけ）
-        #if canImport(GoogleMobileAds)
-//        AdMobManager.shared.start()
-        #endif
+        AdMobManager.shared.start()
     }
 
     var body: some Scene {
