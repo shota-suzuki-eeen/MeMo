@@ -43,6 +43,14 @@ fileprivate enum GachaRarity: String, CaseIterable, Identifiable {
         "\(capsuleAssetName)_open"
     }
 
+    var resultBackgroundAssetName: String {
+        switch self {
+        case .blue: return "blue_block"
+        case .red: return "red_block"
+        case .gold: return "gold_block"
+        }
+    }
+
     var baseWeight: Double {
         switch self {
         case .blue: return 66
@@ -65,6 +73,17 @@ fileprivate struct GachaReward: Identifiable, Hashable {
     let title: String
     let subtitle: String
     let imageName: String
+
+    var categoryDisplayName: String {
+        switch kind {
+        case .food:
+            return "ごはん"
+        case .character:
+            return "キャラクター"
+        case .specialItem:
+            return "スペシャル"
+        }
+    }
 }
 
 fileprivate struct GachaProbabilityRow: Identifiable {
@@ -860,7 +879,8 @@ struct GachaView: View {
                 reward: reward,
                 isLarge: true,
                 showsText: true,
-                showsAccentBorder: true
+                showsAccentBorder: false,
+                usesRarityBackgroundAsset: true
             )
             .frame(width: Layout.singleResultCardWidth, height: Layout.singleResultCardHeight)
             .onTapGesture { }
@@ -895,7 +915,7 @@ struct GachaView: View {
 
             capsuleResultGrid(rewards: rewards, contentWidth: contentWidth)
 
-            Text("アイテム以外の場所をタップで閉じる / 長押しで拡大")
+            Text("画面をタップで戻る / カード長押しで詳細")
                 .font(.system(size: 13, weight: .semibold))
                 .foregroundStyle(.white.opacity(0.88))
                 .multilineTextAlignment(.center)
@@ -933,323 +953,338 @@ struct GachaView: View {
 
     private func capsuleResultGrid(rewards: [GachaReward], contentWidth: CGFloat) -> some View {
         let columns = Array(repeating: GridItem(.flexible(), spacing: Layout.gridSpacing), count: 5)
-        let side = max(48, min(72, (contentWidth - (Layout.gridSpacing * 4)) / 5))
+        let side = max(62, min(76, (contentWidth - (Layout.gridSpacing * 4)) / 5))
 
         return LazyVGrid(columns: columns, spacing: Layout.gridSpacing) {
             ForEach(rewards, id: \.id) { reward in
                 ResultRewardCard(
                     reward: reward,
                     isLarge: false,
-                    showsText: false,
-                    showsAccentBorder: true
+                    showsText: true,
+                    showsAccentBorder: false,
+                    usesRarityBackgroundAsset: true
                 )
-                .frame(width: side, height: side)
+                .frame(width: side, height: side + 34)
                 .contentShape(RoundedRectangle(cornerRadius: Layout.gridCornerRadius, style: .continuous))
-                .onTapGesture { }
-                .onLongPressGesture(minimumDuration: 0.35) {
-                    revealOverlayReward = reward
+                .onLongPressGesture(minimumDuration: 0.28) {
+                    bgmManager.playSE(.push)
+                    withAnimation(.spring(response: 0.28, dampingFraction: 0.82)) {
+                        revealOverlayReward = reward
+                    }
                 }
+                .onTapGesture { }
             }
         }
-        .padding(16)
-        .background(Color.black.opacity(0.32), in: RoundedRectangle(cornerRadius: 24, style: .continuous))
+        .padding(14)
+        .background(Color.black.opacity(0.28), in: RoundedRectangle(cornerRadius: 24, style: .continuous))
     }
 
+    @ViewBuilder
     private func enlargedRewardOverlay(reward: GachaReward, safeTop: CGFloat, safeBottom: CGFloat) -> some View {
         ZStack {
             Color.black.opacity(0.72)
                 .ignoresSafeArea()
-
-            ScrollView(showsIndicators: false) {
-                VStack(spacing: 18) {
-                    ResultHeadlineView(reward: reward)
-
-                    ResultRewardCard(
-                        reward: reward,
-                        isLarge: true,
-                        showsText: true,
-                        showsAccentBorder: true
-                    )
-                    .frame(width: Layout.singleResultCardWidth, height: Layout.singleResultCardHeight)
-
-                    Text("タップで閉じる")
-                        .font(.system(size: 14, weight: .bold))
-                        .foregroundStyle(.white.opacity(0.9))
+                .contentShape(Rectangle())
+                .onTapGesture {
+                    withAnimation(.easeOut(duration: 0.18)) {
+                        revealOverlayReward = nil
+                    }
                 }
-                .frame(maxWidth: .infinity)
-                .padding(.top, safeTop + 26)
-                .padding(.bottom, max(safeBottom, 16) + 26)
-                .padding(.horizontal, 20)
-                .frame(minHeight: UIScreen.main.bounds.height - safeTop - safeBottom)
-            }
-        }
-        .contentShape(Rectangle())
-        .simultaneousGesture(
-            TapGesture().onEnded {
-                closeEnlargedRewardOverlay()
-            }
-        )
-        .transition(.opacity)
-        .zIndex(60)
-    }
 
-    private func closeEnlargedRewardOverlay() {
-        withAnimation(.easeOut(duration: 0.18)) {
-            revealOverlayReward = nil
+            VStack(spacing: 18) {
+                ResultHeadlineView(reward: reward)
+
+                ResultRewardCard(
+                    reward: reward,
+                    isLarge: true,
+                    showsText: true,
+                    showsAccentBorder: false,
+                    usesRarityBackgroundAsset: true
+                )
+                .frame(width: Layout.singleResultCardWidth, height: Layout.singleResultCardHeight)
+                .onTapGesture { }
+
+                Text("画面をタップで閉じる")
+                    .font(.system(size: 14, weight: .semibold))
+                    .foregroundStyle(.white.opacity(0.88))
+            }
+            .padding(.top, safeTop + 18)
+            .padding(.bottom, safeBottom + 18)
+            .padding(.horizontal, 22)
         }
+        .transition(.opacity.combined(with: .scale(scale: 0.96)))
+        .zIndex(50)
     }
 
     private func handleOverlayTap() {
-        switch phase {
-        case .idle, .rolling, .openingSingle, .openingTen:
-            return
-
-        case .waitingTap:
-            bgmManager.playSE(.open)
-            openingTask?.cancel()
-
-            if drawMode == .single {
-                phase = .openingSingle
-                openingTask = Task {
-                    try? await Task.sleep(nanoseconds: 520_000_000)
-                    guard !Task.isCancelled else { return }
-                    await MainActor.run {
-                        if phase == .openingSingle {
-                            phase = .showingSingleResult
-                        }
-                    }
-                }
-            } else {
-                phase = .openingTen
-                openingTask = Task {
-                    try? await Task.sleep(nanoseconds: 650_000_000)
-                    guard !Task.isCancelled else { return }
-                    await MainActor.run {
-                        if phase == .openingTen {
-                            phase = .showingTenResult
-                        }
-                    }
-                }
+        if revealOverlayReward != nil {
+            withAnimation(.easeOut(duration: 0.18)) {
+                revealOverlayReward = nil
             }
+            return
+        }
+
+        switch phase {
+        case .waitingTap:
+            startOpeningSequence()
 
         case .showingSingleResult, .showingTenResult:
-            finishDrawAndReturnToIdle()
+            finishOverlay()
+
+        case .rolling, .openingSingle, .openingTen, .idle:
+            break
         }
     }
 
-    private func finishDrawAndReturnToIdle() {
+    private func startOpeningSequence() {
+        guard phase == .waitingTap else { return }
+
         openingTask?.cancel()
         openingTask = nil
+        bgmManager.playSE(.push)
+
+        switch drawMode {
+        case .single:
+            phase = .openingSingle
+            openingTask = Task {
+                try? await Task.sleep(nanoseconds: 620_000_000)
+                guard !Task.isCancelled else { return }
+                await MainActor.run {
+                    phase = .showingSingleResult
+                }
+            }
+
+        case .ten:
+            phase = .openingTen
+            openingTask = Task {
+                try? await Task.sleep(nanoseconds: 820_000_000)
+                guard !Task.isCancelled else { return }
+                await MainActor.run {
+                    phase = .showingTenResult
+                }
+            }
+        }
+    }
+
+    private func finishOverlay() {
         rollTask?.cancel()
         rollTask = nil
+        openingTask?.cancel()
+        openingTask = nil
         revealOverlayReward = nil
+        persistState()
 
-        do {
-            try modelContext.save()
-        } catch {
-            print("❌ ガチャ結果の保存に失敗しました: \(error.localizedDescription)")
-        }
-
-        withAnimation(.easeOut(duration: 0.2)) {
+        withAnimation(.easeOut(duration: 0.18)) {
             overlayOpacity = 0.0
             phase = .idle
         }
 
-        Task { @MainActor in
-            try? await Task.sleep(nanoseconds: 220_000_000)
-            if phase == .idle {
-                rewards = []
-                lastFreeAdSlot = nil
-                lastDrawWasFreeAd = false
-                rewardedAdManager.loadIfNeeded()
-            }
-        }
+        rewards = []
+        lastFreeAdSlot = nil
+        lastDrawWasFreeAd = false
+        rewardedAdManager.loadIfNeeded()
     }
 
-    private func showToast(_ message: String) {
-        toastMessage = message
-
-        withAnimation(.easeInOut(duration: 0.18)) {
-            showToast = true
-        }
-
-        Task { @MainActor in
-            try? await Task.sleep(nanoseconds: 1_300_000_000)
-            withAnimation(.easeInOut(duration: 0.18)) {
-                showToast = false
-            }
+    private func persistState() {
+        do {
+            try modelContext.save()
+        } catch {
+            showToast("保存に失敗しました")
         }
     }
 
     private func formattedProbability(_ value: Double) -> String {
-        if value >= 10 || value.rounded(.towardZero) == value {
-            return "\(Int(value.rounded()))%"
+        if value >= 1 {
+            return String(format: "%.0f%%", value)
         }
         return String(format: "%.1f%%", value)
     }
+
+    private func showToast(_ message: String) {
+        toastMessage = message
+        withAnimation(.easeOut(duration: 0.2)) {
+            showToast = true
+        }
+
+        Task {
+            try? await Task.sleep(nanoseconds: 2_200_000_000)
+            await MainActor.run {
+                withAnimation(.easeIn(duration: 0.2)) {
+                    showToast = false
+                }
+            }
+        }
+    }
 }
 
-private struct RollingMachineView: View {
+fileprivate struct ResultHeadlineView: View {
+    let reward: GachaReward
+
+    var body: some View {
+        VStack(spacing: 6) {
+            Text(reward.rarity.displayName)
+                .font(.system(size: 22, weight: .black))
+                .foregroundStyle(.white)
+                .padding(.horizontal, 18)
+                .padding(.vertical, 6)
+                .background(reward.rarity.accentColor.opacity(0.88), in: Capsule())
+
+            Text(reward.categoryDisplayName)
+                .font(.system(size: 24, weight: .black))
+                .foregroundStyle(.white)
+                .multilineTextAlignment(.center)
+                .lineLimit(2)
+                .minimumScaleFactor(0.72)
+                .shadow(color: .black.opacity(0.35), radius: 3, y: 2)
+        }
+    }
+}
+
+fileprivate struct ResultRewardCard: View {
+    let reward: GachaReward
+    let isLarge: Bool
+    let showsText: Bool
+    let showsAccentBorder: Bool
+    let usesRarityBackgroundAsset: Bool
+
+    private var cornerRadius: CGFloat {
+        isLarge ? 26 : 18
+    }
+
+    private var imageSize: CGFloat {
+        isLarge ? 176 : 40
+    }
+
+    private var textSize: CGFloat {
+        isLarge ? 21 : 9
+    }
+
+    private var verticalSpacing: CGFloat {
+        isLarge ? 14 : 3
+    }
+
+    var body: some View {
+        ZStack {
+            background
+
+            VStack(spacing: verticalSpacing) {
+                Spacer(minLength: 0)
+
+                Image(reward.imageName)
+                    .resizable()
+                    .scaledToFit()
+                    .frame(width: imageSize, height: imageSize)
+                    .shadow(color: .black.opacity(0.18), radius: isLarge ? 10 : 3, y: isLarge ? 6 : 2)
+
+                if showsText {
+                    Text(reward.title)
+                        .font(.system(size: textSize, weight: .black))
+                        .foregroundStyle(.white)
+                        .lineLimit(isLarge ? 2 : 2)
+                        .minimumScaleFactor(0.62)
+                        .multilineTextAlignment(.center)
+                        .padding(.horizontal, isLarge ? 8 : 2)
+                        .shadow(color: .black.opacity(0.42), radius: 2, y: 1)
+                }
+
+                Spacer(minLength: 0)
+            }
+            .padding(isLarge ? 18 : 7)
+        }
+        .clipShape(RoundedRectangle(cornerRadius: cornerRadius, style: .continuous))
+        .overlay {
+            if showsAccentBorder {
+                RoundedRectangle(cornerRadius: cornerRadius, style: .continuous)
+                    .stroke(reward.rarity.accentColor.opacity(0.92), lineWidth: isLarge ? 3 : 1.5)
+            }
+        }
+        .shadow(color: reward.rarity.accentColor.opacity(isLarge ? 0.34 : 0.18), radius: isLarge ? 18 : 6, y: isLarge ? 9 : 3)
+    }
+
+    @ViewBuilder
+    private var background: some View {
+        if usesRarityBackgroundAsset {
+            Image(reward.rarity.resultBackgroundAssetName)
+                .resizable()
+                .scaledToFill()
+        } else {
+            ZStack {
+                RoundedRectangle(cornerRadius: cornerRadius, style: .continuous)
+                    .fill(Color.white.opacity(0.16))
+
+                RadialGradient(
+                    colors: [
+                        reward.rarity.accentColor.opacity(0.32),
+                        Color.black.opacity(0.18)
+                    ],
+                    center: .center,
+                    startRadius: 4,
+                    endRadius: isLarge ? 170 : 58
+                )
+            }
+        }
+    }
+}
+
+fileprivate struct RollingMachineView: View {
     let assetName: String
     let width: CGFloat
     let startDate: Date
 
     var body: some View {
-        TimelineView(.animation) { timeline in
-            let elapsed = timeline.date.timeIntervalSince(startDate)
-            let rotation = sin(elapsed * 18.0) * 4.5
-            let xOffset = sin(elapsed * 28.0) * 3.5
+        TimelineView(.animation) { context in
+            let elapsed = context.date.timeIntervalSince(startDate)
+            let shake = sin(elapsed * 28) * 7
+            let rotation = sin(elapsed * 22) * 4
 
             Image(assetName)
                 .resizable()
                 .scaledToFit()
                 .frame(width: width)
                 .rotationEffect(.degrees(rotation))
-                .offset(x: xOffset)
-                .shadow(color: .white.opacity(0.22), radius: 24)
+                .offset(x: shake)
+                .shadow(color: .black.opacity(0.34), radius: 18, y: 10)
         }
     }
 }
 
-private struct TapPromptView: View {
+fileprivate struct TapPromptView: View {
     let isAnimating: Bool
     let count: Int
 
     var body: some View {
-        HStack(spacing: 6) {
-            ForEach(0..<max(1, count), id: \.self) { _ in
-                Text("TAP")
-                    .font(.system(size: 24, weight: .black))
-                    .foregroundStyle(.white)
-                    .padding(.horizontal, 16)
-                    .padding(.vertical, 8)
-                    .background(Color.white.opacity(0.14), in: Capsule())
-                    .overlay(
-                        Capsule()
-                            .stroke(Color.white.opacity(0.86), lineWidth: 2)
-                    )
-                    .scaleEffect(isAnimating ? 1.04 : 1.0)
-                    .animation(
-                        .easeInOut(duration: 0.62).repeatForever(autoreverses: true),
-                        value: isAnimating
-                    )
-            }
-        }
-    }
-}
-
-private struct ResultHeadlineView: View {
-    let reward: GachaReward
-
-    var body: some View {
         VStack(spacing: 8) {
-            Text(reward.rarity.displayName)
-                .font(.system(size: 34, weight: .black))
-                .foregroundStyle(reward.rarity.accentColor)
-                .shadow(color: reward.rarity.accentColor.opacity(0.55), radius: 12)
+            Text("タップしてOPEN")
+                .font(.system(size: 24, weight: .black))
+                .foregroundStyle(.white)
 
-            Text(reward.subtitle)
-                .font(.system(size: 15, weight: .bold))
-                .foregroundStyle(.white.opacity(0.88))
+            HStack(spacing: 4) {
+                ForEach(0..<max(count, 1), id: \.self) { _ in
+                    Image(systemName: "hand.tap.fill")
+                        .font(.system(size: 16, weight: .bold))
+                        .foregroundStyle(.white.opacity(0.9))
+                }
+            }
         }
+        .scaleEffect(isAnimating ? 1.04 : 1.0)
+        .animation(.easeInOut(duration: 0.72).repeatForever(autoreverses: true), value: isAnimating)
+        .padding(.horizontal, 22)
+        .padding(.vertical, 12)
+        .background(Color.black.opacity(0.38), in: Capsule())
     }
 }
 
-private struct ResultRewardCard: View {
-    let reward: GachaReward
-    let isLarge: Bool
-    let showsText: Bool
-    let showsAccentBorder: Bool
-
-    private var cornerRadius: CGFloat {
-        isLarge ? 26 : 16
-    }
-
-    private var backgroundOpacity: Double {
-        isLarge ? 0.92 : 0.88
-    }
-
-    private var rarityGlowSize: CGFloat {
-        isLarge ? 178 : 58
-    }
-
-    private var rarityGlowBlur: CGFloat {
-        isLarge ? 24 : 10
-    }
-
-    private var imagePadding: CGFloat {
-        isLarge ? 18 : 7
-    }
-
-    var body: some View {
-        ZStack {
-            RoundedRectangle(cornerRadius: cornerRadius, style: .continuous)
-                .fill(Color.black.opacity(backgroundOpacity))
-
-            if showsAccentBorder {
-                RoundedRectangle(cornerRadius: cornerRadius, style: .continuous)
-                    .stroke(reward.rarity.accentColor.opacity(0.96), lineWidth: isLarge ? 3 : 2.2)
-            }
-
-            VStack(spacing: isLarge ? 14 : 0) {
-                ZStack {
-                    Circle()
-                        .fill(reward.rarity.accentColor.opacity(isLarge ? 0.32 : 0.34))
-                        .frame(width: rarityGlowSize, height: rarityGlowSize)
-                        .blur(radius: rarityGlowBlur)
-
-                    Circle()
-                        .fill(reward.rarity.accentColor.opacity(isLarge ? 0.16 : 0.18))
-                        .frame(width: rarityGlowSize * 0.68, height: rarityGlowSize * 0.68)
-                        .blur(radius: rarityGlowBlur * 0.55)
-
-                    Image(reward.imageName)
-                        .resizable()
-                        .scaledToFit()
-                        .padding(imagePadding)
-                        .frame(maxWidth: .infinity, maxHeight: .infinity)
-                }
-                .frame(maxWidth: .infinity, maxHeight: isLarge ? 208 : .infinity)
-
-                if showsText {
-                    VStack(spacing: 5) {
-                        Text(reward.title)
-                            .font(.system(size: 24, weight: .black))
-                            .foregroundStyle(.white.opacity(0.94))
-                            .multilineTextAlignment(.center)
-                            .lineLimit(2)
-                            .minimumScaleFactor(0.72)
-
-                        Text(reward.subtitle)
-                            .font(.system(size: 14, weight: .bold))
-                            .foregroundStyle(.white.opacity(0.72))
-                            .multilineTextAlignment(.center)
-                    }
-                    .padding(.horizontal, 14)
-                    .padding(.bottom, 18)
-                }
-            }
-            .padding(isLarge ? 0 : 4)
-        }
-        .clipShape(RoundedRectangle(cornerRadius: cornerRadius, style: .continuous))
-        .shadow(color: reward.rarity.accentColor.opacity(isLarge ? 0.35 : 0.16), radius: isLarge ? 20 : 8)
-    }
-}
-
-private struct ToastView: View {
+fileprivate struct ToastView: View {
     let message: String
 
     var body: some View {
         Text(message)
             .font(.system(size: 14, weight: .bold))
             .foregroundStyle(.white)
-            .padding(.horizontal, 16)
-            .padding(.vertical, 11)
-            .background(Color.black.opacity(0.78), in: Capsule())
-            .overlay(
-                Capsule()
-                    .stroke(Color.white.opacity(0.28), lineWidth: 1)
-            )
-            .shadow(radius: 10)
+            .multilineTextAlignment(.center)
+            .padding(.horizontal, 18)
+            .padding(.vertical, 12)
+            .background(Color.black.opacity(0.76), in: Capsule())
+            .padding(.horizontal, 20)
     }
 }
