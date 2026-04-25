@@ -1447,6 +1447,34 @@ struct HomeView: View {
     }
 
     @MainActor
+    private func spawnRareFoodFloatingHearts(count: Int = 5) {
+        guard count > 0 else { return }
+
+        let safeWidth = max(homeContentSize.width, 1)
+        let characterDisplayHeight = min(safeWidth * 0.9, Layout.characterMaxHeight)
+        let baseYOffset = Layout.characterTopOffset - (characterDisplayHeight * 0.38)
+        let xRange = (-safeWidth * 0.22)...(safeWidth * 0.22)
+
+        for index in 0..<count {
+            let heart = FloatingHeart(
+                xOffset: CGFloat.random(in: xRange),
+                yOffset: baseYOffset + CGFloat.random(in: -36...28),
+                size: CGFloat.random(in: 34...62)
+            )
+
+            floatingHearts.append(heart)
+
+            let heartID = heart.id
+            floatingHeartCleanupTasks[heartID]?.cancel()
+            floatingHeartCleanupTasks[heartID] = scheduleMainActorTask(after: 1.05 + (Double(index) * 0.04)) {
+                floatingHearts.removeAll { $0.id == heartID }
+                floatingHeartCleanupTasks.removeValue(forKey: heartID)
+            }
+        }
+    }
+
+
+    @MainActor
     private func registerCharacterPettingTouch(
         at location: CGPoint,
         in gestureAreaSize: CGSize,
@@ -2106,7 +2134,10 @@ struct HomeView: View {
             return
         }
 
-        pendingFoodFeedID = selectedFood.id
+        let selectedFoodID = selectedFood.id
+        let shouldShowRareFoodEffect = !selectedFood.isShopEligible
+
+        pendingFoodFeedID = selectedFoodID
         isFoodFeedingAnimationRunning = true
         foodSelectorDragAnchorFoodID = nil
         foodSelectorScrollSelectionDelta = 0
@@ -2120,13 +2151,18 @@ struct HomeView: View {
         }
 
         foodFeedResolutionTask?.cancel()
-        foodFeedResolutionTask = scheduleMainActorTask(after: 0.16) { [selectedFoodID = selectedFood.id] in
+        foodFeedResolutionTask = scheduleMainActorTask(after: 0.16) { [selectedFoodID, shouldShowRareFoodEffect] in
             let didFeed = resolveFood(foodId: selectedFoodID, state: state)
             isFoodFeedingAnimationRunning = false
             foodSelectorDragOffset = .zero
             foodFeedResolutionTask = nil
 
             if didFeed {
+                if shouldShowRareFoodEffect {
+                    bgmManager.playSE(.touch)
+                    spawnRareFoodFloatingHearts(count: 5)
+                }
+
                 syncFoodSelectorSelection()
                 closeFoodSelector()
             } else {
