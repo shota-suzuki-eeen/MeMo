@@ -83,10 +83,6 @@ final class AppState {
     // MARK: - ✅ Super Favorite Reveal (NEW)
     var superFavoriteRevealedData: Data? = nil
 
-    // MARK: - ✅ Moja (NEW)
-    var mojaCount: Int = 0
-    var mojaFusionIsRunning: Bool = false
-    var mojaFusionEndAt: Date? = nil
 
     // MARK: - Step Enjoy
     var stepEnjoyLastCheckedAt: Date? = nil
@@ -143,9 +139,6 @@ final class AppState {
 
         superFavoriteRevealedData: Data? = nil,
 
-        mojaCount: Int = 0,
-        mojaFusionIsRunning: Bool = false,
-        mojaFusionEndAt: Date? = nil,
 
         stepEnjoyLastCheckedAt: Date? = nil,
         stepEnjoyTotalSteps: Int = 0,
@@ -197,9 +190,6 @@ final class AppState {
 
         self.superFavoriteRevealedData = superFavoriteRevealedData
 
-        self.mojaCount = mojaCount
-        self.mojaFusionIsRunning = mojaFusionIsRunning
-        self.mojaFusionEndAt = mojaFusionEndAt
 
         self.stepEnjoyLastCheckedAt = stepEnjoyLastCheckedAt
         self.stepEnjoyTotalSteps = max(0, stepEnjoyTotalSteps)
@@ -1178,59 +1168,5 @@ extension AppState {
 
     func isValidZukanPetID(_ id: String) -> Bool {
         AppState.initialZukanPetIDs.contains(id)
-    }
-}
-
-// MARK: - ✅ Moja helpers
-extension AppState {
-    @discardableResult
-    func addMoja(_ count: Int = 1) -> Bool {
-        let add = max(0, count)
-        guard add > 0 else { return false }
-        mojaCount += add
-        return true
-    }
-
-    @discardableResult
-    func consumeMoja(_ count: Int = 1) -> Bool {
-        let use = max(0, count)
-        if use == 0 {
-            return true
-        }
-        guard mojaCount >= use else { return false }
-        mojaCount -= use
-        return true
-    }
-
-    @discardableResult
-    func startMojaFusion(cost: Int = 1, now: Date = Date()) -> Bool {
-        guard mojaFusionIsRunning == false else { return false }
-        guard consumeMoja(cost) else { return false }
-
-        mojaFusionIsRunning = true
-        mojaFusionEndAt = now.addingTimeInterval(6 * 60 * 60)
-        return true
-    }
-
-    func mojaFusionRemainingSeconds(now: Date = Date()) -> TimeInterval? {
-        guard mojaFusionIsRunning, let end = mojaFusionEndAt else { return nil }
-        return max(0, end.timeIntervalSince(now))
-    }
-
-    @discardableResult
-    func finalizeMojaFusionIfNeeded(now: Date = Date()) -> Bool {
-        guard mojaFusionIsRunning, let end = mojaFusionEndAt else { return false }
-        guard now >= end else { return false }
-
-        mojaFusionIsRunning = false
-        mojaFusionEndAt = nil
-        return true
-    }
-
-    func reduceMojaFusion(seconds: TimeInterval) {
-        guard mojaFusionIsRunning, let end = mojaFusionEndAt else { return }
-        let reduce = max(0, seconds)
-        guard reduce > 0 else { return }
-        mojaFusionEndAt = end.addingTimeInterval(-reduce)
     }
 }
