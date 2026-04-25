@@ -27,8 +27,10 @@ final class ZukanViewModel: ObservableObject {
     let characterPageSize: Int = 6
     let wallpaperPageSize: Int = 3
 
+    /// 図鑑に表示できるキャラクターID一覧。
+    /// ガチャで獲得したキャラクターも図鑑に反映されるよう、PetMaster に登録されている全キャラクターを対象にする。
     var initialPetIDs: [String] {
-        PetMaster.all.map(\.id).filter { $0 != "pet_011" }
+        PetMaster.all.map(\.id)
     }
 
     func makePetRows(state: AppState) -> [ZukanPetRow] {
@@ -43,7 +45,12 @@ final class ZukanViewModel: ObservableObject {
 
     func visiblePetIDs(state: AppState) -> [String] {
         let initialSet = Set(initialPetIDs)
-        return state.ownedPetIDs().filter { initialSet.contains($0) }
+        var seenIDs = Set<String>()
+
+        return state.ownedPetIDs().filter { id in
+            guard initialSet.contains(id) else { return false }
+            return seenIDs.insert(id).inserted
+        }
     }
 
     func makeZukanSlots(state: AppState) -> [ZukanPetSlot] {

@@ -142,7 +142,7 @@ enum PetMaster {
         case "reward_002": return "girl_onePiece"
         case "reward_003": return "person_skate"
         default:
-            return "purpor" // 安全フォールバック
+            return "purson" // 安全フォールバック
         }
     }
 
