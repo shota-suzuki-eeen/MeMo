@@ -40,6 +40,7 @@ final class BGMManager: NSObject, ObservableObject, AVAudioPlayerDelegate {
         case button
         case food
         case gacha
+        case gachaDo
         case touch
         case wc
         case wcCleanup
@@ -61,6 +62,8 @@ final class BGMManager: NSObject, ObservableObject, AVAudioPlayerDelegate {
                 return "effect_food"
             case .gacha:
                 return "effect_gacha"
+            case .gachaDo:
+                return "effect_gacha_do"
             case .touch:
                 return "effect_touch"
             case .wc, .wcCleanup:

@@ -164,10 +164,13 @@ struct GachaView: View {
     @State private var tapPromptAnimating = false
     @State private var overlayOpacity: Double = 0.0
     @State private var rollTask: Task<Void, Never>?
+    @State private var openingTask: Task<Void, Never>?
     @State private var lastFreeAdSlot: GachaFreeAdSlot?
     @State private var lastDrawWasFreeAd: Bool = false
     @State private var toastMessage: String?
     @State private var showToast: Bool = false
+
+    private static let pityThreshold = 100
 
     private enum Phase {
         case idle
@@ -200,7 +203,7 @@ struct GachaView: View {
         var title: String {
             switch self {
             case .single: return "1回"
-            case .ten: return "10連"
+            case .ten: return "10回"
             }
         }
     }
@@ -258,7 +261,7 @@ struct GachaView: View {
         if state.gachaGuaranteedGoldNext {
             return "次回SR確定"
         }
-        return "\(state.gachaPityCounter)/150"
+        return "\(state.gachaPityCounter)/\(Self.pityThreshold)"
     }
 
     private var freeSlotStatusText: String {
@@ -272,7 +275,7 @@ struct GachaView: View {
         if let current = GachaFreeAdSlot.current(at: now) {
             return "\(current.title)の枠は使用済み（\(current.windowText)）"
         }
-        return "広告枠外です（5:00-10:00 / 10:00-15:00 / 15:00-23:00）"
+        return "無料枠外です（5:00-10:00 / 10:00-15:00 / 15:00-23:00）"
     }
 
     private var wcCountText: String {
@@ -349,6 +352,8 @@ struct GachaView: View {
         .onDisappear {
             rollTask?.cancel()
             rollTask = nil
+            openingTask?.cancel()
+            openingTask = nil
             bgmManager.restoreDefaultBackground()
         }
     }
@@ -417,13 +422,13 @@ struct GachaView: View {
                     .frame(width: machineWidth)
                     .padding(.top, 4)
 
+                actionButtons
+                    .frame(maxWidth: contentWidth)
+
                 statusPanel
                     .frame(maxWidth: contentWidth)
 
                 probabilityPanel
-                    .frame(maxWidth: contentWidth)
-
-                actionButtons
                     .frame(maxWidth: contentWidth)
             }
             .frame(maxWidth: .infinity)
@@ -436,7 +441,7 @@ struct GachaView: View {
         VStack(alignment: .leading, spacing: 12) {
             statusRow(title: "所持歩数", value: walletStepsText)
             statusRow(title: "天井", value: pityDescriptionText)
-            statusRow(title: "広告10連", value: freeSlotStatusText)
+            statusRow(title: "無料10回", value: freeSlotStatusText)
             statusRow(title: "トイレ所持数", value: wcCountText)
         }
         .padding(14)
@@ -486,7 +491,7 @@ struct GachaView: View {
                 )
 
                 drawButton(
-                    title: "10連 / 5,000歩",
+                    title: "10回 / 5,000歩",
                     accent: Color(red: 1.0, green: 0.86, blue: 0.24),
                     isEnabled: canTenDraw,
                     action: { startPaidDraw(mode: .ten) }
@@ -494,7 +499,7 @@ struct GachaView: View {
             }
 
             drawButton(
-                title: canFreeTenDraw ? "広告で無料10連" : "広告10連（時間外 / 使用済み）",
+                title: canFreeTenDraw ? "広告視聴で無料10回" : "広告無料10回（時間外 / 使用済み）",
                 accent: Color(red: 0.45, green: 1.0, blue: 0.78),
                 isEnabled: canFreeTenDraw,
                 action: performRewardedAdThenFreeTenDraw
@@ -566,7 +571,7 @@ struct GachaView: View {
 
         state.gachaResetIfNeeded(now: Date())
         guard let slot = state.gachaConsumeFreeTenDraw(now: Date()) else {
-            showToast("現在利用できる広告10連はありません")
+            showToast("現在利用できる無料10回はありません")
             return
         }
 
@@ -578,6 +583,8 @@ struct GachaView: View {
 
         rollTask?.cancel()
         rollTask = nil
+        openingTask?.cancel()
+        openingTask = nil
 
         drawMode = mode
         lastDrawWasFreeAd = isFreeAd
@@ -587,6 +594,7 @@ struct GachaView: View {
         revealOverlayReward = nil
         machineAnimationStart = Date()
         tapPromptAnimating = true
+        bgmManager.playSE(.gachaDo)
 
         withAnimation(.easeOut(duration: 0.2)) {
             overlayOpacity = 0.82
@@ -638,11 +646,11 @@ struct GachaView: View {
         switch reward.kind {
         case .food(let foodID):
             _ = state.addFood(foodId: foodID, count: 1)
-            state.gachaAdvancePityAfterNonGold(threshold: 150)
+            state.gachaAdvancePityAfterNonGold(threshold: Self.pityThreshold)
 
         case .specialItem(let id):
             _ = state.gachaAddSpecialItem(id: id, count: 1)
-            state.gachaAdvancePityAfterNonGold(threshold: 150)
+            state.gachaAdvancePityAfterNonGold(threshold: Self.pityThreshold)
 
         case .character(let petID):
             var owned = state.ownedPetIDs()
@@ -756,7 +764,7 @@ struct GachaView: View {
                 startDate: machineAnimationStart
             )
 
-            Text(lastDrawWasFreeAd ? "広告10連を回しています…" : "\(drawMode.title)ガチャを回しています…")
+            Text(lastDrawWasFreeAd ? "無料10回を回しています…" : "\(drawMode.title)ガチャを回しています…")
                 .font(.system(size: 18, weight: .bold))
                 .foregroundStyle(.white)
                 .padding(.horizontal, 18)
@@ -792,7 +800,7 @@ struct GachaView: View {
                 TapPromptView(isAnimating: tapPromptAnimating, count: 1)
 
                 if let slot = lastFreeAdSlot, lastDrawWasFreeAd {
-                    Text("無料10連（\(slot.windowText)）")
+                    Text("無料10回（\(slot.windowText)）")
                         .font(.system(size: 13, weight: .semibold))
                         .foregroundStyle(.white.opacity(0.86))
                 }
@@ -932,117 +940,127 @@ struct GachaView: View {
 
     private func enlargedRewardOverlay(reward: GachaReward, safeTop: CGFloat, safeBottom: CGFloat) -> some View {
         ZStack {
-            Color.black.opacity(0.7)
+            Color.black.opacity(0.72)
                 .ignoresSafeArea()
                 .onTapGesture {
-                    revealOverlayReward = nil
+                    withAnimation(.easeOut(duration: 0.18)) {
+                        revealOverlayReward = nil
+                    }
                 }
 
             ScrollView(showsIndicators: false) {
-                VStack {
-                    unifiedLargeRewardView(reward: reward)
+                VStack(spacing: 18) {
+                    ResultHeadlineView(reward: reward)
+
+                    ResultRewardCard(
+                        reward: reward,
+                        isLarge: true,
+                        showsText: true,
+                        showsAccentBorder: true
+                    )
+                    .frame(width: Layout.singleResultCardWidth, height: Layout.singleResultCardHeight)
+
+                    Text("タップで閉じる")
+                        .font(.system(size: 14, weight: .bold))
+                        .foregroundStyle(.white.opacity(0.9))
                 }
                 .frame(maxWidth: .infinity)
-                .padding(.top, safeTop + 18)
-                .padding(.bottom, max(safeBottom, 16) + 20)
-                .padding(.horizontal, 18)
+                .padding(.top, safeTop + 26)
+                .padding(.bottom, max(safeBottom, 16) + 26)
+                .padding(.horizontal, 20)
                 .frame(minHeight: UIScreen.main.bounds.height - safeTop - safeBottom)
-                .contentShape(Rectangle())
             }
-            .simultaneousGesture(
-                TapGesture().onEnded {
-                    revealOverlayReward = nil
-                }
-            )
         }
         .transition(.opacity)
-        .zIndex(50)
+        .zIndex(60)
     }
 
     private func handleOverlayTap() {
-        guard revealOverlayReward == nil else {
-            revealOverlayReward = nil
-            return
-        }
-
         switch phase {
+        case .idle, .rolling, .openingSingle, .openingTen:
+            return
+
         case .waitingTap:
+            bgmManager.playSE(.open)
+            openingTask?.cancel()
+
             if drawMode == .single {
-                openSingleSequence()
+                phase = .openingSingle
+                openingTask = Task {
+                    try? await Task.sleep(nanoseconds: 520_000_000)
+                    guard !Task.isCancelled else { return }
+                    await MainActor.run {
+                        if phase == .openingSingle {
+                            phase = .showingSingleResult
+                        }
+                    }
+                }
             } else {
-                openTenSequence()
+                phase = .openingTen
+                openingTask = Task {
+                    try? await Task.sleep(nanoseconds: 650_000_000)
+                    guard !Task.isCancelled else { return }
+                    await MainActor.run {
+                        if phase == .openingTen {
+                            phase = .showingTenResult
+                        }
+                    }
+                }
             }
 
         case .showingSingleResult, .showingTenResult:
-            closeOverlay()
-
-        case .idle, .rolling, .openingSingle, .openingTen:
-            break
+            finishDrawAndReturnToIdle()
         }
     }
 
-    private func openSingleSequence() {
-        rollTask?.cancel()
-        rollTask = Task {
-            await MainActor.run {
-                phase = .openingSingle
-            }
-            try? await Task.sleep(nanoseconds: 1_000_000_000)
-            guard !Task.isCancelled else { return }
-            await MainActor.run {
-                phase = .showingSingleResult
-            }
-        }
-    }
-
-    private func openTenSequence() {
-        rollTask?.cancel()
-        rollTask = Task {
-            await MainActor.run {
-                phase = .openingTen
-            }
-            try? await Task.sleep(nanoseconds: 480_000_000)
-            guard !Task.isCancelled else { return }
-            await MainActor.run {
-                phase = .showingTenResult
-            }
-        }
-    }
-
-    private func closeOverlay() {
+    private func finishDrawAndReturnToIdle() {
+        openingTask?.cancel()
+        openingTask = nil
         rollTask?.cancel()
         rollTask = nil
         revealOverlayReward = nil
 
-        withAnimation(.easeOut(duration: 0.18)) {
+        do {
+            try modelContext.save()
+        } catch {
+            print("❌ ガチャ結果の保存に失敗しました: \(error.localizedDescription)")
+        }
+
+        withAnimation(.easeOut(duration: 0.2)) {
             overlayOpacity = 0.0
-        }
-
-        DispatchQueue.main.asyncAfter(deadline: .now() + 0.18) {
             phase = .idle
-            lastFreeAdSlot = nil
-            lastDrawWasFreeAd = false
         }
-    }
 
-    private func formattedProbability(_ value: Double) -> String {
-        let rounded = (value * 10).rounded() / 10
-        if rounded == floor(rounded) {
-            return String(format: "%.0f%%", rounded)
+        Task { @MainActor in
+            try? await Task.sleep(nanoseconds: 220_000_000)
+            if phase == .idle {
+                rewards = []
+                lastFreeAdSlot = nil
+                lastDrawWasFreeAd = false
+            }
         }
-        return String(format: "%.1f%%", rounded)
     }
 
     private func showToast(_ message: String) {
         toastMessage = message
-        withAnimation(.easeInOut(duration: 0.2)) {
+
+        withAnimation(.easeInOut(duration: 0.18)) {
             showToast = true
         }
-        DispatchQueue.main.asyncAfter(deadline: .now() + 1.5) {
-            withAnimation(.easeInOut(duration: 0.2)) {
-                self.showToast = false
+
+        Task { @MainActor in
+            try? await Task.sleep(nanoseconds: 1_300_000_000)
+            withAnimation(.easeInOut(duration: 0.18)) {
+                showToast = false
             }
         }
+    }
+
+    private func formattedProbability(_ value: Double) -> String {
+        if value >= 10 || value.rounded(.towardZero) == value {
+            return "\(Int(value.rounded()))%"
+        }
+        return String(format: "%.1f%%", value)
     }
 }
 
@@ -1052,18 +1070,18 @@ private struct RollingMachineView: View {
     let startDate: Date
 
     var body: some View {
-        TimelineView(.animation(minimumInterval: 1.0 / 60.0)) { timeline in
+        TimelineView(.animation) { timeline in
             let elapsed = timeline.date.timeIntervalSince(startDate)
-            let angle = sin(elapsed * 11.0) * 9.0
-            let xOffset = sin(elapsed * 13.0) * 9.0
+            let rotation = sin(elapsed * 18.0) * 4.5
+            let xOffset = sin(elapsed * 28.0) * 3.5
 
             Image(assetName)
                 .resizable()
                 .scaledToFit()
                 .frame(width: width)
-                .rotationEffect(.degrees(angle), anchor: .init(x: 0.5, y: 0.88))
+                .rotationEffect(.degrees(rotation))
                 .offset(x: xOffset)
-                .shadow(color: .black.opacity(0.28), radius: 22, y: 12)
+                .shadow(color: .white.opacity(0.22), radius: 24)
         }
     }
 }
@@ -1072,23 +1090,24 @@ private struct TapPromptView: View {
     let isAnimating: Bool
     let count: Int
 
-    @State private var phase = false
-
     var body: some View {
-        HStack(spacing: 10) {
-            ForEach(0..<count, id: \.self) { _ in
-                Text("TAP!")
-                    .font(.system(size: 34, weight: .black))
+        HStack(spacing: 6) {
+            ForEach(0..<max(1, count), id: \.self) { _ in
+                Text("TAP")
+                    .font(.system(size: 24, weight: .black))
                     .foregroundStyle(.white)
-                    .scaleEffect(phase ? 1.08 : 0.94)
-                    .offset(y: phase ? -5 : 5)
-            }
-        }
-        .shadow(color: .white.opacity(0.28), radius: 10)
-        .onAppear {
-            guard isAnimating else { return }
-            withAnimation(.easeInOut(duration: 1.15).repeatForever(autoreverses: true)) {
-                phase = true
+                    .padding(.horizontal, 16)
+                    .padding(.vertical, 8)
+                    .background(Color.white.opacity(0.14), in: Capsule())
+                    .overlay(
+                        Capsule()
+                            .stroke(Color.white.opacity(0.86), lineWidth: 2)
+                    )
+                    .scaleEffect(isAnimating ? 1.04 : 1.0)
+                    .animation(
+                        .easeInOut(duration: 0.62).repeatForever(autoreverses: true),
+                        value: isAnimating
+                    )
             }
         }
     }
@@ -1100,16 +1119,13 @@ private struct ResultHeadlineView: View {
     var body: some View {
         VStack(spacing: 8) {
             Text(reward.rarity.displayName)
-                .font(.system(size: 17, weight: .black))
+                .font(.system(size: 34, weight: .black))
                 .foregroundStyle(reward.rarity.accentColor)
-                .padding(.horizontal, 14)
-                .padding(.vertical, 6)
-                .background(Color.white.opacity(0.1), in: Capsule())
+                .shadow(color: reward.rarity.accentColor.opacity(0.55), radius: 12)
 
-            Text("\(reward.title) をゲット！")
-                .font(.system(size: 24, weight: .black))
-                .foregroundStyle(.white)
-                .multilineTextAlignment(.center)
+            Text(reward.subtitle)
+                .font(.system(size: 15, weight: .bold))
+                .foregroundStyle(.white.opacity(0.88))
         }
     }
 }
@@ -1121,48 +1137,55 @@ private struct ResultRewardCard: View {
     let showsAccentBorder: Bool
 
     var body: some View {
-        VStack(spacing: showsText ? (isLarge ? 14 : 10) : 0) {
-            Spacer(minLength: 0)
+        ZStack {
+            RoundedRectangle(cornerRadius: isLarge ? 26 : 16, style: .continuous)
+                .fill(Color.white.opacity(isLarge ? 0.92 : 0.88))
 
-            Image(reward.imageName)
-                .resizable()
-                .scaledToFit()
-                .frame(
-                    maxWidth: isLarge ? 180 : 54,
-                    maxHeight: isLarge ? 180 : 54
+            RoundedRectangle(cornerRadius: isLarge ? 26 : 16, style: .continuous)
+                .fill(
+                    LinearGradient(
+                        colors: [
+                            reward.rarity.accentColor.opacity(isLarge ? 0.26 : 0.18),
+                            Color.white.opacity(0.10)
+                        ],
+                        startPoint: .topLeading,
+                        endPoint: .bottomTrailing
+                    )
                 )
-                .shadow(color: reward.rarity.accentColor.opacity(isLarge ? 0.55 : 0.28), radius: isLarge ? 22 : 8)
 
-            if showsText {
-                VStack(spacing: 6) {
-                    Text(reward.title)
-                        .font(.system(size: isLarge ? 22 : 16, weight: .black))
-                        .foregroundStyle(.white)
-                        .multilineTextAlignment(.center)
-                        .lineLimit(2)
+            if showsAccentBorder {
+                RoundedRectangle(cornerRadius: isLarge ? 26 : 16, style: .continuous)
+                    .stroke(reward.rarity.accentColor.opacity(0.95), lineWidth: 3)
+            }
 
-                    Text(reward.subtitle)
-                        .font(.system(size: isLarge ? 14 : 12, weight: .semibold))
-                        .foregroundStyle(.white.opacity(0.82))
-                        .multilineTextAlignment(.center)
+            VStack(spacing: isLarge ? 14 : 0) {
+                Image(reward.imageName)
+                    .resizable()
+                    .scaledToFit()
+                    .padding(isLarge ? 18 : 7)
+                    .frame(maxWidth: .infinity, maxHeight: .infinity)
+
+                if showsText {
+                    VStack(spacing: 5) {
+                        Text(reward.title)
+                            .font(.system(size: 24, weight: .black))
+                            .foregroundStyle(.black.opacity(0.86))
+                            .multilineTextAlignment(.center)
+                            .lineLimit(2)
+                            .minimumScaleFactor(0.72)
+
+                        Text(reward.subtitle)
+                            .font(.system(size: 14, weight: .bold))
+                            .foregroundStyle(.black.opacity(0.58))
+                            .multilineTextAlignment(.center)
+                    }
+                    .padding(.horizontal, 14)
+                    .padding(.bottom, 18)
                 }
             }
-
-            Spacer(minLength: 0)
         }
-        .padding(isLarge ? 22 : 8)
-        .frame(maxWidth: .infinity, maxHeight: .infinity)
-        .background(
-            RoundedRectangle(cornerRadius: 18, style: .continuous)
-                .fill(Color.black.opacity(isLarge ? 0.36 : 0.18))
-        )
-        .overlay {
-            if showsAccentBorder {
-                RoundedRectangle(cornerRadius: 18, style: .continuous)
-                    .stroke(reward.rarity.accentColor.opacity(0.95), lineWidth: isLarge ? 2.5 : 1.6)
-            }
-        }
-        .shadow(color: .black.opacity(0.22), radius: 12, y: 8)
+        .clipShape(RoundedRectangle(cornerRadius: isLarge ? 26 : 16, style: .continuous))
+        .shadow(color: reward.rarity.accentColor.opacity(isLarge ? 0.35 : 0.0), radius: isLarge ? 20 : 0)
     }
 }
 
@@ -1173,9 +1196,13 @@ private struct ToastView: View {
         Text(message)
             .font(.system(size: 14, weight: .bold))
             .foregroundStyle(.white)
-            .padding(.horizontal, 18)
-            .padding(.vertical, 12)
-            .background(Color.black.opacity(0.82), in: Capsule())
-            .shadow(color: .black.opacity(0.18), radius: 10, x: 0, y: 6)
+            .padding(.horizontal, 16)
+            .padding(.vertical, 11)
+            .background(Color.black.opacity(0.78), in: Capsule())
+            .overlay(
+                Capsule()
+                    .stroke(Color.white.opacity(0.28), lineWidth: 1)
+            )
+            .shadow(radius: 10)
     }
 }

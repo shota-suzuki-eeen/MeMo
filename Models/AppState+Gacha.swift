@@ -178,7 +178,7 @@ extension AppState {
         gachaGuaranteedGoldNext = false
     }
 
-    func gachaAdvancePityAfterNonGold(threshold: Int = 150) {
+    func gachaAdvancePityAfterNonGold(threshold: Int = 100) {
         let next = max(0, gachaPityCounter) + 1
         gachaPityCounter = next
         gachaGuaranteedGoldNext = next >= max(1, threshold)

@@ -391,7 +391,7 @@ struct HomeView: View {
         static let topInfoPopupContentMaxHeight: CGFloat = 560
         static let topInfoPopupBackgroundAssetName: String = "red_block"
         static let topInfoPopupCloseButtonAssetName: String = "close_button"
-        static let topInfoPopupCloseButtonSize: CGFloat = 66
+        static let topInfoPopupCloseButtonSize: CGFloat = 48
         static let zTopInfoPopup: Double = 1200
 
         static let rightButtonSize: CGFloat = 116
