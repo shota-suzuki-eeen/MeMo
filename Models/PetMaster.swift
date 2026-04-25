@@ -14,24 +14,6 @@ struct PetMasterItem: Identifiable, Codable, Equatable {
     let name: String
 }
 
-// MARK: - Care / Friendship (Spec v6)
-
-enum FriendshipSpec {
-    static let maxPoint: Int = 100
-    static let cardThreshold: Int = 100
-
-    static let foodGain: Int = 10
-
-    static let bathGain: Int = 15
-    static let bathCooldownHours: Int = 8
-    static let bathAdReduceHoursPerWatch: Int = 4
-    static let bathAdLimitPerDay: Int = 2
-
-    static let toiletNormal: Int = 10
-    static let toiletWithin1h: Int = 20
-    static let toiletBonusWindowSeconds: TimeInterval = 60 * 60
-}
-
 // MARK: - Master List
 
 enum PetMaster {

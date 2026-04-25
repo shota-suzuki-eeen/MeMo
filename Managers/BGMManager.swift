@@ -48,7 +48,6 @@ final class BGMManager: NSObject, ObservableObject, AVAudioPlayerDelegate {
         // Existing call-site compatibility
         static let push: SoundEffect = .button
         static let open: SoundEffect = .button
-        static let buy: SoundEffect = .button
         static let bath: SoundEffect = .button
         static let eat: SoundEffect = .food
         static let love: SoundEffect = .touch

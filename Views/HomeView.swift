@@ -31,10 +31,7 @@ struct HomeView: View {
     @State private var showCaptureModeDialog: Bool = false
     @State private var selectedCaptureMode: CameraCaptureView.Mode?
 
-    @State private var toastMessage: String?
-    @State private var showToast: Bool = false
 
-    @State private var displayedFriendship: Double = 0
     @State private var displayedStepProgress: Double = 0
     @State private var displayedFullnessLevel: Int = 0
     @State private var animatedFullnessLevel: Double = 0
@@ -59,16 +56,13 @@ struct HomeView: View {
     @State private var pendingFoodFeedID: String?
     @State private var isFoodSelectorHorizontalRattling: Bool = false
     @State private var foodSelectorDragAnchorFoodID: String?
-    @State private var foodSelectorScrollSelectionDelta: Int = 0
 
     @State private var characterAssetName: String = ""
     @State private var idleLoopTask: Task<Void, Never>?
     @State private var isCharacterActionRunning: Bool = false
-    @State private var toastDismissTask: Task<Void, Never>?
     @State private var toiletLockedPopupDismissTask: Task<Void, Never>?
     @State private var toiletTicketCleanupTask: Task<Void, Never>?
     @State private var foodFeedResolutionTask: Task<Void, Never>?
-    @State private var friendshipWrapTask: Task<Void, Never>?
     @State private var toiletWiggleActivationTask: Task<Void, Never>?
     @State private var floatingHeartCleanupTasks: [UUID: Task<Void, Never>] = [:]
     @State private var happinessDecayAnimationTask: Task<Void, Never>?
@@ -111,8 +105,6 @@ struct HomeView: View {
         let lastDayKey: String
         let cachedTodaySteps: Int
         let cachedTodayMeterSteps: Int
-        let friendshipPoint: Int
-        let friendshipCardCount: Int
         let satisfactionLevel: Int
         let satisfactionLastUpdatedAt: Date?
         let foodFlagAt: Date?
@@ -139,7 +131,6 @@ struct HomeView: View {
     }
 
     private var isToiletLocked: Bool { state.hasToiletFlag }
-    private var hasFoodFlag: Bool { state.hasFoodFlag }
     private var fixedDailyGoalSteps: Int { AppState.fixedDailyStepGoal }
 
     private var widgetLinkedTodaySteps: Int {
@@ -321,7 +312,6 @@ struct HomeView: View {
     fileprivate enum Layout {
         static let bannerHeight: CGFloat = 76
         static let bannerWidthIPhone: CGFloat = 320
-        static let homeBackgroundAssetName: String = "Home_background"
 
         static let leftTopPaddingTop: CGFloat = 44
         static let leftTopPaddingLeading: CGFloat = 18
@@ -347,7 +337,6 @@ struct HomeView: View {
         static let walletWidth: CGFloat = 125
         static let redMinWidth: CGFloat = 18
 
-        static let friendshipTextFont: CGFloat = 11
 
         static let fullnessGaugeTop: CGFloat = 32
         static let fullnessGaugeTrailing: CGFloat = 28
@@ -488,7 +477,6 @@ struct HomeView: View {
                 todaySteps = state.widgetTodaySteps
                 displayedTodaySteps = todaySteps
                 displayedWalletSteps = state.walletSteps
-                displayedFriendship = Double(state.friendshipPoint)
                 syncDisplayedHappiness(animated: false)
                 displayedStepProgress = calcStepProgressRaw(
                     todaySteps: displayedTodaySteps,
@@ -555,8 +543,6 @@ struct HomeView: View {
                 isCharacterActionRunning = false
                 characterAssetName = preferredCharacterRestAssetName
                 activeTopInfoPopup = nil
-                showToast = false
-                toastMessage = nil
                 showToiletLockedPopup = false
                 showFoodSelector = false
                 selectedFoodRarityTab = .normal
@@ -793,9 +779,6 @@ struct HomeView: View {
             homeContentSize = newSize
             syncToiletPoopsIfNeeded(containerSize: newSize)
         }
-        .overlay(alignment: .bottom) {
-            toastOverlayView
-        }
     }
 
     private var topStatusButtonsLayer: some View {
@@ -988,17 +971,6 @@ struct HomeView: View {
                 .zIndex(999)
         }
     }
-
-    @ViewBuilder
-    private var toastOverlayView: some View {
-        if showToast, let toastMessage {
-            ToastView(message: toastMessage)
-                .padding(.bottom, 18)
-                .transition(.move(edge: .bottom).combined(with: .opacity))
-        }
-    }
-
-
     @ViewBuilder
     private var rightMenuPopupOverlay: some View {
         if showRightMenuPopup {
@@ -1221,8 +1193,6 @@ struct HomeView: View {
             lastDayKey: state.lastDayKey,
             cachedTodaySteps: state.cachedTodaySteps,
             cachedTodayMeterSteps: state.cachedTodayMeterSteps,
-            friendshipPoint: state.friendshipPoint,
-            friendshipCardCount: state.friendshipCardCount,
             satisfactionLevel: state.satisfactionLevel,
             satisfactionLastUpdatedAt: state.satisfactionLastUpdatedAt,
             foodFlagAt: state.foodFlagAt,
@@ -1330,8 +1300,6 @@ struct HomeView: View {
 
     @MainActor
     private func cancelDelayedHomeTasks() {
-        toastDismissTask?.cancel()
-        toastDismissTask = nil
 
         toiletLockedPopupDismissTask?.cancel()
         toiletLockedPopupDismissTask = nil
@@ -1342,8 +1310,6 @@ struct HomeView: View {
         foodFeedResolutionTask?.cancel()
         foodFeedResolutionTask = nil
 
-        friendshipWrapTask?.cancel()
-        friendshipWrapTask = nil
 
         toiletWiggleActivationTask?.cancel()
         toiletWiggleActivationTask = nil
@@ -1581,24 +1547,12 @@ struct HomeView: View {
         }
     }
 
-    private func claimCurrentHappinessRewardFromPopup() {
-        guard let claimableLevel = currentClaimableHappinessRewardLevel else {
-            toast("受け取れる報酬はありません")
-            return
-        }
-
-        bgmManager.playSE(.push)
-        claimHappinessReward(level: claimableLevel)
-    }
-
     private func claimHappinessReward(level: Int) {
-        guard let reward = state.claimHappinessReward(level: level, now: Date()) else {
-            toast("受け取れる報酬はありません")
+        guard state.claimHappinessReward(level: level, now: Date()) != nil else {
             return
         }
 
         save()
-        toast("幸せLv.\(reward.level)報酬で\(reward.characterName)を獲得！")
         syncDisplayedHappiness(animated: false)
     }
 
@@ -1797,7 +1751,6 @@ struct HomeView: View {
     private func resetFoodSelectorDragState() {
         foodSelectorDragOffset = .zero
         foodSelectorDragAnchorFoodID = nil
-        foodSelectorScrollSelectionDelta = 0
     }
 
     private func closeFoodSelector() {
@@ -1820,7 +1773,6 @@ struct HomeView: View {
 
         let feedState = state.canFeedNow(now: Date())
         guard feedState.can else {
-            toast(feedState.reason ?? "もう満腹みたい")
             return
         }
 
@@ -1911,7 +1863,6 @@ struct HomeView: View {
         if foodSelectorDragAnchorFoodID == nil {
             syncFoodSelectorSelection()
             foodSelectorDragAnchorFoodID = selectedFoodID ?? foods.first?.id
-            foodSelectorScrollSelectionDelta = 0
         }
 
         foodSelectorDragOffset = value.translation
@@ -1973,7 +1924,6 @@ struct HomeView: View {
 
         defer {
             foodSelectorDragAnchorFoodID = nil
-            foodSelectorScrollSelectionDelta = 0
         }
 
         if pendingFoodFeedID != nil {
@@ -2028,11 +1978,6 @@ struct HomeView: View {
         }
     }
 
-    private func startFoodSelectorHorizontalRattleIfNeeded() {
-        guard !isFoodSelectorHorizontalRattling else { return }
-        isFoodSelectorHorizontalRattling = true
-    }
-
     private func stopFoodSelectorHorizontalRattleIfNeeded() {
         guard isFoodSelectorHorizontalRattling else { return }
         isFoodSelectorHorizontalRattling = false
@@ -2051,13 +1996,11 @@ struct HomeView: View {
 
         let feedState = state.canFeedNow(now: Date())
         guard feedState.can else {
-            toast(feedState.reason ?? "もう満腹みたい")
             closeFoodSelector()
             return
         }
 
         guard let selectedFood else {
-            toast("ご飯を持っていません")
             Task { @MainActor in
                 Haptics.rattle(duration: 0.12, style: .light)
             }
@@ -2082,13 +2025,11 @@ struct HomeView: View {
 
         let feedState = state.canFeedNow(now: Date())
         guard feedState.can else {
-            toast(feedState.reason ?? "もう満腹みたい")
             closeFoodSelector()
             return
         }
 
         guard currentFoodSelectorFoods.contains(where: { $0.id == foodID }) else {
-            toast("ご飯が見つかりません")
             return
         }
 
@@ -2118,7 +2059,6 @@ struct HomeView: View {
         guard !isFoodFeedingAnimationRunning else { return }
         guard let selectedFood else {
             pendingFoodFeedID = nil
-            toast("ご飯を持っていません")
             Task { @MainActor in
                 Haptics.rattle(duration: 0.12, style: .light)
             }
@@ -2129,7 +2069,6 @@ struct HomeView: View {
         let feedState = state.canFeedNow(now: Date())
         guard feedState.can else {
             pendingFoodFeedID = nil
-            toast(feedState.reason ?? "もう満腹みたい")
             closeFoodSelector()
             return
         }
@@ -2140,7 +2079,6 @@ struct HomeView: View {
         pendingFoodFeedID = selectedFoodID
         isFoodFeedingAnimationRunning = true
         foodSelectorDragAnchorFoodID = nil
-        foodSelectorScrollSelectionDelta = 0
 
         withAnimation(.spring(response: 0.24, dampingFraction: 0.78)) {
             foodSelectorDragOffset = CGSize(width: 0, height: -120)
@@ -2227,7 +2165,6 @@ struct HomeView: View {
                 save()
             }
             syncToiletPoopsIfNeeded(containerSize: homeContentSize, now: now, persistChanges: persistChanges)
-            toast("トイレ行きたい！")
             syncCharacterBaseFromState(force: true)
             updateToiletWiggle()
         }
@@ -2260,7 +2197,6 @@ struct HomeView: View {
             if persistChanges {
                 save()
             }
-            toast("おなかすいた！")
         }
         return didRaise
     }
@@ -2369,21 +2305,18 @@ struct HomeView: View {
         }
 
         guard let food = FoodCatalog.byId(foodId) else {
-            toast("ご飯が見つかりません")
             return false
         }
 
         let now = Date()
         let feedState = state.canFeedNow(now: now)
         guard feedState.can else {
-            toast(feedState.reason ?? "今はごはんの時間じゃないよ")
             syncDisplayedFullness(now: now)
             syncFoodSelectorSelection()
             return false
         }
 
         guard state.foodCount(foodId: foodId) > 0 else {
-            toast("そのご飯は持っていません")
             Task { @MainActor in
                 Haptics.rattle(duration: 0.12, style: .light)
             }
@@ -2392,13 +2325,11 @@ struct HomeView: View {
         }
 
         guard state.consumeFood(foodId: foodId, count: 1) else {
-            toast("ご飯の消費に失敗しました")
             return false
         }
 
         let feedResult = state.feedOnce(now: now)
         guard feedResult.didFeed else {
-            toast(feedResult.reason ?? "今はごはんをあげられません")
             syncDisplayedFullness(now: now)
             syncFoodSelectorSelection()
             return false
@@ -2406,7 +2337,6 @@ struct HomeView: View {
 
         _ = state.resolveFood(now: now)
 
-        let gainedPoint = 10
         let happinessBonus = state.happinessBonusPoints(forFoodID: food.id)
         if happinessBonus > 0 {
             _ = state.addHappinessPoints(happinessBonus, now: now)
@@ -2416,11 +2346,8 @@ struct HomeView: View {
         syncDisplayedFullness(now: now)
         syncDisplayedHappiness(animated: happinessBonus > 0)
 
-        addFriendshipWithAnimation(points: gainedPoint, state: state)
         bgmManager.playSE(.eat)
 
-        let happinessSuffix = happinessBonus > 0 ? " / 幸せ度 +\(happinessBonus)" : ""
-        toast("\(food.name)をあげた！ 満腹度 \(normalizedFullnessLevel(feedResult.after))/\(fullnessMaxLevel) +\(gainedPoint)\(happinessSuffix)")
 
         syncFoodSelectorSelection()
         updateWidgetSnapshot(forceReload: true)
@@ -2486,43 +2413,6 @@ struct HomeView: View {
         }
     }
 
-    @MainActor
-    private func addFriendshipWithAnimation(points: Int, state: AppState) {
-        guard points > 0 else { return }
-
-        let maxMeter = AppState.friendshipMaxMeter
-        let beforeDisplayed = displayedFriendship
-
-        let result = state.addFriendship(points: points, maxMeter: maxMeter)
-        save()
-
-        let after = result.afterPoint
-
-        Task { @MainActor in
-            Haptics.rattle(duration: 0.50, style: .medium)
-        }
-
-        if result.didWrap {
-            withAnimation(.easeOut(duration: 0.35)) {
-                displayedFriendship = Double(maxMeter)
-            }
-
-            friendshipWrapTask?.cancel()
-            friendshipWrapTask = scheduleMainActorTask(after: 0.37) {
-                displayedFriendship = 0
-                withAnimation(.easeOut(duration: 0.55)) {
-                    displayedFriendship = Double(after)
-                }
-                friendshipWrapTask = nil
-            }
-        } else {
-            displayedFriendship = beforeDisplayed
-            withAnimation(.easeOut(duration: 0.65)) {
-                displayedFriendship = Double(after)
-            }
-        }
-    }
-
     private func makeUniquePhotoFileName(dayKey: String, now: Date) -> String {
         let ms = Int64(now.timeIntervalSince1970 * 1000)
         return "\(dayKey)_\(ms).jpg"
@@ -2561,25 +2451,11 @@ struct HomeView: View {
 
             try modelContext.save()
 
-            toast("今日の一枚を保存しました")
             Task { @MainActor in
                 Haptics.rattle(duration: 0.18, style: .light)
             }
         } catch {
             print("❌ saveTodayPhoto failed:", error)
-            toast("保存に失敗しました")
-        }
-    }
-
-    @MainActor
-    private func toast(_ message: String) {
-        toastMessage = message
-        withAnimation(.easeInOut(duration: 0.2)) { showToast = true }
-
-        toastDismissTask?.cancel()
-        toastDismissTask = scheduleMainActorTask(after: 1.4) {
-            withAnimation(.easeInOut(duration: 0.2)) { showToast = false }
-            toastDismissTask = nil
         }
     }
 
@@ -2592,7 +2468,6 @@ struct HomeView: View {
 
         let feedState = state.canFeedNow(now: Date())
         guard feedState.can else {
-            toast(feedState.reason ?? "もう満腹みたい")
             return
         }
 
@@ -2600,7 +2475,6 @@ struct HomeView: View {
 
         guard !ownedFoods.isEmpty else {
             bgmManager.playSE(.push)
-            toast("ご飯を持っていません")
             Task { @MainActor in
                 Haptics.rattle(duration: 0.12, style: .light)
             }
@@ -2638,7 +2512,6 @@ struct HomeView: View {
             return
         }
 
-        toast("うんちを直接こすって掃除しよう！")
     }
 
     @MainActor
@@ -2655,7 +2528,6 @@ struct HomeView: View {
         }
 
         guard state.gachaSpecialItemCount(id: "wc") > 0 else {
-            toast("トイレチケットを持っていません")
             Task { @MainActor in
                 Haptics.rattle(duration: 0.12, style: .light)
             }
@@ -2674,7 +2546,6 @@ struct HomeView: View {
             guard state.gachaConsumeSpecialItem(id: "wc", count: 1) else {
                 toiletTicketClearingPoopIDs.removeAll()
                 isToiletTicketCleaning = false
-                toast("トイレチケットの消費に失敗しました")
                 toiletTicketCleanupTask = nil
                 return
             }
@@ -2714,8 +2585,6 @@ struct HomeView: View {
         toiletTicketClearingPoopIDs.removeAll()
         isToiletTicketCleaning = false
 
-        addFriendshipWithAnimation(points: r.isWithin1h ? 20 : 10, state: state)
-        toast(r.isWithin1h ? "トイレ成功（1時間以内）+20" : "トイレ成功 +10")
         save()
 
         syncCharacterBaseFromState(force: true)
@@ -3333,7 +3202,6 @@ private struct StatusIconButton: View {
 }
 
 
-
 private struct HomeTopInfoPopup: View {
     let popup: HomeView.TopInfoPopup
     let walletCoinCount: Int
@@ -3797,26 +3665,6 @@ private struct HomeTopInfoValueBlock: View {
         }
     }
 }
-
-private struct HomeTopInfoDescriptionRow: View {
-    let title: String
-    let detail: String
-
-    var body: some View {
-        VStack(alignment: .leading, spacing: 6) {
-            Text(title)
-                .font(.system(size: 13, weight: .semibold))
-                .foregroundStyle(.secondary)
-
-            Text(detail)
-                .font(.system(size: 15, weight: .medium))
-                .foregroundStyle(.primary)
-                .fixedSize(horizontal: false, vertical: true)
-        }
-    }
-}
-
-
 private struct CenterMenuPopup: View {
     let isToiletLocked: Bool
     let onBlocked: () -> Void
@@ -4442,11 +4290,6 @@ private struct FoodCarouselCard: View {
         return CGSize(width: side, height: side)
     }
 
-    private var backgroundOpacity: Double {
-        if isPendingFeed && absPosition < 0.75 { return 0.24 }
-        return absPosition < 0.75 ? 0.16 : 0.12
-    }
-
     private var focusShadowColor: Color {
         rarityTab.accentColor.opacity(isFocused && absPosition < 0.75 ? 0.28 : 0.0)
     }
@@ -4701,20 +4544,5 @@ private struct FloatingHeartView: View {
                     isAnimating = true
                 }
             }
-    }
-}
-
-private struct ToastView: View {
-    let message: String
-
-    var body: some View {
-        Text(message)
-            .font(.footnote)
-            .foregroundStyle(.primary)
-            .padding(.horizontal, 14)
-            .padding(.vertical, 10)
-            .background(.thinMaterial)
-            .clipShape(Capsule())
-            .shadow(radius: 8)
     }
 }

@@ -10,9 +10,6 @@ import SwiftData
 
 @Model
 final class AppState {
-    // ✅ なかよし度メーター上限（0..(max-1)）
-    static let friendshipMaxMeter: Int = 100
-
     // MARK: - Currency (Step)
     // NOTE:
     // SwiftData の既存保存データを壊しにくくするため、
@@ -38,10 +35,6 @@ final class AppState {
     // cachedTodayKcal       : メーター表示用の歩数キャッシュとして再利用
     var cachedTodaySteps: Int
     var cachedTodayKcal: Int
-
-    // ✅ なかよし度（0..99）＆カード
-    var friendshipPoint: Int
-    var friendshipCardCount: Int
 
     // MARK: - ✅ Fullness (backing store: satisfaction)
     // NOTE:
@@ -74,15 +67,6 @@ final class AppState {
     // ✅ トイレpoopの時間増加基準時刻
     var toiletPoopLastSpawnAt: Date?
 
-    // ✅ 卵（ショップ）
-    var eggOwned: Bool
-    var eggHatchAt: Date?
-    var eggAdUsedToday: Bool
-
-    // ✅ デイリーショップ（MVP）
-    var shopDayKey: String
-    var shopItemsData: Data?
-    var shopRewardResetsToday: Int
 
     // ✅ キャラ（MVP）
     var currentPetID: String
@@ -130,9 +114,6 @@ final class AppState {
         cachedTodaySteps: Int = 0,
         cachedTodayKcal: Int = 0,
 
-        friendshipPoint: Int = 0,
-        friendshipCardCount: Int = 0,
-
         satisfactionLevel: Int = 0,
         satisfactionLastUpdatedAt: Date? = nil,
 
@@ -150,13 +131,6 @@ final class AppState {
         toiletPoopsData: Data? = nil,
         toiletPoopLastSpawnAt: Date? = nil,
 
-        eggOwned: Bool = false,
-        eggHatchAt: Date? = nil,
-        eggAdUsedToday: Bool = false,
-
-        shopDayKey: String = AppState.makeDayKey(Date()),
-        shopItemsData: Data? = nil,
-        shopRewardResetsToday: Int = 0,
 
         currentPetID: String = "pet_000",
         ownedPetIDsData: Data? = nil,
@@ -193,9 +167,6 @@ final class AppState {
         self.cachedTodaySteps = max(0, cachedTodaySteps)
         self.cachedTodayKcal = max(0, cachedTodayKcal)
 
-        self.friendshipPoint = friendshipPoint
-        self.friendshipCardCount = friendshipCardCount
-
         let clampedSatisfaction = min(AppState.fullnessMaxLevel, max(0, satisfactionLevel))
         self.satisfactionLevel = clampedSatisfaction
         self.satisfactionLastUpdatedAt = clampedSatisfaction > 0 ? satisfactionLastUpdatedAt : nil
@@ -214,13 +185,6 @@ final class AppState {
         self.toiletPoopsData = toiletPoopsData
         self.toiletPoopLastSpawnAt = toiletPoopLastSpawnAt
 
-        self.eggOwned = eggOwned
-        self.eggHatchAt = eggHatchAt
-        self.eggAdUsedToday = eggAdUsedToday
-
-        self.shopDayKey = shopDayKey
-        self.shopItemsData = shopItemsData
-        self.shopRewardResetsToday = shopRewardResetsToday
 
         self.currentPetID = currentPetID
         self.ownedPetIDsData = ownedPetIDsData
@@ -827,48 +791,6 @@ extension AppState {
             didUpdateStepsCache: didUpdateStepsCache,
             didUpdateKcalCache: didUpdateMeterStepsCache
         )
-    }
-}
-
-// MARK: - Friendship
-extension AppState {
-    struct FriendshipGainResult: Equatable {
-        let beforePoint: Int
-        let afterPoint: Int
-        let gainedCards: Int
-        let didWrap: Bool
-        let didReachMax: Bool
-    }
-
-    @discardableResult
-    func addFriendship(points: Int, maxMeter: Int = AppState.friendshipMaxMeter) -> FriendshipGainResult {
-        let before = friendshipPoint
-        let gain = max(0, points)
-        let total = friendshipPoint + gain
-        let didReachMax = (before < maxMeter) && (total >= maxMeter)
-
-        if total >= maxMeter {
-            let cards = total / maxMeter
-            friendshipCardCount += cards
-            friendshipPoint = total % maxMeter
-
-            return .init(
-                beforePoint: before,
-                afterPoint: friendshipPoint,
-                gainedCards: cards,
-                didWrap: true,
-                didReachMax: didReachMax
-            )
-        } else {
-            friendshipPoint = total
-            return .init(
-                beforePoint: before,
-                afterPoint: friendshipPoint,
-                gainedCards: 0,
-                didWrap: false,
-                didReachMax: didReachMax
-            )
-        }
     }
 }
 
