@@ -169,7 +169,14 @@ final class StepViewModel: ObservableObject {
     func configureIfNeeded() {
         guard !didConfigure else { return }
         didConfigure = true
+        requestLocationAuthorizationIfNeeded()
+    }
+
+    func requestLocationAuthorizationIfNeeded() {
         locationTrackingManager.refreshAuthorizationState()
+
+        guard locationTrackingManager.authorizationState == .notDetermined else { return }
+        locationTrackingManager.requestAuthorization()
     }
 
     func handlePrimaryAction() {
