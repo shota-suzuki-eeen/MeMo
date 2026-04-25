@@ -8,6 +8,7 @@
 import SwiftUI
 import SwiftData
 import UIKit
+import AVFoundation
 #if canImport(WidgetKit)
 import WidgetKit
 #endif
@@ -16,6 +17,7 @@ struct HomeView: View {
     @Environment(\.modelContext) private var modelContext
     @Environment(\.scenePhase) private var scenePhase
     @EnvironmentObject private var bgmManager: BGMManager
+    @State private var touchTapSEPool = TouchTapSEPool()
     @AppStorage(WallpaperCatalog.selectedHomeWallpaperAssetNameKey)
     private var selectedHomeWallpaperAssetName: String = WallpaperCatalog.defaultWallpaper.assetName
 
@@ -95,6 +97,11 @@ struct HomeView: View {
     @State private var floatingHearts: [FloatingHeart] = []
 
     private let characterRubDistancePerTouch: CGFloat = 28
+
+    private enum CharacterPettingTriggerKind {
+        case tap
+        case rub
+    }
 
     private struct HomePersistenceSnapshot: Equatable {
         let walletSteps: Int
@@ -564,6 +571,7 @@ struct HomeView: View {
                 characterPettingLastPoint = nil
                 characterPettingAccumulatedDistance = 0
                 floatingHearts.removeAll()
+                touchTapSEPool.stopAll()
             }
             .onChange(of: state.walletKcal) { _, _ in
                 guard isHomeVisible else { return }
@@ -1073,13 +1081,11 @@ struct HomeView: View {
 
             BottomButtons(
                 onMenu: {
-                    bgmManager.playSE(.open)
                     withAnimation(.easeInOut(duration: 0.18)) {
                         showRightMenuPopup = true
                     }
                 },
                 onGatya: {
-                    bgmManager.playSE(.push)
                     showGachaView = true
                 },
                 onWork: {
@@ -1444,6 +1450,7 @@ struct HomeView: View {
     private func registerCharacterPettingTouch(
         at location: CGPoint,
         in gestureAreaSize: CGSize,
+        triggerKind: CharacterPettingTriggerKind,
         count: Int = 1
     ) {
         guard count > 0 else { return }
@@ -1457,6 +1464,15 @@ struct HomeView: View {
 
         for _ in 0..<count {
             spawnFloatingHeart(at: location, in: gestureAreaSize)
+        }
+
+        switch triggerKind {
+        case .tap:
+            for _ in 0..<count {
+                touchTapSEPool.play()
+            }
+        case .rub:
+            bgmManager.playSE(.love)
         }
 
         if result.gainedPoints > 0 {
@@ -1496,7 +1512,7 @@ struct HomeView: View {
 
         while characterPettingAccumulatedDistance >= characterRubDistancePerTouch {
             characterPettingAccumulatedDistance -= characterRubDistancePerTouch
-            registerCharacterPettingTouch(at: value.location, in: gestureAreaSize)
+            registerCharacterPettingTouch(at: value.location, in: gestureAreaSize, triggerKind: .rub)
         }
     }
 
@@ -1517,7 +1533,7 @@ struct HomeView: View {
         )
 
         if totalDistance < 10 {
-            registerCharacterPettingTouch(at: value.location, in: gestureAreaSize)
+            registerCharacterPettingTouch(at: value.location, in: gestureAreaSize, triggerKind: .tap)
         }
     }
 
@@ -1712,6 +1728,7 @@ struct HomeView: View {
 
         if !state.hasRemainingToiletPoops {
             toiletPoopActivePoint.removeAll()
+            bgmManager.playSE(.wc)
             resolveToilet(state: state)
         }
     }
@@ -2585,7 +2602,6 @@ struct HomeView: View {
             return
         }
 
-        bgmManager.playSE(.wc)
         toast("うんちを直接こすって掃除しよう！")
     }
 
@@ -2610,7 +2626,6 @@ struct HomeView: View {
             return
         }
 
-        bgmManager.playSE(.wc)
         isToiletTicketCleaning = true
         toiletPoopActivePoint.removeAll()
 
@@ -2634,6 +2649,11 @@ struct HomeView: View {
 
             toiletTicketClearingPoopIDs.removeAll()
             isToiletTicketCleaning = false
+
+            if !poops.isEmpty, !state.hasRemainingToiletPoops {
+                bgmManager.playSE(.wc)
+            }
+
             resolveToilet(state: state)
             toiletTicketCleanupTask = nil
         }
@@ -2646,7 +2666,6 @@ struct HomeView: View {
             return
         }
 
-        bgmManager.playSE(.open)
         showStepEnjoy = true
     }
 
@@ -4511,6 +4530,113 @@ private extension Array {
     subscript(safe index: Int) -> Element? {
         guard indices.contains(index) else { return nil }
         return self[index]
+    }
+}
+
+
+private final class TouchTapSEPool: NSObject, AVAudioPlayerDelegate {
+    private var activePlayers: [UUID: AVAudioPlayer] = [:]
+    private var bundleAudioURLCache: [String: URL] = [:]
+    private var dataAssetCache: [String: Data] = [:]
+
+    func play() {
+        do {
+            try configureAudioSessionIfNeeded()
+
+            let player = try makeAudioPlayer(named: "effect_touch")
+            let id = UUID()
+
+            player.delegate = self
+            player.volume = 1.0
+            player.numberOfLoops = 0
+            player.prepareToPlay()
+
+            activePlayers[id] = player
+            player.play()
+        } catch {
+            print("❌ effect_touch の再生に失敗しました: \(error.localizedDescription)")
+        }
+    }
+
+    func stopAll() {
+        for player in activePlayers.values {
+            player.stop()
+        }
+        activePlayers.removeAll()
+    }
+
+    nonisolated func audioPlayerDidFinishPlaying(_ player: AVAudioPlayer, successfully flag: Bool) {
+        Task { @MainActor in
+            self.removePlayer(player)
+        }
+    }
+
+    nonisolated func audioPlayerDecodeErrorDidOccur(_ player: AVAudioPlayer, error: Error?) {
+        Task { @MainActor in
+            self.removePlayer(player)
+            if let error {
+                print("❌ effect_touch デコードエラー: \(error.localizedDescription)")
+            }
+        }
+    }
+
+    @MainActor
+    private func configureAudioSessionIfNeeded() throws {
+        let session = AVAudioSession.sharedInstance()
+        try session.setCategory(.ambient, mode: .default, options: [])
+        try session.setActive(true)
+    }
+
+    private func makeAudioPlayer(named name: String) throws -> AVAudioPlayer {
+        if let url = findAudioFileURLInBundle(named: name) {
+            return try AVAudioPlayer(contentsOf: url)
+        }
+
+        if let data = findAudioDataAsset(named: name) {
+            return try AVAudioPlayer(data: data)
+        }
+
+        throw NSError(
+            domain: "HomeView.TouchTapSEPool",
+            code: 404,
+            userInfo: [NSLocalizedDescriptionKey: "音源が見つかりません: \(name)"]
+        )
+    }
+
+    private func findAudioFileURLInBundle(named name: String) -> URL? {
+        if let cached = bundleAudioURLCache[name] {
+            return cached
+        }
+
+        let exts = ["m4a", "mp3", "wav", "aif", "aiff", "caf"]
+        for ext in exts {
+            if let url = Bundle.main.url(forResource: name, withExtension: ext) {
+                bundleAudioURLCache[name] = url
+                return url
+            }
+        }
+        return nil
+    }
+
+    private func findAudioDataAsset(named name: String) -> Data? {
+        if let cached = dataAssetCache[name] {
+            return cached
+        }
+
+        if let data = NSDataAsset(name: name)?.data {
+            dataAssetCache[name] = data
+            return data
+        }
+
+        return nil
+    }
+
+    @MainActor
+    private func removePlayer(_ target: AVAudioPlayer) {
+        guard let id = activePlayers.first(where: { $0.value === target })?.key else {
+            return
+        }
+        activePlayers.removeValue(forKey: id)
     }
 }
 

@@ -277,6 +277,10 @@ extension AppState {
         let totalTouchCount = happinessPettingTouchCountToday + safeCount
         let requestedPoints = min(availablePoints, totalTouchCount / AppState.happinessTouchesPerPoint)
 
+        for _ in 0..<safeCount {
+            NotificationCenter.default.post(name: BGMManager.happinessHeartDidAppearNotification, object: nil)
+        }
+
         var actualGainedPoints = 0
         if requestedPoints > 0 {
             let gainResult = addHappinessPoints(requestedPoints, now: now)

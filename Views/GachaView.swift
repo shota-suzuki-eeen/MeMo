@@ -334,7 +334,7 @@ struct GachaView: View {
                         ToastView(message: toastMessage)
                             .padding(.bottom, max(24, safeBottom + 12))
                     }
-                    .transition(.move(edge: .bottom).combined(with: .opacity))
+                    .transition(.move(edge: Edge.bottom).combined(with: .opacity))
                 }
             }
             .ignoresSafeArea()
@@ -550,6 +550,7 @@ struct GachaView: View {
             return
         }
 
+        bgmManager.playSE(.gacha)
         state.gachaResetIfNeeded(now: Date())
         state.walletSteps -= mode.cost
         beginDraw(mode: mode, isFreeAd: false, freeSlot: nil)

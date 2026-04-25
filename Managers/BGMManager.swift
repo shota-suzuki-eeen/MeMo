@@ -3,7 +3,7 @@
 //  MeMo
 //
 //  Updated for per-screen BGM with fade transitions.
-//  Fixed build error for StepViewModel notification references.
+//  SoundEffect mappings adjusted for adopted SE/BGM assets only.
 //
 
 import Foundation
@@ -24,23 +24,85 @@ final class BGMManager: NSObject, ObservableObject, AVAudioPlayerDelegate {
         "BGMManager.stepSessionDidExitWorkoutNotification"
     )
 
+    // MARK: - Notifications used by Home sound hooks
+
+    static let happinessHeartDidAppearNotification = Notification.Name(
+        "BGMManager.happinessHeartDidAppearNotification"
+    )
+
+    static let manualToiletCleanupDidFinishNotification = Notification.Name(
+        "BGMManager.manualToiletCleanupDidFinishNotification"
+    )
+
     // MARK: - Sound Effect
 
-    enum SoundEffect: String, CaseIterable {
-        case bath
-        case buy
-        case crap
-        case eat
-        case love
-        case open
-        case push
+    enum SoundEffect: CaseIterable, Hashable {
+        case button
+        case food
+        case gacha
+        case touch
         case wc
+        case wcCleanup
+
+        // Existing call-site compatibility
+        static let push: SoundEffect = .button
+        static let open: SoundEffect = .button
+        static let buy: SoundEffect = .button
+        static let bath: SoundEffect = .button
+        static let eat: SoundEffect = .food
+        static let love: SoundEffect = .touch
+        static let crap: SoundEffect = .wcCleanup
+
+        var resourceName: String {
+            switch self {
+            case .button:
+                return "effect_button"
+            case .food:
+                return "effect_food"
+            case .gacha:
+                return "effect_gacha"
+            case .touch:
+                return "effect_touch"
+            case .wc, .wcCleanup:
+                return "effect_wc"
+            }
+        }
+
+        var allowsOverlap: Bool {
+            switch self {
+            case .touch:
+                return false
+            default:
+                return true
+            }
+        }
+
+        var fadeOutDuration: TimeInterval? {
+            switch self {
+            case .wcCleanup:
+                return 3.0
+            default:
+                return nil
+            }
+        }
     }
 
     enum BackgroundTrack: String, CaseIterable {
         case main = "BGM_main"
         case gacha = "BGM_gacha"
         case zukan = "BGM_zukan"
+        case takibi = "takibi"
+    }
+
+    private final class ActiveSEPlayback {
+        let effect: SoundEffect
+        let player: AVAudioPlayer
+        var fadeTask: Task<Void, Never>?
+
+        init(effect: SoundEffect, player: AVAudioPlayer) {
+            self.effect = effect
+            self.player = player
+        }
     }
 
     private let defaultTrack: BackgroundTrack = .main
@@ -52,7 +114,8 @@ final class BGMManager: NSObject, ObservableObject, AVAudioPlayerDelegate {
 
     private var fadeTask: Task<Void, Never>?
 
-    private var activeSEPlayers: [UUID: AVAudioPlayer] = [:]
+    private var activeSEPlaybacks: [UUID: ActiveSEPlayback] = [:]
+    private var nonOverlappingEffectsInFlight: Set<SoundEffect> = []
 
     private var bundleAudioURLCache: [String: URL] = [:]
     private var dataAssetCache: [String: Data] = [:]
@@ -163,21 +226,35 @@ final class BGMManager: NSObject, ObservableObject, AVAudioPlayerDelegate {
     }
 
     func playSE(_ effect: SoundEffect, volume: Float = 1.0) {
+        if !effect.allowsOverlap, nonOverlappingEffectsInFlight.contains(effect) {
+            return
+        }
+
         do {
             try configureAudioSessionIfNeeded()
 
-            let sePlayer = try makeAudioPlayer(named: effect.rawValue)
+            let sePlayer = try makeAudioPlayer(named: effect.resourceName)
             let id = UUID()
+            let playback = ActiveSEPlayback(effect: effect, player: sePlayer)
 
             sePlayer.delegate = self
             sePlayer.volume = max(0.0, min(1.0, volume))
             sePlayer.numberOfLoops = 0
             sePlayer.prepareToPlay()
+
+            activeSEPlaybacks[id] = playback
+
+            if !effect.allowsOverlap {
+                nonOverlappingEffectsInFlight.insert(effect)
+            }
+
             sePlayer.play()
 
-            activeSEPlayers[id] = sePlayer
+            if let fadeOutDuration = effect.fadeOutDuration {
+                scheduleSEFadeOut(for: id, duration: fadeOutDuration)
+            }
         } catch {
-            print("❌ SE再生に失敗しました: \(effect.rawValue) / \(error.localizedDescription)")
+            print("❌ SE再生に失敗しました: \(effect.resourceName) / \(error.localizedDescription)")
         }
     }
 
@@ -212,6 +289,20 @@ final class BGMManager: NSObject, ObservableObject, AVAudioPlayerDelegate {
             .receive(on: RunLoop.main)
             .sink { [weak self] _ in
                 self?.restoreDefaultBackground(fadeDuration: 0.55)
+            }
+            .store(in: &notificationCancellables)
+
+        NotificationCenter.default.publisher(for: Self.happinessHeartDidAppearNotification)
+            .receive(on: RunLoop.main)
+            .sink { [weak self] _ in
+                self?.playSE(.touch)
+            }
+            .store(in: &notificationCancellables)
+
+        NotificationCenter.default.publisher(for: Self.manualToiletCleanupDidFinishNotification)
+            .receive(on: RunLoop.main)
+            .sink { [weak self] _ in
+                self?.playSE(.wcCleanup)
             }
             .store(in: &notificationCancellables)
     }
@@ -285,6 +376,35 @@ final class BGMManager: NSObject, ObservableObject, AVAudioPlayerDelegate {
         }
     }
 
+    private func scheduleSEFadeOut(for playbackID: UUID, duration: TimeInterval) {
+        guard let playback = activeSEPlaybacks[playbackID] else { return }
+
+        playback.fadeTask?.cancel()
+
+        let startVolume = max(0, min(1.0, playback.player.volume))
+        let safeDuration = max(0.01, duration)
+        let stepCount = max(1, Int((safeDuration / 0.05).rounded(.up)))
+        let sleepNanoseconds = UInt64((safeDuration / Double(stepCount)) * 1_000_000_000)
+
+        playback.fadeTask = Task { @MainActor in
+            for step in 0...stepCount {
+                guard !Task.isCancelled else { return }
+                guard let playback = activeSEPlaybacks[playbackID] else { return }
+
+                let progress = Float(step) / Float(stepCount)
+                playback.player.volume = max(0, min(1.0, startVolume * (1.0 - progress)))
+
+                if step < stepCount {
+                    try? await Task.sleep(nanoseconds: sleepNanoseconds)
+                }
+            }
+
+            guard let playback = activeSEPlaybacks[playbackID] else { return }
+            playback.player.stop()
+            removeSEPlayback(for: playbackID)
+        }
+    }
+
     private func configureAudioSessionIfNeeded() throws {
         let session = AVAudioSession.sharedInstance()
         try session.setCategory(.ambient, mode: .default, options: [])
@@ -336,8 +456,18 @@ final class BGMManager: NSObject, ObservableObject, AVAudioPlayerDelegate {
     }
 
     private func removeFinishedSEPlayer(_ target: AVAudioPlayer) {
-        if let key = activeSEPlayers.first(where: { $0.value === target })?.key {
-            activeSEPlayers.removeValue(forKey: key)
+        guard let id = activeSEPlaybacks.first(where: { $0.value.player === target })?.key else {
+            return
+        }
+        removeSEPlayback(for: id)
+    }
+
+    private func removeSEPlayback(for id: UUID) {
+        guard let playback = activeSEPlaybacks.removeValue(forKey: id) else { return }
+        playback.fadeTask?.cancel()
+
+        if !playback.effect.allowsOverlap {
+            nonOverlappingEffectsInFlight.remove(playback.effect)
         }
     }
 }
