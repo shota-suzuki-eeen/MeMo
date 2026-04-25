@@ -78,12 +78,7 @@ final class BGMManager: NSObject, ObservableObject, AVAudioPlayerDelegate {
         }
 
         var fadeOutDuration: TimeInterval? {
-            switch self {
-            case .wcCleanup:
-                return 3.0
-            default:
-                return nil
-            }
+            resourceName == "effect_wc" ? 3.0 : nil
         }
     }
 
