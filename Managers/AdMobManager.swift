@@ -82,6 +82,24 @@ enum DeveloperModeStore {
     }
 }
 
+// MARK: - Full-screen ad BGM mute bridge
+
+private enum AdPlaybackAudioMuteController {
+    static func begin() {
+        NotificationCenter.default.post(
+            name: BGMManager.adPlaybackDidBeginNotification,
+            object: nil
+        )
+    }
+
+    static func end() {
+        NotificationCenter.default.post(
+            name: BGMManager.adPlaybackDidEndNotification,
+            object: nil
+        )
+    }
+}
+
 // MARK: - App-level Manager
 
 @MainActor
@@ -364,12 +382,16 @@ struct BannerArea: View {
 // MARK: - Rewarded
 
 @MainActor
-final class RewardedAdManager: ObservableObject {
+final class RewardedAdManager: NSObject, ObservableObject {
     @Published private(set) var isReady: Bool = false
     @Published private(set) var isLoading: Bool = false
     @Published private(set) var lastErrorMessage: String? = nil
 
     private let adUnitID: String
+    private var pendingReward: (() -> Void)?
+    private var pendingUnavailable: (() -> Void)?
+    private var didEarnRewardDuringPresentation: Bool = false
+    private var isPresentingAd: Bool = false
 
     #if canImport(GoogleMobileAds)
     private var rewardedAd: RewardedAd?
@@ -377,6 +399,7 @@ final class RewardedAdManager: ObservableObject {
 
     init(adUnitID: String) {
         self.adUnitID = adUnitID
+        super.init()
 
         if DeveloperModeStore.isEnabled {
             self.isReady = true
@@ -419,6 +442,7 @@ final class RewardedAdManager: ObservableObject {
                 }
 
                 self.rewardedAd = ad
+                self.rewardedAd?.fullScreenContentDelegate = self
                 self.isReady = (ad != nil)
             }
         }
@@ -442,6 +466,11 @@ final class RewardedAdManager: ObservableObject {
         }
 
         #if canImport(GoogleMobileAds)
+        guard !isPresentingAd else {
+            onUnavailable?()
+            return
+        }
+
         guard let ad = rewardedAd else {
             isReady = false
             loadIfNeeded()
@@ -456,18 +485,50 @@ final class RewardedAdManager: ObservableObject {
             return
         }
 
-        ad.present(from: root) {
-            onReward()
+        pendingReward = onReward
+        pendingUnavailable = onUnavailable
+        didEarnRewardDuringPresentation = false
+        isPresentingAd = true
+
+        ad.fullScreenContentDelegate = self
+        AdPlaybackAudioMuteController.begin()
+
+        ad.present(from: root) { [weak self] in
+            Task { @MainActor in
+                self?.didEarnRewardDuringPresentation = true
+            }
         }
 
         isReady = false
         rewardedAd = nil
-        load()
         #else
         lastErrorMessage = "GoogleMobileAds がリンクされていません"
         isReady = false
         onUnavailable?()
         #endif
+    }
+
+    private func finishPresentation(
+        shouldRunReward: Bool,
+        shouldRunUnavailable: Bool
+    ) {
+        let reward = pendingReward
+        let unavailable = pendingUnavailable
+
+        pendingReward = nil
+        pendingUnavailable = nil
+        didEarnRewardDuringPresentation = false
+        isPresentingAd = false
+
+        AdPlaybackAudioMuteController.end()
+
+        if shouldRunReward {
+            reward?()
+        } else if shouldRunUnavailable {
+            unavailable?()
+        }
+
+        load()
     }
 }
 
@@ -481,6 +542,7 @@ final class InterstitialAdManager: NSObject, ObservableObject {
 
     private let adUnitID: String
     private var onDismiss: (() -> Void)?
+    private var isPresentingAd: Bool = false
 
     #if canImport(GoogleMobileAds)
     private var interstitialAd: InterstitialAd?
@@ -552,6 +614,11 @@ final class InterstitialAdManager: NSObject, ObservableObject {
         }
 
         #if canImport(GoogleMobileAds)
+        guard !isPresentingAd else {
+            onDismiss()
+            return
+        }
+
         guard let ad = interstitialAd else {
             isReady = false
             onDismiss()
@@ -567,7 +634,10 @@ final class InterstitialAdManager: NSObject, ObservableObject {
         }
 
         self.onDismiss = onDismiss
+        isPresentingAd = true
         ad.fullScreenContentDelegate = self
+
+        AdPlaybackAudioMuteController.begin()
         ad.present(from: root)
 
         isReady = false
@@ -577,28 +647,51 @@ final class InterstitialAdManager: NSObject, ObservableObject {
         onDismiss()
         #endif
     }
+
+    private func finishPresentation() {
+        let callback = onDismiss
+        onDismiss = nil
+        isPresentingAd = false
+
+        AdPlaybackAudioMuteController.end()
+
+        callback?()
+        load()
+    }
 }
 
 #if canImport(GoogleMobileAds)
-// MARK: - GADFullScreenContentDelegate
+// MARK: - FullScreenContentDelegate
 
-extension InterstitialAdManager: FullScreenContentDelegate {
+extension RewardedAdManager: FullScreenContentDelegate {
     @MainActor
     func adDidDismissFullScreenContent(_ ad: FullScreenPresentingAd) {
-        let callback = onDismiss
-        onDismiss = nil
-        callback?()
-        load()
+        finishPresentation(
+            shouldRunReward: didEarnRewardDuringPresentation,
+            shouldRunUnavailable: false
+        )
     }
 
     @MainActor
     func ad(_ ad: FullScreenPresentingAd, didFailToPresentFullScreenContentWithError error: Error) {
         lastErrorMessage = error.localizedDescription
+        finishPresentation(
+            shouldRunReward: false,
+            shouldRunUnavailable: true
+        )
+    }
+}
 
-        let callback = onDismiss
-        onDismiss = nil
-        callback?()
-        load()
+extension InterstitialAdManager: FullScreenContentDelegate {
+    @MainActor
+    func adDidDismissFullScreenContent(_ ad: FullScreenPresentingAd) {
+        finishPresentation()
+    }
+
+    @MainActor
+    func ad(_ ad: FullScreenPresentingAd, didFailToPresentFullScreenContentWithError error: Error) {
+        lastErrorMessage = error.localizedDescription
+        finishPresentation()
     }
 }
 #endif

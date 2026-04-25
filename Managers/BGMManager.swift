@@ -34,6 +34,16 @@ final class BGMManager: NSObject, ObservableObject, AVAudioPlayerDelegate {
         "BGMManager.manualToiletCleanupDidFinishNotification"
     )
 
+    // MARK: - Notifications used by full-screen ads
+
+    static let adPlaybackDidBeginNotification = Notification.Name(
+        "BGMManager.adPlaybackDidBeginNotification"
+    )
+
+    static let adPlaybackDidEndNotification = Notification.Name(
+        "BGMManager.adPlaybackDidEndNotification"
+    )
+
     // MARK: - Sound Effect
 
     enum SoundEffect: CaseIterable, Hashable {
@@ -110,6 +120,7 @@ final class BGMManager: NSObject, ObservableObject, AVAudioPlayerDelegate {
     private var hasPrepared: Bool = false
 
     private var fadeTask: Task<Void, Never>?
+    private var activeAdMuteRequestCount: Int = 0
 
     private var activeSEPlaybacks: [UUID: ActiveSEPlayback] = [:]
     private var nonOverlappingEffectsInFlight: Set<SoundEffect> = []
@@ -117,6 +128,10 @@ final class BGMManager: NSObject, ObservableObject, AVAudioPlayerDelegate {
     private var bundleAudioURLCache: [String: URL] = [:]
     private var dataAssetCache: [String: Data] = [:]
     private var notificationCancellables: Set<AnyCancellable> = []
+
+    private var effectiveTargetBGMVolume: Float {
+        activeAdMuteRequestCount > 0 ? 0 : targetBGMVolume
+    }
 
     override init() {
         super.init()
@@ -134,6 +149,15 @@ final class BGMManager: NSObject, ObservableObject, AVAudioPlayerDelegate {
         fadeDuration: TimeInterval = 0.55
     ) {
         if currentTrack == track, let player, player.isPlaying {
+            let targetVolume = effectiveTargetBGMVolume
+            if abs(player.volume - targetVolume) > 0.01 {
+                scheduleFade(
+                    player: player,
+                    from: player.volume,
+                    to: targetVolume,
+                    duration: fadeDuration
+                )
+            }
             return
         }
 
@@ -156,11 +180,12 @@ final class BGMManager: NSObject, ObservableObject, AVAudioPlayerDelegate {
                     }
                     player.play()
                 }
+                let targetVolume = effectiveTargetBGMVolume
                 let startVolume = max(0, min(targetBGMVolume, player.volume))
                 scheduleFade(
                     player: player,
                     from: startVolume,
-                    to: targetBGMVolume,
+                    to: targetVolume,
                     duration: fadeDuration
                 )
                 return
@@ -220,6 +245,52 @@ final class BGMManager: NSObject, ObservableObject, AVAudioPlayerDelegate {
 
     func restoreDefaultBackground(fadeDuration: TimeInterval = 0.55) {
         switchBackground(to: defaultTrack, fadeDuration: fadeDuration)
+    }
+
+    func muteForAdPlayback(fadeDuration: TimeInterval = 0.15) {
+        activeAdMuteRequestCount += 1
+
+        guard activeAdMuteRequestCount == 1 else {
+            return
+        }
+
+        fadeTask?.cancel()
+
+        guard let player else {
+            return
+        }
+
+        scheduleFade(
+            player: player,
+            from: player.volume,
+            to: 0,
+            duration: fadeDuration
+        )
+    }
+
+    func restoreAfterAdPlayback(fadeDuration: TimeInterval = 0.25) {
+        guard activeAdMuteRequestCount > 0 else {
+            return
+        }
+
+        activeAdMuteRequestCount -= 1
+
+        guard activeAdMuteRequestCount == 0 else {
+            return
+        }
+
+        fadeTask?.cancel()
+
+        guard let player, player.isPlaying else {
+            return
+        }
+
+        scheduleFade(
+            player: player,
+            from: player.volume,
+            to: targetBGMVolume,
+            duration: fadeDuration
+        )
     }
 
     func playSE(_ effect: SoundEffect, volume: Float = 1.0) {
@@ -302,6 +373,20 @@ final class BGMManager: NSObject, ObservableObject, AVAudioPlayerDelegate {
                 self?.playSE(.wcCleanup)
             }
             .store(in: &notificationCancellables)
+
+        NotificationCenter.default.publisher(for: Self.adPlaybackDidBeginNotification)
+            .receive(on: RunLoop.main)
+            .sink { [weak self] _ in
+                self?.muteForAdPlayback()
+            }
+            .store(in: &notificationCancellables)
+
+        NotificationCenter.default.publisher(for: Self.adPlaybackDidEndNotification)
+            .receive(on: RunLoop.main)
+            .sink { [weak self] _ in
+                self?.restoreAfterAdPlayback()
+            }
+            .store(in: &notificationCancellables)
     }
 
     // MARK: - Private
@@ -313,6 +398,8 @@ final class BGMManager: NSObject, ObservableObject, AVAudioPlayerDelegate {
     ) {
         fadeTask?.cancel()
 
+        let targetVolume = effectiveTargetBGMVolume
+        let oldStartVolume = oldPlayer?.volume ?? targetBGMVolume
         let safeDuration = max(0.01, duration)
         let stepCount = max(1, Int((safeDuration / 0.05).rounded(.up)))
         let sleepNanoseconds = UInt64((safeDuration / Double(stepCount)) * 1_000_000_000)
@@ -322,10 +409,10 @@ final class BGMManager: NSObject, ObservableObject, AVAudioPlayerDelegate {
                 guard !Task.isCancelled else { return }
 
                 let progress = Float(step) / Float(stepCount)
-                newPlayer.volume = targetBGMVolume * progress
+                newPlayer.volume = targetVolume * progress
 
                 if let oldPlayer {
-                    oldPlayer.volume = targetBGMVolume * (1.0 - progress)
+                    oldPlayer.volume = oldStartVolume * (1.0 - progress)
                 }
 
                 if step < stepCount {

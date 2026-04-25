@@ -960,11 +960,6 @@ struct GachaView: View {
         ZStack {
             Color.black.opacity(0.72)
                 .ignoresSafeArea()
-                .onTapGesture {
-                    withAnimation(.easeOut(duration: 0.18)) {
-                        revealOverlayReward = nil
-                    }
-                }
 
             ScrollView(showsIndicators: false) {
                 VStack(spacing: 18) {
@@ -989,8 +984,20 @@ struct GachaView: View {
                 .frame(minHeight: UIScreen.main.bounds.height - safeTop - safeBottom)
             }
         }
+        .contentShape(Rectangle())
+        .simultaneousGesture(
+            TapGesture().onEnded {
+                closeEnlargedRewardOverlay()
+            }
+        )
         .transition(.opacity)
         .zIndex(60)
+    }
+
+    private func closeEnlargedRewardOverlay() {
+        withAnimation(.easeOut(duration: 0.18)) {
+            revealOverlayReward = nil
+        }
     }
 
     private func handleOverlayTap() {
