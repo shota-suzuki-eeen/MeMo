@@ -156,7 +156,8 @@ struct GachaView: View {
     @EnvironmentObject private var bgmManager: BGMManager
     @Query private var states: [AppState]
 
-    @StateObject private var rewardedAdManager = RewardedAdManager(adUnitID: AdUnitID.rewardGacha)
+    // アプリ起動時に AdMobManager.shared.start() で事前ロードされた広告をそのまま利用する
+    @ObservedObject private var rewardedAdManager = AdMobManager.shared.rewardGacha
 
     @State private var phase: Phase = .idle
     @State private var drawMode: DrawMode = .single
@@ -351,7 +352,6 @@ struct GachaView: View {
             state?.ensureInitialPetsIfNeeded()
             state?.gachaResetIfNeeded(now: Date())
             rewardedAdManager.loadIfNeeded()
-            AdMobManager.shared.prepareRewardGacha()
         }
         .onDisappear {
             rollTask?.cancel()
@@ -577,7 +577,6 @@ struct GachaView: View {
             },
             onUnavailable: {
                 rewardedAdManager.loadIfNeeded()
-                AdMobManager.shared.prepareRewardGacha()
                 showToast("広告を読み込み中です。少し待ってからもう一度お試しください")
             }
         )
@@ -1063,7 +1062,6 @@ struct GachaView: View {
                 lastFreeAdSlot = nil
                 lastDrawWasFreeAd = false
                 rewardedAdManager.loadIfNeeded()
-                AdMobManager.shared.prepareRewardGacha()
             }
         }
     }
