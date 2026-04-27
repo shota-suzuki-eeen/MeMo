@@ -242,6 +242,8 @@ struct GachaView: View {
         static let singleCapsuleMaxSize: CGFloat = 220
         static let singleResultCardWidth: CGFloat = 290
         static let singleResultCardHeight: CGFloat = 340
+        static let enlargedResultCardHeight: CGFloat = 360
+        static let enlargedResultImageSize: CGFloat = 210
 
         static let gridSpacing: CGFloat = 10
         static let gridCornerRadius: CGFloat = 18
@@ -953,18 +955,18 @@ struct GachaView: View {
 
     private func capsuleResultGrid(rewards: [GachaReward], contentWidth: CGFloat) -> some View {
         let columns = Array(repeating: GridItem(.flexible(), spacing: Layout.gridSpacing), count: 5)
-        let side = max(62, min(76, (contentWidth - (Layout.gridSpacing * 4)) / 5))
+        let side = max(54, min(64, (contentWidth - (Layout.gridSpacing * 4)) / 5))
 
         return LazyVGrid(columns: columns, spacing: Layout.gridSpacing) {
             ForEach(rewards, id: \.id) { reward in
                 ResultRewardCard(
                     reward: reward,
                     isLarge: false,
-                    showsText: true,
+                    showsText: false,
                     showsAccentBorder: false,
                     usesRarityBackgroundAsset: true
                 )
-                .frame(width: side, height: side + 34)
+                .frame(width: side, height: side)
                 .contentShape(RoundedRectangle(cornerRadius: Layout.gridCornerRadius, style: .continuous))
                 .onLongPressGesture(minimumDuration: 0.28) {
                     bgmManager.playSE(.push)
@@ -999,9 +1001,10 @@ struct GachaView: View {
                     isLarge: true,
                     showsText: true,
                     showsAccentBorder: false,
-                    usesRarityBackgroundAsset: true
+                    usesRarityBackgroundAsset: true,
+                    largeImageSizeOverride: Layout.enlargedResultImageSize
                 )
-                .frame(width: Layout.singleResultCardWidth, height: Layout.singleResultCardHeight)
+                .frame(width: Layout.singleResultCardWidth, height: Layout.enlargedResultCardHeight)
                 .onTapGesture { }
 
                 Text("画面をタップで閉じる")
@@ -1146,13 +1149,30 @@ fileprivate struct ResultRewardCard: View {
     let showsText: Bool
     let showsAccentBorder: Bool
     let usesRarityBackgroundAsset: Bool
+    let largeImageSizeOverride: CGFloat?
+
+    init(
+        reward: GachaReward,
+        isLarge: Bool,
+        showsText: Bool,
+        showsAccentBorder: Bool,
+        usesRarityBackgroundAsset: Bool,
+        largeImageSizeOverride: CGFloat? = nil
+    ) {
+        self.reward = reward
+        self.isLarge = isLarge
+        self.showsText = showsText
+        self.showsAccentBorder = showsAccentBorder
+        self.usesRarityBackgroundAsset = usesRarityBackgroundAsset
+        self.largeImageSizeOverride = largeImageSizeOverride
+    }
 
     private var cornerRadius: CGFloat {
         isLarge ? 26 : 18
     }
 
     private var imageSize: CGFloat {
-        isLarge ? 176 : 40
+        isLarge ? (largeImageSizeOverride ?? 176) : 52
     }
 
     private var textSize: CGFloat {
@@ -1189,7 +1209,7 @@ fileprivate struct ResultRewardCard: View {
 
                 Spacer(minLength: 0)
             }
-            .padding(isLarge ? 18 : 7)
+            .padding(isLarge ? 18 : 5)
         }
         .clipShape(RoundedRectangle(cornerRadius: cornerRadius, style: .continuous))
         .overlay {
@@ -1206,7 +1226,8 @@ fileprivate struct ResultRewardCard: View {
         if usesRarityBackgroundAsset {
             Image(reward.rarity.resultBackgroundAssetName)
                 .resizable()
-                .scaledToFill()
+                .aspectRatio(contentMode: isLarge ? .fill : .fit)
+                .frame(maxWidth: .infinity, maxHeight: .infinity)
         } else {
             ZStack {
                 RoundedRectangle(cornerRadius: cornerRadius, style: .continuous)
