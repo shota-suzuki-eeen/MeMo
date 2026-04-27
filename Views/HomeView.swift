@@ -419,13 +419,15 @@ struct HomeView: View {
         static let zToiletTicketButton: Double = 275
         static let zWcButton: Double = 240
 
-        static let foodSelectorBottomGapFromButtons: CGFloat = 166
+        static let foodSelectorBottomGapFromButtons: CGFloat = 210
         static let foodSelectorHitAreaWidth: CGFloat = 320
         static let foodSelectorHitAreaHeight: CGFloat = 220
         static let foodSelectorInstructionOffsetY: CGFloat = 150
         static let foodSelectorRollStepWidth: CGFloat = 96
         static let foodSelectorRollMaxVisibleOffset: Double = 3.0
         static let foodSelectorPendingDecisionThreshold: CGFloat = 44
+        static let foodSelectorPendingOffsetY: CGFloat = 44
+        static let foodSelectorPendingActionTextOffsetY: CGFloat = 0
         static let foodSelectorToggleOffsetX: CGFloat = 148
         static let foodSelectorToggleOffsetY: CGFloat = -18
 
@@ -953,6 +955,7 @@ struct HomeView: View {
             )
             .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .bottom)
             .padding(.bottom, Layout.bottomPadding + Layout.foodSelectorBottomGapFromButtons)
+            .offset(y: pendingFoodFeedID == nil ? 0 : Layout.foodSelectorPendingOffsetY)
             .zIndex(Layout.zFoodSelector + 1)
         }
     }
@@ -4074,7 +4077,7 @@ private struct FoodSelectionCarousel: View {
                         .padding(.horizontal, 18)
                         .padding(.vertical, 10)
                         .background(Color.black.opacity(0.58), in: Capsule())
-                        .offset(y: pendingActionText == "あげる" ? -138 : 138)
+                        .offset(y: HomeView.Layout.foodSelectorPendingActionTextOffsetY)
                         .transition(.opacity)
                 }
 
