@@ -882,9 +882,10 @@ struct GachaView: View {
                 isLarge: true,
                 showsText: true,
                 showsAccentBorder: false,
-                usesRarityBackgroundAsset: true
+                usesRarityBackgroundAsset: true,
+                largeImageSizeOverride: Layout.enlargedResultImageSize
             )
-            .frame(width: Layout.singleResultCardWidth, height: Layout.singleResultCardHeight)
+            .frame(width: Layout.singleResultCardWidth, height: Layout.enlargedResultCardHeight)
             .onTapGesture { }
 
             Text("画面をタップで戻る")
