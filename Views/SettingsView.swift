@@ -6,18 +6,19 @@
 //
 
 import SwiftUI
-import SwiftData
 
 struct SettingsView: View {
-    @Environment(\.modelContext) private var modelContext
+    @Environment(\.openURL) private var openURL
     @EnvironmentObject private var bgmManager: BGMManager
-    @Query private var appStates: [AppState]
 
     @State private var toastMessage: String?
     @State private var showToast: Bool = false
 
     // ✅ 開発者モード
     @AppStorage("isDeveloperMode") private var isDeveloperMode: Bool = false
+
+    // ✅ 表示モード（デフォルトはライトモード）
+    @AppStorage(MemoAppearanceMode.storageKey) private var memoAppearanceModeRawValue: String = MemoAppearanceMode.light.rawValue
 
     // ✅ 開発者モード解除/有効化用
     @State private var hiddenTapCount: Int = 0
@@ -29,74 +30,132 @@ struct SettingsView: View {
     private let developerPinCode = "eeen"
     private let hiddenTapRequiredCount = 15
 
-    private var fixedDailyGoalSteps: Int {
-        AppState.fixedDailyStepGoal
+    private let appVersion = "1.0.0"
+    private let termsURL: URL? = nil
+    private let privacyPolicyURL: URL? = nil
+    private let contactURL = URL(
+        string: "https://docs.google.com/forms/d/e/1FAIpQLScpk7wVSUGvr8AA2RDpVa3gak2lA_wk0GbLeQTlI62Wc0X58g/viewform?usp=header"
+    )!
+
+    private var selectedAppearanceMode: MemoAppearanceMode {
+        MemoAppearanceMode.resolve(memoAppearanceModeRawValue)
     }
 
     var body: some View {
-        let state = ensureAppState()
-
         ZStack {
             Color.clear.ignoresSafeArea()
 
             ScrollView {
                 VStack(alignment: .leading, spacing: 14) {
-                    HStack(spacing: 8) {
-                        Spacer()
+                    titleView
 
-                        Text("設定")
-                            .font(.title2)
-                            .bold()
+                    settingsSection(title: "テーマ") {
+                        VStack(alignment: .leading, spacing: 12) {
+                            Text("表示モード")
+                                .font(.headline)
 
-                        if isDeveloperMode {
-                            Text("DEV")
-                                .font(.caption2.bold())
-                                .foregroundStyle(.white)
-                                .padding(.horizontal, 8)
-                                .padding(.vertical, 4)
-                                .background(Color.orange)
-                                .clipShape(Capsule())
-                        }
-
-                        Spacer()
-                    }
-                    .padding(.top, 8)
-
-                    // ✅ 目標表示カード（編集不可）
-                    VStack(alignment: .leading, spacing: 10) {
-                        Text("1日の目標歩数")
-                            .font(.headline)
-
-                        Text("目標設定の変更機能は廃止されました。Home画面のメーターは毎日 10,000 歩を基準に表示されます。")
-                            .font(.footnote)
-                            .foregroundStyle(.secondary)
-
-                        HStack(spacing: 10) {
-                            VStack(alignment: .leading, spacing: 4) {
-                                Text("現在の目標")
-                                    .font(.footnote)
-                                    .foregroundStyle(.secondary)
-
-                                Text("\(fixedDailyGoalSteps.formatted()) 歩")
-                                    .font(.system(size: 20, weight: .bold))
-                                    .foregroundStyle(.primary)
+                            HStack(spacing: 10) {
+                                ForEach(MemoAppearanceMode.allCases) { mode in
+                                    appearanceModeButton(mode)
+                                }
                             }
 
-                            Spacer()
-
-                            Text("固定")
-                                .font(.caption.bold())
-                                .foregroundStyle(.white)
-                                .padding(.horizontal, 10)
-                                .padding(.vertical, 6)
-                                .background(Color.blue)
-                                .clipShape(Capsule())
+                            Text("アプリの表示をライトモード / ダークモードに切り替えます。")
+                                .font(.footnote)
+                                .foregroundStyle(.secondary)
                         }
                     }
-                    .padding(14)
-                    .background(.thinMaterial)
-                    .clipShape(RoundedRectangle(cornerRadius: 16))
-                    .shadow(radius: 8)
+
+                    settingsSection(title: "システム") {
+                        VStack(alignment: .leading, spacing: 14) {
+                            Toggle(isOn: $bgmManager.isBGMEnabled) {
+                                VStack(alignment: .leading, spacing: 4) {
+                                    Text("BGM")
+                                        .font(.headline)
+
+                                    Text(bgmManager.isBGMEnabled ? "ON" : "OFF")
+                                        .font(.footnote)
+                                        .foregroundStyle(.secondary)
+                                }
+                            }
+                            .onChange(of: bgmManager.isBGMEnabled) { _, _ in
+                                bgmManager.playSE(.push)
+                            }
+
+                            if bgmManager.isBGMEnabled {
+                                VStack(alignment: .leading, spacing: 8) {
+                                    HStack {
+                                        Text("BGM音量")
+                                            .font(.subheadline.weight(.semibold))
+
+                                        Spacer()
+
+                                        Text("\(bgmManager.bgmVolumeStep) / 10")
+                                            .font(.subheadline.monospacedDigit())
+                                            .foregroundStyle(.secondary)
+                                    }
+
+                                    Slider(
+                                        value: Binding(
+                                            get: { Double(bgmManager.bgmVolumeStep) },
+                                            set: { newValue in
+                                                bgmManager.bgmVolumeStep = Int(newValue.rounded())
+                                            }
+                                        ),
+                                        in: 1...10,
+                                        step: 1
+                                    )
+                                }
+                                .transition(.opacity.combined(with: .move(edge: .top)))
+                            }
+
+                            Divider()
+
+                            Toggle(isOn: $bgmManager.isSoundEffectEnabled) {
+                                VStack(alignment: .leading, spacing: 4) {
+                                    Text("効果音")
+                                        .font(.headline)
+
+                                    Text(bgmManager.isSoundEffectEnabled ? "ON" : "OFF")
+                                        .font(.footnote)
+                                        .foregroundStyle(.secondary)
+                                }
+                            }
+                            .onChange(of: bgmManager.isSoundEffectEnabled) { _, newValue in
+                                if newValue {
+                                    bgmManager.playSE(.push)
+                                }
+                            }
+                        }
+                    }
+
+                    settingsSection(title: "アプリ") {
+                        VStack(spacing: 0) {
+                            SettingsValueRow(title: "バージョン", value: appVersion)
+
+                            Divider()
+                                .padding(.leading, 2)
+
+                            SettingsLinkRow(title: "利用規約", value: "準備中") {
+                                openOptionalURL(termsURL, fallbackMessage: "利用規約は準備中です")
+                            }
+
+                            Divider()
+                                .padding(.leading, 2)
+
+                            SettingsLinkRow(title: "プライバシーポリシー", value: "準備中") {
+                                openOptionalURL(privacyPolicyURL, fallbackMessage: "プライバシーポリシーは準備中です")
+                            }
+
+                            Divider()
+                                .padding(.leading, 2)
+
+                            SettingsLinkRow(title: "お問い合わせ", value: nil) {
+                                bgmManager.playSE(.push)
+                                openURL(contactURL)
+                            }
+                        }
+                    }
 
                     Spacer(minLength: 24)
                 }
@@ -182,28 +241,132 @@ struct SettingsView: View {
                 registerHiddenTap()
             }
         )
-        .background(
-            ZStack {
-                Image("setting_background")
-                    .resizable()
-                    .scaledToFill()
-                    .ignoresSafeArea()
-
-                Color.black.opacity(0.25)
-                    .ignoresSafeArea()
-            }
-        )
+        .background(settingBackground)
         .navigationBarTitleDisplayMode(.inline)
         .animation(.easeInOut(duration: 0.2), value: showDeveloperPinPopup)
+        .animation(.easeInOut(duration: 0.18), value: bgmManager.isBGMEnabled)
+        .animation(.easeInOut(duration: 0.18), value: memoAppearanceModeRawValue)
         .onAppear {
-            if state.normalizeFixedDailyStepGoal() {
-                do {
-                    try modelContext.save()
-                } catch {
-                    toast("目標歩数の更新に失敗しました")
-                }
-            }
+            normalizeAppearanceModeIfNeeded()
+            MemoInterfaceStyleApplier.apply(style: selectedAppearanceMode.userInterfaceStyle)
         }
+        .onChange(of: memoAppearanceModeRawValue) { _, newValue in
+            MemoInterfaceStyleApplier.apply(style: MemoAppearanceMode.resolve(newValue).userInterfaceStyle)
+        }
+    }
+
+    private var titleView: some View {
+        HStack(spacing: 8) {
+            Spacer()
+
+            Text("設定")
+                .font(.title2)
+                .bold()
+
+            if isDeveloperMode {
+                Text("DEV")
+                    .font(.caption2.bold())
+                    .foregroundStyle(.white)
+                    .padding(.horizontal, 8)
+                    .padding(.vertical, 4)
+                    .background(Color.orange)
+                    .clipShape(Capsule())
+            }
+
+            Spacer()
+        }
+        .padding(.top, 8)
+    }
+
+    private var settingBackground: some View {
+        ZStack {
+            Image("setting_background")
+                .resizable()
+                .scaledToFill()
+                .ignoresSafeArea()
+
+            Color.black
+                .opacity(selectedAppearanceMode == .dark ? 0.55 : 0.25)
+                .ignoresSafeArea()
+        }
+    }
+
+    @ViewBuilder
+    private func settingsSection<Content: View>(
+        title: String,
+        @ViewBuilder content: () -> Content
+    ) -> some View {
+        VStack(alignment: .leading, spacing: 10) {
+            Text(title)
+                .font(.caption.bold())
+                .foregroundStyle(.secondary)
+                .padding(.horizontal, 2)
+
+            content()
+                .padding(14)
+                .background(.thinMaterial)
+                .clipShape(RoundedRectangle(cornerRadius: 16))
+                .shadow(radius: 8)
+        }
+    }
+
+    private func appearanceModeButton(_ mode: MemoAppearanceMode) -> some View {
+        let isSelected = selectedAppearanceMode == mode
+
+        return Button {
+            selectAppearanceMode(mode)
+        } label: {
+            HStack(spacing: 8) {
+                Image(systemName: isSelected ? "checkmark.circle.fill" : "circle")
+                    .font(.subheadline.weight(.semibold))
+
+                Text(mode.title)
+                    .font(.subheadline.weight(.semibold))
+            }
+            .foregroundStyle(isSelected ? .white : .primary)
+            .frame(maxWidth: .infinity)
+            .padding(.vertical, 11)
+            .background(
+                RoundedRectangle(cornerRadius: 12)
+                    .fill(isSelected ? Color.accentColor : Color.primary.opacity(0.08))
+            )
+            .overlay(
+                RoundedRectangle(cornerRadius: 12)
+                    .stroke(isSelected ? Color.accentColor : Color.primary.opacity(0.12), lineWidth: 1)
+            )
+            .contentShape(RoundedRectangle(cornerRadius: 12))
+        }
+        .buttonStyle(.plain)
+    }
+
+    private func selectAppearanceMode(_ mode: MemoAppearanceMode) {
+        bgmManager.playSE(.push)
+
+        guard memoAppearanceModeRawValue != mode.rawValue else {
+            MemoInterfaceStyleApplier.apply(style: mode.userInterfaceStyle)
+            return
+        }
+
+        memoAppearanceModeRawValue = mode.rawValue
+        MemoInterfaceStyleApplier.apply(style: mode.userInterfaceStyle)
+    }
+
+    private func normalizeAppearanceModeIfNeeded() {
+        let resolved = MemoAppearanceMode.resolve(memoAppearanceModeRawValue)
+        if resolved.rawValue != memoAppearanceModeRawValue {
+            memoAppearanceModeRawValue = resolved.rawValue
+        }
+    }
+
+    private func openOptionalURL(_ url: URL?, fallbackMessage: String) {
+        bgmManager.playSE(.push)
+
+        guard let url else {
+            toast(fallbackMessage)
+            return
+        }
+
+        openURL(url)
     }
 
     // MARK: - Developer Mode
@@ -258,29 +421,6 @@ struct SettingsView: View {
         }
     }
 
-    // MARK: - AppState
-
-    private func ensureAppState() -> AppState {
-        if let first = appStates.first {
-            return first
-        }
-
-        let created = AppState(
-            walletKcal: 0,
-            pendingKcal: 0,
-            lastSyncedAt: nil,
-            dailyGoalKcal: AppState.fixedDailyStepGoal,
-            lastDayKey: AppState.makeDayKey(Date())
-        )
-        modelContext.insert(created)
-
-        do {
-            try modelContext.save()
-        } catch { }
-
-        return created
-    }
-
     // MARK: - Toast
 
     private func toast(_ message: String) {
@@ -289,5 +429,55 @@ struct SettingsView: View {
         DispatchQueue.main.asyncAfter(deadline: .now() + 1.4) {
             withAnimation(.easeInOut(duration: 0.2)) { showToast = false }
         }
+    }
+}
+
+private struct SettingsValueRow: View {
+    let title: String
+    let value: String
+
+    var body: some View {
+        HStack(spacing: 12) {
+            Text(title)
+                .font(.body)
+
+            Spacer()
+
+            Text(value)
+                .font(.body)
+                .foregroundStyle(.secondary)
+        }
+        .padding(.vertical, 12)
+    }
+}
+
+private struct SettingsLinkRow: View {
+    let title: String
+    let value: String?
+    let action: () -> Void
+
+    var body: some View {
+        Button(action: action) {
+            HStack(spacing: 12) {
+                Text(title)
+                    .font(.body)
+                    .foregroundStyle(.primary)
+
+                Spacer()
+
+                if let value {
+                    Text(value)
+                        .font(.body)
+                        .foregroundStyle(.secondary)
+                }
+
+                Image(systemName: "chevron.right")
+                    .font(.caption.weight(.semibold))
+                    .foregroundStyle(.secondary)
+            }
+            .padding(.vertical, 12)
+            .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
     }
 }

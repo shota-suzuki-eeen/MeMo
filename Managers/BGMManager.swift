@@ -44,6 +44,44 @@ final class BGMManager: NSObject, ObservableObject, AVAudioPlayerDelegate {
         "BGMManager.adPlaybackDidEndNotification"
     )
 
+    // MARK: - User Settings
+
+    private enum SettingsStorageKey {
+        static let isBGMEnabled = "memo.sound.bgm.enabled"
+        static let bgmVolumeStep = "memo.sound.bgm.volumeStep"
+        static let isSoundEffectEnabled = "memo.sound.effect.enabled"
+    }
+
+    private static let defaultBGMVolumeStep = 7
+    private static let minimumBGMVolumeStep = 1
+    private static let maximumBGMVolumeStep = 10
+
+    @Published var isBGMEnabled: Bool {
+        didSet {
+            UserDefaults.standard.set(isBGMEnabled, forKey: SettingsStorageKey.isBGMEnabled)
+            applyBGMPlaybackPreference()
+        }
+    }
+
+    @Published var bgmVolumeStep: Int {
+        didSet {
+            let clampedValue = Self.clampedBGMVolumeStep(bgmVolumeStep)
+            guard clampedValue == bgmVolumeStep else {
+                bgmVolumeStep = clampedValue
+                return
+            }
+
+            UserDefaults.standard.set(bgmVolumeStep, forKey: SettingsStorageKey.bgmVolumeStep)
+            applyBGMVolumePreference()
+        }
+    }
+
+    @Published var isSoundEffectEnabled: Bool {
+        didSet {
+            UserDefaults.standard.set(isSoundEffectEnabled, forKey: SettingsStorageKey.isSoundEffectEnabled)
+        }
+    }
+
     // MARK: - Sound Effect
 
     enum SoundEffect: CaseIterable, Hashable {
@@ -113,7 +151,10 @@ final class BGMManager: NSObject, ObservableObject, AVAudioPlayerDelegate {
     }
 
     private let defaultTrack: BackgroundTrack = .main
-    private let targetBGMVolume: Float = 0.7
+
+    private var targetBGMVolume: Float {
+        Float(Self.clampedBGMVolumeStep(bgmVolumeStep)) / Float(Self.maximumBGMVolumeStep)
+    }
 
     private var player: AVAudioPlayer?
     private var currentTrack: BackgroundTrack?
@@ -130,10 +171,26 @@ final class BGMManager: NSObject, ObservableObject, AVAudioPlayerDelegate {
     private var notificationCancellables: Set<AnyCancellable> = []
 
     private var effectiveTargetBGMVolume: Float {
-        activeAdMuteRequestCount > 0 ? 0 : targetBGMVolume
+        activeAdMuteRequestCount > 0 || !isBGMEnabled ? 0 : targetBGMVolume
     }
 
     override init() {
+        let defaults = UserDefaults.standard
+
+        if defaults.object(forKey: SettingsStorageKey.isBGMEnabled) == nil {
+            defaults.set(true, forKey: SettingsStorageKey.isBGMEnabled)
+        }
+        if defaults.object(forKey: SettingsStorageKey.bgmVolumeStep) == nil {
+            defaults.set(Self.defaultBGMVolumeStep, forKey: SettingsStorageKey.bgmVolumeStep)
+        }
+        if defaults.object(forKey: SettingsStorageKey.isSoundEffectEnabled) == nil {
+            defaults.set(true, forKey: SettingsStorageKey.isSoundEffectEnabled)
+        }
+
+        isBGMEnabled = defaults.bool(forKey: SettingsStorageKey.isBGMEnabled)
+        bgmVolumeStep = Self.clampedBGMVolumeStep(defaults.integer(forKey: SettingsStorageKey.bgmVolumeStep))
+        isSoundEffectEnabled = defaults.bool(forKey: SettingsStorageKey.isSoundEffectEnabled)
+
         super.init()
         bindNotifications()
     }
@@ -148,6 +205,11 @@ final class BGMManager: NSObject, ObservableObject, AVAudioPlayerDelegate {
         track: BackgroundTrack,
         fadeDuration: TimeInterval = 0.55
     ) {
+        guard isBGMEnabled else {
+            stop(fadeDuration: fadeDuration)
+            return
+        }
+
         if currentTrack == track, let player, player.isPlaying {
             let targetVolume = effectiveTargetBGMVolume
             if abs(player.volume - targetVolume) > 0.01 {
@@ -168,6 +230,11 @@ final class BGMManager: NSObject, ObservableObject, AVAudioPlayerDelegate {
         to track: BackgroundTrack,
         fadeDuration: TimeInterval = 0.55
     ) {
+        guard isBGMEnabled else {
+            stop(fadeDuration: fadeDuration)
+            return
+        }
+
         fadeTask?.cancel()
 
         do {
@@ -181,7 +248,7 @@ final class BGMManager: NSObject, ObservableObject, AVAudioPlayerDelegate {
                     player.play()
                 }
                 let targetVolume = effectiveTargetBGMVolume
-                let startVolume = max(0, min(targetBGMVolume, player.volume))
+                let startVolume = max(0, min(1, player.volume))
                 scheduleFade(
                     player: player,
                     from: startVolume,
@@ -216,7 +283,7 @@ final class BGMManager: NSObject, ObservableObject, AVAudioPlayerDelegate {
         guard let player else { return }
         fadeTask?.cancel()
 
-        let startVolume = max(0, min(targetBGMVolume, player.volume))
+        let startVolume = max(0, min(1, player.volume))
         scheduleFade(
             player: player,
             from: startVolume,
@@ -288,12 +355,16 @@ final class BGMManager: NSObject, ObservableObject, AVAudioPlayerDelegate {
         scheduleFade(
             player: player,
             from: player.volume,
-            to: targetBGMVolume,
+            to: effectiveTargetBGMVolume,
             duration: fadeDuration
         )
     }
 
     func playSE(_ effect: SoundEffect, volume: Float = 1.0) {
+        guard isSoundEffectEnabled else {
+            return
+        }
+
         if !effect.allowsOverlap, nonOverlappingEffectsInFlight.contains(effect) {
             return
         }
@@ -391,6 +462,31 @@ final class BGMManager: NSObject, ObservableObject, AVAudioPlayerDelegate {
 
     // MARK: - Private
 
+    private static func clampedBGMVolumeStep(_ value: Int) -> Int {
+        min(maximumBGMVolumeStep, max(minimumBGMVolumeStep, value))
+    }
+
+    private func applyBGMPlaybackPreference() {
+        if isBGMEnabled {
+            startIfNeeded(track: currentTrack ?? defaultTrack, fadeDuration: 0.25)
+        } else {
+            stop(fadeDuration: 0.25)
+        }
+    }
+
+    private func applyBGMVolumePreference() {
+        guard isBGMEnabled, let player, player.isPlaying else {
+            return
+        }
+
+        scheduleFade(
+            player: player,
+            from: player.volume,
+            to: effectiveTargetBGMVolume,
+            duration: 0.15
+        )
+    }
+
     private func scheduleCrossfade(
         from oldPlayer: AVAudioPlayer?,
         to newPlayer: AVAudioPlayer,
@@ -448,7 +544,7 @@ final class BGMManager: NSObject, ObservableObject, AVAudioPlayerDelegate {
 
                 let progress = Float(step) / Float(stepCount)
                 let nextVolume = startVolume + ((endVolume - startVolume) * progress)
-                player.volume = max(0, min(targetBGMVolume, nextVolume))
+                player.volume = max(0, min(1, nextVolume))
 
                 if step < stepCount {
                     try? await Task.sleep(nanoseconds: sleepNanoseconds)
