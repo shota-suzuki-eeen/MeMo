@@ -3,6 +3,8 @@
 //  MeMo
 //
 //  Updated for HomeView happiness UI.
+//  円形内の波表現だけ MetalCircularLiquidLayer に差し替え、
+//  glass_heart とレベルバッジアセットの重なり順・サイズ感は既存実装に戻しています。
 //
 
 import SwiftUI
@@ -14,6 +16,8 @@ struct HappinessStomachGauge: View {
     let level: Int
     let outerSize: CGFloat
     let innerSize: CGFloat
+
+    @Environment(\.scenePhase) private var scenePhase
 
     @State private var displayedLevelAssetName: String
     @State private var levelBadgeOpacity: Double = 1
@@ -36,7 +40,7 @@ struct HappinessStomachGauge: View {
     }
 
     private var clampedPoint: Double {
-        min(Double(maxPoint), max(0, point))
+        min(Double(max(maxPoint, 1)), max(0, point))
     }
 
     private var fillFraction: CGFloat {
@@ -56,49 +60,33 @@ struct HappinessStomachGauge: View {
         Color(red: 1.0, green: 0.55, blue: 0.64)
     }
 
+    private var isMetalLiquidActive: Bool {
+        scenePhase == .active
+    }
+
     private static func levelAssetName(for level: Int) -> String {
         let clampedLevel = min(AppState.happinessMaxLevel, max(0, level))
         return String(clampedLevel)
     }
 
     var body: some View {
-        TimelineView(.animation(minimumInterval: 1.0 / 30.0)) { timeline in
-            let t = timeline.date.timeIntervalSinceReferenceDate
-            let phase1 = CGFloat(t * 1.35)
-            let phase2 = CGFloat(t * 1.02 + 1.4)
+        TimelineView(.animation(minimumInterval: 1.0 / 30.0)) { _ in
             let heartWidth = innerSize * 0.88
             let heartHeight = innerSize * 0.88
             let liquidDiameter = outerSize * 0.98
 
             ZStack {
                 if fillFraction > 0.001 {
-                    ZStack {
-                        HappinessLiquidWaveShape(
-                            fillFraction: fillFraction,
-                            phase: phase1,
-                            amplitude: 4.8
-                        )
-                        .fill(
-                            LinearGradient(
-                                colors: [
-                                    liquidHighlightColor.opacity(0.92),
-                                    liquidMainColor.opacity(0.96),
-                                    liquidDeepColor.opacity(0.94)
-                                ],
-                                startPoint: .top,
-                                endPoint: .bottom
-                            )
-                        )
-
-                        HappinessLiquidWaveShape(
-                            fillFraction: max(0, fillFraction - 0.025),
-                            phase: phase2,
-                            amplitude: 7.0
-                        )
-                        .fill(Color.white.opacity(0.18))
-                    }
+                    MetalCircularLiquidLayer(
+                        fillFraction: fillFraction,
+                        mainColor: liquidMainColor,
+                        deepColor: liquidDeepColor,
+                        highlightColor: liquidHighlightColor,
+                        isActive: isMetalLiquidActive
+                    )
                     .frame(width: liquidDiameter, height: liquidDiameter)
                     .clipShape(Circle())
+                    .allowsHitTesting(false)
                 }
 
                 ZStack {
@@ -234,43 +222,5 @@ private struct HappinessLevelFrontBadge: View {
             .frame(width: badgeWidth, height: badgeHeight)
             .opacity(opacity)
             .shadow(color: .black.opacity(0.16), radius: 4, x: 0, y: 2)
-    }
-}
-
-private struct HappinessLiquidWaveShape: Shape {
-    var fillFraction: CGFloat
-    var phase: CGFloat
-    var amplitude: CGFloat
-
-    var animatableData: AnimatablePair<CGFloat, CGFloat> {
-        get { AnimatablePair(phase, fillFraction) }
-        set {
-            phase = newValue.first
-            fillFraction = newValue.second
-        }
-    }
-
-    func path(in rect: CGRect) -> Path {
-        var path = Path()
-
-        let fraction = max(0, min(1, fillFraction))
-        guard fraction > 0 else { return path }
-
-        let width = rect.width
-        let liquidBaseY = rect.maxY - rect.height * fraction
-
-        path.move(to: CGPoint(x: rect.minX, y: rect.maxY))
-        path.addLine(to: CGPoint(x: rect.minX, y: liquidBaseY))
-
-        for x in stride(from: CGFloat.zero, through: width, by: 2) {
-            let progress = x / width
-            let wave = sin((progress * .pi * 2 * 1.1) + phase) * amplitude
-            let y = liquidBaseY + wave
-            path.addLine(to: CGPoint(x: rect.minX + x, y: y))
-        }
-
-        path.addLine(to: CGPoint(x: rect.maxX, y: rect.maxY))
-        path.closeSubpath()
-        return path
     }
 }

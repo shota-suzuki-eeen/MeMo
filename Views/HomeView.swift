@@ -61,6 +61,7 @@ struct HomeView: View {
     @State private var idleLoopTask: Task<Void, Never>?
     @State private var isCharacterActionRunning: Bool = false
     @State private var toiletLockedPopupDismissTask: Task<Void, Never>?
+    @State private var noFoodPopupDismissTask: Task<Void, Never>?
     @State private var toiletTicketCleanupTask: Task<Void, Never>?
     @State private var foodFeedResolutionTask: Task<Void, Never>?
     @State private var toiletWiggleActivationTask: Task<Void, Never>?
@@ -72,6 +73,7 @@ struct HomeView: View {
 
     @State private var showToiletLockedPopup: Bool = false
     @State private var toiletLockedPopupText: String = ""
+    @State private var showNoFoodPopup: Bool = false
 
     @State private var isToiletWiggleOn: Bool = false
 
@@ -456,6 +458,14 @@ struct HomeView: View {
         static let lockedPopupPaddingV: CGFloat = 12
         static let lockedPopupShowSeconds: Double = 1.1
 
+        static let noFoodPopupMaxWidth: CGFloat = 320
+        static let noFoodPopupPaddingH: CGFloat = 22
+        static let noFoodPopupPaddingV: CGFloat = 18
+        static let noFoodPopupTitleFont: CGFloat = 18
+        static let noFoodPopupCaptionFont: CGFloat = 13
+        static let noFoodPopupShowSeconds: Double = 1.45
+        static let zNoFoodPopup: Double = 980
+
         static let careSpawnCheckInterval: Double = 1.0
     }
 
@@ -548,6 +558,7 @@ struct HomeView: View {
                 characterAssetName = preferredCharacterRestAssetName
                 activeTopInfoPopup = nil
                 showToiletLockedPopup = false
+                showNoFoodPopup = false
                 showFoodSelector = false
                 selectedFoodRarityTab = .normal
                 resetFoodSelectorDragState()
@@ -707,6 +718,7 @@ struct HomeView: View {
             mainHomeContentView
             rightMenuPopupOverlay
             topInfoPopupOverlay
+            noFoodMessagePopupOverlay
             bottomButtonsTimelineLayer
             toiletTicketButtonLayer
             toiletPoopsLayer
@@ -885,7 +897,8 @@ struct HomeView: View {
             displayLevel: displayedFullnessLevel,
             maxLevel: fullnessMaxLevel,
             outerSize: Layout.fullnessGaugeOuterSize,
-            innerSize: Layout.fullnessGaugeInnerSize
+            innerSize: Layout.fullnessGaugeInnerSize,
+            isActive: isHomeVisible
         )
         .padding(.top, Layout.fullnessGaugeTop)
         .padding(.leading, Layout.fullnessGaugeLeading)
@@ -1049,6 +1062,32 @@ struct HomeView: View {
             .ignoresSafeArea()
             .zIndex(Layout.zTopInfoPopup + 1)
             .transition(.scale(scale: 0.94).combined(with: .opacity))
+        }
+    }
+
+    @ViewBuilder
+    private var noFoodMessagePopupOverlay: some View {
+        if showNoFoodPopup {
+            VStack(spacing: 8) {
+                Text("ごはんを持っていません😭")
+                    .font(.system(size: Layout.noFoodPopupTitleFont, weight: .bold))
+                    .foregroundStyle(.primary)
+
+                Text("ガチャでごはんを獲得しよう！")
+                    .font(.system(size: Layout.noFoodPopupCaptionFont, weight: .semibold))
+                    .foregroundStyle(.secondary)
+            }
+            .multilineTextAlignment(.center)
+            .padding(.horizontal, Layout.noFoodPopupPaddingH)
+            .padding(.vertical, Layout.noFoodPopupPaddingV)
+            .frame(maxWidth: Layout.noFoodPopupMaxWidth)
+            .background(.thinMaterial)
+            .clipShape(RoundedRectangle(cornerRadius: 18, style: .continuous))
+            .shadow(radius: 12)
+            .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .center)
+            .transition(.opacity.combined(with: .scale(scale: 0.96)))
+            .zIndex(Layout.zNoFoodPopup)
+            .allowsHitTesting(false)
         }
     }
 
@@ -1308,6 +1347,9 @@ struct HomeView: View {
 
         toiletLockedPopupDismissTask?.cancel()
         toiletLockedPopupDismissTask = nil
+
+        noFoodPopupDismissTask?.cancel()
+        noFoodPopupDismissTask = nil
 
         toiletTicketCleanupTask?.cancel()
         toiletTicketCleanupTask = nil
@@ -2135,6 +2177,22 @@ struct HomeView: View {
     }
 
     @MainActor
+    private func showNoFoodMessage() {
+        noFoodPopupDismissTask?.cancel()
+
+        withAnimation(.easeOut(duration: 0.12)) {
+            showNoFoodPopup = true
+        }
+
+        noFoodPopupDismissTask = scheduleMainActorTask(after: Layout.noFoodPopupShowSeconds) {
+            withAnimation(.easeInOut(duration: 0.18)) {
+                showNoFoodPopup = false
+            }
+            noFoodPopupDismissTask = nil
+        }
+    }
+
+    @MainActor
     private func updateToiletWiggle() {
         toiletWiggleActivationTask?.cancel()
 
@@ -2480,6 +2538,7 @@ struct HomeView: View {
 
         guard !ownedFoods.isEmpty else {
             bgmManager.playSE(.push)
+            showNoFoodMessage()
             Task { @MainActor in
                 Haptics.rattle(duration: 0.12, style: .light)
             }
@@ -2583,14 +2642,24 @@ struct HomeView: View {
 
     @MainActor
     private func resolveToilet(state: AppState) {
-        let r = state.resolveToilet(now: Date())
+        let now = Date()
+        let r = state.resolveToilet(now: now)
         guard r.didResolve else { return }
 
         toiletPoopActivePoint.removeAll()
         toiletTicketClearingPoopIDs.removeAll()
         isToiletTicketCleaning = false
 
+        let happinessResult = state.addHappinessPoints(10, now: now)
+        if happinessResult.gainedPoints > 0 {
+            spawnRareFoodFloatingHearts(count: 5)
+            Task { @MainActor in
+                Haptics.tap(style: .soft)
+            }
+        }
+
         save()
+        syncDisplayedHappiness(animated: happinessResult.gainedPoints > 0)
 
         syncCharacterBaseFromState(force: true)
         updateToiletWiggle()
@@ -2849,6 +2918,7 @@ private struct FullnessStomachGauge: View {
     let maxLevel: Int
     let outerSize: CGFloat
     let innerSize: CGFloat
+    let isActive: Bool
 
     private var clampedLevel: Double {
         min(Double(maxLevel), max(0, level))
@@ -2895,93 +2965,75 @@ private struct FullnessStomachGauge: View {
     }
 
     var body: some View {
-        TimelineView(.animation(minimumInterval: 1.0 / 30.0)) { timeline in
-            let t = timeline.date.timeIntervalSinceReferenceDate
-            let phase1 = CGFloat(t * 1.45)
-            let phase2 = CGFloat(t * 1.05 + 1.1)
-            let stomachWidth = innerSize * 0.88
-            let stomachHeight = innerSize * 0.88
-            let liquidDiameter = outerSize * 0.98
+        let stomachWidth = innerSize * 0.88
+        let stomachHeight = innerSize * 0.88
+        let liquidDiameter = outerSize * 0.98
+
+        ZStack {
+            if fillFraction > 0.001 {
+                MetalCircularLiquidLayer(
+                    fillFraction: fillFraction,
+                    mainColor: liquidMainColor,
+                    deepColor: liquidDeepColor,
+                    highlightColor: liquidHighlightColor,
+                    isActive: isActive
+                )
+                .frame(width: liquidDiameter, height: liquidDiameter)
+                .clipShape(Circle())
+                .allowsHitTesting(false)
+            }
 
             ZStack {
-                if fillFraction > 0.001 {
-                    ZStack {
-                        StomachLiquidWaveShape(
-                            fillFraction: fillFraction,
-                            phase: phase1,
-                            amplitude: 4.8
-                        )
-                        .fill(
-                            LinearGradient(
-                                colors: [
-                                    liquidHighlightColor.opacity(0.90),
-                                    liquidMainColor.opacity(0.96),
-                                    liquidDeepColor.opacity(0.94)
-                                ],
-                                startPoint: .top,
-                                endPoint: .bottom
-                            )
-                        )
+                Image("stomach")
+                    .resizable()
+                    .scaledToFit()
+                    .frame(width: stomachWidth, height: stomachHeight)
+                    .opacity(0.82)
 
-                        StomachLiquidWaveShape(
-                            fillFraction: max(0, fillFraction - 0.025),
-                            phase: phase2,
-                            amplitude: 7.0
-                        )
-                        .fill(Color.white.opacity(0.18))
-
-                        Canvas { context, size in
-                            let bubbleSpecs: [(CGFloat, CGFloat, CGFloat, Double)] = [
-                                (0.32, 0.70, 3.2, 0.55),
-                                (0.56, 0.61, 2.6, 0.75),
-                                (0.68, 0.48, 4.0, 0.48),
-                                (0.76, 0.66, 2.8, 0.68),
-                                (0.43, 0.52, 2.4, 0.82),
-                                (0.60, 0.77, 3.6, 0.60)
-                            ]
-
-                            let liquidTop = size.height * (1 - fillFraction)
-
-                            for spec in bubbleSpecs {
-                                let x = spec.0 * size.width + CGFloat(sin(t * spec.3 + Double(spec.0) * 7.0)) * 2.2
-                                let verticalTravel = CGFloat((t * (18.0 * spec.3)).truncatingRemainder(dividingBy: 22))
-                                let yBase = spec.1 * size.height
-                                let y = max(liquidTop + 8, yBase - verticalTravel)
-                                let r = spec.2
-
-                                let rect = CGRect(x: x - r, y: y - r, width: r * 2, height: r * 2)
-                                context.fill(Path(ellipseIn: rect), with: .color(Color.white.opacity(0.34)))
-                                context.stroke(
-                                    Path(ellipseIn: rect.insetBy(dx: 0.8, dy: 0.8)),
-                                    with: .color(Color.white.opacity(0.52)),
-                                    lineWidth: 0.7
-                                )
-                            }
-                        }
-                    }
-                    .frame(width: liquidDiameter, height: liquidDiameter)
-                    .clipShape(Circle())
-                }
-
-                ZStack {
+                LinearGradient(
+                    colors: [
+                        Color.white.opacity(0.30),
+                        Color.white.opacity(0.10),
+                        Color(red: 0.80, green: 0.88, blue: 0.86).opacity(0.14),
+                        Color.white.opacity(0.20)
+                    ],
+                    startPoint: .topLeading,
+                    endPoint: .bottomTrailing
+                )
+                .frame(width: stomachWidth, height: stomachHeight)
+                .blendMode(.screen)
+                .mask(
                     Image("stomach")
                         .resizable()
                         .scaledToFit()
                         .frame(width: stomachWidth, height: stomachHeight)
-                        .opacity(0.82)
+                )
 
-                    LinearGradient(
-                        colors: [
-                            Color.white.opacity(0.30),
-                            Color.white.opacity(0.10),
-                            Color(red: 0.80, green: 0.88, blue: 0.86).opacity(0.14),
-                            Color.white.opacity(0.20)
-                        ],
-                        startPoint: .topLeading,
-                        endPoint: .bottomTrailing
-                    )
-                    .frame(width: stomachWidth, height: stomachHeight)
-                    .blendMode(.screen)
+                RadialGradient(
+                    colors: [
+                        Color.white.opacity(0.22),
+                        Color.white.opacity(0.05),
+                        Color.clear
+                    ],
+                    center: .topLeading,
+                    startRadius: 1,
+                    endRadius: innerSize * 0.52
+                )
+                .frame(width: stomachWidth, height: stomachHeight)
+                .blendMode(.screen)
+                .mask(
+                    Image("stomach")
+                        .resizable()
+                        .scaledToFit()
+                        .frame(width: stomachWidth, height: stomachHeight)
+                )
+
+                Capsule()
+                    .fill(Color.white.opacity(0.82))
+                    .frame(width: innerSize * 0.11, height: innerSize * 0.42)
+                    .blur(radius: 1.1)
+                    .rotationEffect(.degrees(11))
+                    .offset(x: -innerSize * 0.08, y: -innerSize * 0.06)
                     .mask(
                         Image("stomach")
                             .resizable()
@@ -2989,18 +3041,12 @@ private struct FullnessStomachGauge: View {
                             .frame(width: stomachWidth, height: stomachHeight)
                     )
 
-                    RadialGradient(
-                        colors: [
-                            Color.white.opacity(0.22),
-                            Color.white.opacity(0.05),
-                            Color.clear
-                        ],
-                        center: .topLeading,
-                        startRadius: 1,
-                        endRadius: innerSize * 0.52
-                    )
-                    .frame(width: stomachWidth, height: stomachHeight)
-                    .blendMode(.screen)
+                RoundedRectangle(cornerRadius: 30, style: .continuous)
+                    .fill(Color.white.opacity(0.34))
+                    .frame(width: innerSize * 0.42, height: innerSize * 0.14)
+                    .blur(radius: 2.0)
+                    .rotationEffect(.degrees(10))
+                    .offset(x: innerSize * 0.10, y: -innerSize * 0.18)
                     .mask(
                         Image("stomach")
                             .resizable()
@@ -3008,49 +3054,22 @@ private struct FullnessStomachGauge: View {
                             .frame(width: stomachWidth, height: stomachHeight)
                     )
 
-                    Capsule()
-                        .fill(Color.white.opacity(0.82))
-                        .frame(width: innerSize * 0.11, height: innerSize * 0.42)
-                        .blur(radius: 1.1)
-                        .rotationEffect(.degrees(11))
-                        .offset(x: -innerSize * 0.08, y: -innerSize * 0.06)
-                        .mask(
-                            Image("stomach")
-                                .resizable()
-                                .scaledToFit()
-                                .frame(width: stomachWidth, height: stomachHeight)
-                        )
-
-                    RoundedRectangle(cornerRadius: 30, style: .continuous)
-                        .fill(Color.white.opacity(0.34))
-                        .frame(width: innerSize * 0.42, height: innerSize * 0.14)
-                        .blur(radius: 2.0)
-                        .rotationEffect(.degrees(10))
-                        .offset(x: innerSize * 0.10, y: -innerSize * 0.18)
-                        .mask(
-                            Image("stomach")
-                                .resizable()
-                                .scaledToFit()
-                                .frame(width: stomachWidth, height: stomachHeight)
-                        )
-
-                    Capsule()
-                        .fill(Color.white.opacity(0.28))
-                        .frame(width: innerSize * 0.52, height: innerSize * 0.07)
-                        .blur(radius: 1.4)
-                        .offset(x: 0, y: innerSize * 0.28)
-                        .mask(
-                            Image("stomach")
-                                .resizable()
-                                .scaledToFit()
-                                .frame(width: stomachWidth, height: stomachHeight)
-                        )
-                }
-                .frame(width: outerSize, height: outerSize)
-                .drawingGroup()
+                Capsule()
+                    .fill(Color.white.opacity(0.28))
+                    .frame(width: innerSize * 0.52, height: innerSize * 0.07)
+                    .blur(radius: 1.4)
+                    .offset(x: 0, y: innerSize * 0.28)
+                    .mask(
+                        Image("stomach")
+                            .resizable()
+                            .scaledToFit()
+                            .frame(width: stomachWidth, height: stomachHeight)
+                    )
             }
-            .shadow(color: .black.opacity(0.16), radius: 8, x: 0, y: 5)
+            .frame(width: outerSize, height: outerSize)
+            .drawingGroup()
         }
+        .shadow(color: .black.opacity(0.16), radius: 8, x: 0, y: 5)
     }
 }
 
