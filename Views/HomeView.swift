@@ -574,7 +574,7 @@ struct HomeView: View {
                 floatingHearts.removeAll()
                 touchTapSEPool.stopAll()
             }
-            .onChange(of: state.walletKcal) { _, _ in
+            .onChange(of: state.walletSteps) { _, _ in
                 guard isHomeVisible else { return }
                 Task { await reconcileWalletDisplayIfNeeded(state: state) }
                 updateWidgetSnapshot()
@@ -2782,7 +2782,8 @@ struct HomeView: View {
 
         if deltaWallet > 0 {
             state.pendingSteps = 0
-            state.walletSteps = targetWallet
+            // 歩数獲得時は addWalletSteps 経由で更新し、累計獲得歩数も同時に反映する。
+            _ = state.addWalletSteps(deltaWallet)
             save()
         }
 

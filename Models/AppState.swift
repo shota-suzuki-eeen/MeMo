@@ -10,12 +10,17 @@ import SwiftData
 
 @Model
 final class AppState {
+    // MARK: - Persistent App State
+    // ⚠️ SwiftData運用メモ
+    // AppState はアプリ全体の進行状況・所持通貨・お世話状態・通知設定などを保持する中心データ。
+    // リリース後、このクラス内の保存プロパティはユーザーのローカル保存データと直結する。
+    // 既存プロパティのリネーム・削除・型変更はデータ互換性に影響するため、必ず移行方針を決めてから行う。
+    // 現在は未リリースのため、保存名とアプリ上の意味を揃える目的で 旧カロリー名称を walletSteps に整理済み。
+
     // MARK: - Currency (Step)
-    // NOTE:
-    // SwiftData の既存保存データを壊しにくくするため、
-    // backing store のプロパティ名は一旦そのまま維持する。
-    // 実際の意味は「歩数通貨」として扱う。
-    var walletKcal: Int
+    // walletSteps: 歩数通貨の所持数。
+    // pendingKcal は未リリース時点の既存実装名を維持しているが、アプリ上では pendingSteps として扱う。
+    var walletSteps: Int
     var pendingKcal: Int
 
     // MARK: - Health Sync
@@ -101,7 +106,7 @@ final class AppState {
     var stepEnjoyLastRewardAt: Date? = nil
 
     init(
-        walletKcal: Int = 0,
+        walletSteps: Int = 0,
         pendingKcal: Int = 0,
         lastSyncedAt: Date? = nil,
         dailyGoalKcal: Int = AppState.fixedDailyStepGoal,
@@ -149,7 +154,7 @@ final class AppState {
         stepEnjoyDailyRewardStepBank: Int = 0,
         stepEnjoyLastRewardAt: Date? = nil
     ) {
-        self.walletKcal = max(0, walletKcal)
+        self.walletSteps = max(0, walletSteps)
         self.pendingKcal = max(0, pendingKcal)
 
         self.lastSyncedAt = lastSyncedAt
@@ -213,7 +218,7 @@ final class AppState {
     }
 }
 
-// MARK: - Step-based aliases / fixed goal
+// MARK: - Step helpers / fixed goal
 extension AppState {
     static let fixedDailyStepGoal: Int = 10_000
 
@@ -226,24 +231,18 @@ extension AppState {
     static let toiletPoopMaxCount: Int = 15
     static let toiletPoopSpawnIntervalSeconds: TimeInterval = 15 * 60
 
-    /// 歩数通貨の所持数
-    /// 増加したぶんだけ累計獲得歩数にも反映する。
-    /// 消費などで減少した場合は累計側を減らさない。
-    var walletSteps: Int {
-        get { max(0, walletKcal) }
-        set {
-            let previousValue = max(0, walletKcal)
-            let sanitizedNewValue = max(0, newValue)
-            walletKcal = sanitizedNewValue
+    /// 歩数通貨を増やす。
+    /// 増加分だけ HomeView の「総歩数」に表示する累計獲得歩数にも反映する。
+    /// ガチャなどの消費で walletSteps を減らす場合は、累計獲得歩数を減らさないため直接 walletSteps を更新する。
+    @discardableResult
+    func addWalletSteps(_ amount: Int) -> Int {
+        let delta = max(0, amount)
+        guard delta > 0 else { return 0 }
 
-            let gainedSteps = sanitizedNewValue - previousValue
-            if gainedSteps > 0 {
-                cumulativeEarnedSteps += gainedSteps
-                stepEnjoyLastDeltaSteps = gainedSteps
-            } else if gainedSteps < 0 {
-                stepEnjoyLastDeltaSteps = 0
-            }
-        }
+        walletSteps = max(0, walletSteps) + delta
+        cumulativeEarnedSteps += delta
+        stepEnjoyLastDeltaSteps = delta
+        return delta
     }
 
     /// 未反映の歩数通貨
@@ -341,14 +340,10 @@ extension AppState {
     func drainPendingStepsToWallet() -> Int {
         let delta = max(0, pendingSteps)
         guard delta > 0 else { return 0 }
-        walletSteps += delta
+
+        _ = addWalletSteps(delta)
         pendingSteps = 0
         return delta
-    }
-
-    @discardableResult
-    func drainPendingKcalToWallet() -> Int {
-        drainPendingStepsToWallet()
     }
 }
 

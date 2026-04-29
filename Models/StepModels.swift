@@ -110,6 +110,11 @@ struct WorkoutSessionDraft: Identifiable, Equatable {
     }
 }
 
+// MARK: - Persistent Workout Session
+// ⚠️ SwiftData運用メモ
+// WorkoutSessionRecord はユーザーの運動記録そのものを保持する。
+// リリース後は、既存プロパティ名・型・routeData のJSON構造を移行なしで変更しない。
+// routeData の構造を変える場合は、WorkoutRoutePoint 側で decodeIfPresent を使うなど、旧データを読める形にする。
 @Model
 final class WorkoutSessionRecord {
     @Attribute(.unique) var id: UUID

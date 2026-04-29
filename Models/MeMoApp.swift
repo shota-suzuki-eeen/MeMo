@@ -28,6 +28,16 @@ struct MeMoApp: App {
         WindowGroup {
             MemoAppRootContainer(bgmManager: bgmManager)
         }
+        // MARK: - SwiftData Schema
+        // ⚠️ リリース後の運用ルール
+        // ここに登録している @Model は、ユーザーのローカル保存データと直結している。
+        // リリース後は以下を原則禁止する。
+        // - 既存 @Model の削除
+        // - 既存 @Model 名の変更
+        // - .modelContainer から既存モデルを外す
+        //
+        // 新しい保存モデルが必要な場合は、既存モデルを残したまま配列に追加する。
+        // 既存データを移行する場合は、旧モデル/旧プロパティを残した状態で段階的に行う。
         .modelContainer(for: [
             AppState.self,
             TodayPhotoEntry.self,

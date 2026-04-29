@@ -9,6 +9,10 @@ import Foundation
 import SwiftData
 import UIKit
 
+// MARK: - Persistent Photo Metadata
+// ⚠️ SwiftData運用メモ
+// TodayPhotoEntry は、思い出画像そのものではなく画像ファイルへの参照情報を保持する。
+// リリース後は、dayKey / fileName / 保存ディレクトリの扱いを変更すると既存の思い出表示に影響する。
 @Model
 final class TodayPhotoEntry {
     // yyyyMMdd
@@ -64,7 +68,14 @@ final class TodayPhotoEntry {
 }
 
 // MARK: - Storage
-
+// ⚠️ リリース後の画像保存ルール
+// TodayPhotoEntry は SwiftData に fileName を保存し、実画像は Documents/memories/ 配下に保存する。
+// そのため、リリース後に以下を移行なしで変更すると既存画像が表示できなくなる可能性がある。
+// - memories ディレクトリ名
+// - fileName の命名ルール
+// - JPEG保存形式
+//
+// 保存先を変更する場合は、旧パスから新パスへの移行処理を必ず用意する。
 enum TodayPhotoStorage {
     static func memoriesDirURL() throws -> URL {
         let base = FileManager.default.urls(for: .documentDirectory, in: .userDomainMask).first!
