@@ -72,17 +72,16 @@ enum PetMaster {
         .init(id: "pet_039", name: "タヌキ"),
         .init(id: "pet_040", name: "レッサーパンダ"),
         .init(id: "pet_041", name: "アザラシ"),
-        .init(id: "pet_042", name: "ラッコ"),
         .init(id: "pet_043", name: "スカンク"),
         .init(id: "pet_044", name: "ツバメ"),
         .init(id: "pet_045", name: "トラ"),
-        .init(id: "pet_046", name: "ホワイトタイガー"),
+        .init(id: "pet_046", name: "チーター"),
         .init(id: "pet_047", name: "シマウマ"),
         .init(id: "pet_048", name: "オオカミ"),
         .init(id: "reward_000", name: "ヘヤギ"),
-        .init(id: "reward_001", name: "シェフ"),
-        .init(id: "reward_002", name: "ワンピース"),
-        .init(id: "reward_003", name: "スケボー"),
+        .init(id: "reward_001", name: "スクール"),
+        .init(id: "reward_002", name: "シェフ"),
+        .init(id: "reward_003", name: "プライベート"),
     ]
 
     // ✅ ペットID → アセット名（修正版）
@@ -130,17 +129,16 @@ enum PetMaster {
         case "pet_039": return "raccoonDog"
         case "pet_040": return "redPanda"
         case "pet_041": return "seal"
-        case "pet_042": return "seaOtter"
         case "pet_043": return "skunk"
         case "pet_044": return "swallow"
         case "pet_045": return "tiger"
-        case "pet_046": return "whiteTiger"
+        case "pet_046": return "cheetah"
         case "pet_047": return "zebra"
         case "pet_048": return "wolf"
         case "reward_000": return "person_room"
-        case "reward_001": return "person_chef"
-        case "reward_002": return "girl_onePiece"
-        case "reward_003": return "person_skate"
+        case "reward_001": return "girl_school"
+        case "reward_002": return "person_chef"
+        case "reward_003": return "girl_private"
         default:
             return "purson" // 安全フォールバック
         }

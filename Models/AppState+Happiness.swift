@@ -27,9 +27,9 @@ extension AppState {
 
     static let happinessRewardDefinitions: [HappinessRewardDefinition] = [
         .init(level: 5, petID: "reward_000", assetName: "person_room", characterName: "部屋着"),
-        .init(level: 10, petID: "reward_001", assetName: "person_chef", characterName: "シェフ"),
-        .init(level: 15, petID: "reward_002", assetName: "girl_onePiece", characterName: "ワンピース"),
-        .init(level: 20, petID: "reward_003", assetName: "person_skate", characterName: "スケボー")
+        .init(level: 10, petID: "reward_001", assetName: "girl_school", characterName: "制服"),
+        .init(level: 15, petID: "reward_002", assetName: "person_chef", characterName: "シェフ"),
+        .init(level: 20, petID: "reward_003", assetName: "girl_private", characterName: "プライベート")
     ]
 
     struct HappinessGainResult: Equatable {
