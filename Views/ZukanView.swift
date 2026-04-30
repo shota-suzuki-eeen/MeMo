@@ -181,18 +181,10 @@ struct ZukanView: View {
                         Button {
                             handleTrainTapped(state: state, id: selectedPetID)
                         } label: {
-                            Text(
-                                isCurrentPet
-                                ? "\(selectedName) をお世話中"
-                                : (
-                                    isDeveloperMode
-                                    ? "\(selectedName) をお世話する（広告なし）"
-                                    : "\(selectedName) をお世話する"
-                                )
-                            )
-                            .font(.headline)
-                            .frame(maxWidth: .infinity)
-                            .padding(.vertical, 12)
+                            Text("お世話する")
+                                .font(.headline)
+                                .frame(maxWidth: .infinity)
+                                .padding(.vertical, 12)
                         }
                         .buttonStyle(.borderedProminent)
                         .disabled(isCurrentPet)
@@ -566,39 +558,26 @@ private struct ZukanCharacterCell: View {
     let isSelected: Bool
     let onTap: () -> Void
 
-    private var displayName: String {
-        PetMaster.all.first(where: { $0.id == petID })?.name ?? petID
-    }
-
     private var imageName: String {
         PetMaster.assetName(for: petID)
     }
 
     var body: some View {
         Button(action: onTap) {
-            VStack(spacing: 8) {
-                Image(imageName)
-                    .resizable()
-                    .scaledToFit()
-                    .frame(height: 58)
-                    .padding(.top, 12)
-
-                Text(displayName)
-                    .font(.caption.weight(.semibold))
-                    .lineLimit(1)
-                    .minimumScaleFactor(0.8)
-                    .padding(.horizontal, 6)
-                    .padding(.bottom, 12)
-            }
-            .frame(maxWidth: .infinity)
-            .background(
-                RoundedRectangle(cornerRadius: 16)
-                    .fill(isCurrent ? Color.blue.opacity(0.22) : Color.white.opacity(0.72))
-            )
-            .overlay(
-                RoundedRectangle(cornerRadius: 16)
-                    .stroke(isSelected ? Color.orange : (isCurrent ? Color.blue : Color.clear), lineWidth: isSelected ? 3 : 2)
-            )
+            Image(imageName)
+                .resizable()
+                .scaledToFit()
+                .frame(height: 66)
+                .padding(.vertical, 14)
+                .frame(maxWidth: .infinity, minHeight: 94)
+                .background(
+                    RoundedRectangle(cornerRadius: 16)
+                        .fill(isCurrent ? Color.blue.opacity(0.22) : Color.white.opacity(0.72))
+                )
+                .overlay(
+                    RoundedRectangle(cornerRadius: 16)
+                        .stroke(isSelected ? Color.orange : (isCurrent ? Color.blue : Color.clear), lineWidth: isSelected ? 3 : 2)
+                )
         }
         .buttonStyle(.plain)
     }

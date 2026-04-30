@@ -148,27 +148,101 @@ enum PetMaster {
     private static func baseDescriptionText(for petID: String) -> String {
         switch petID {
         case "pet_000":
-            return "*"
+            return "人は道具を使い、協力して暮らすのが得意。"
         case "pet_001":
-            return "*"
+            return "イヌの嗅覚は人間よりとても鋭い。"
         case "pet_002":
-            return "*"
+            return "ネコはヒゲで狭い場所を通れるか測る。"
         case "pet_003":
-            return "*"
+            return "ニワトリは朝だけでなく一日中鳴くことがある。"
         case "pet_004":
-            return "*"
+            return "サルは道具を使うほど器用な種類もいる。"
         case "pet_005":
-            return "*"
+            return "ウサギの歯は一生伸び続ける。"
         case "pet_006":
-            return "*"
+            return "カエルは皮ふからも水分を吸収する。"
         case "pet_007":
-            return "*"
+            return "ペンギンは水中を飛ぶように泳ぐ。"
         case "pet_008":
-            return "*"
+            return "ヒツジは仲間の顔を覚えられる。"
         case "pet_009":
-            return "*"
+            return "サメは鋭い感覚で獲物を探す。"
         case "pet_010":
-            return "*"
+            return "カメの甲羅は背骨や肋骨とつながっている。"
+        case "pet_011":
+            return "イルカは音で周りを探るのが得意。"
+        case "pet_012":
+            return "ナマケモノは木の上でゆっくり暮らす。"
+        case "pet_013":
+            return "バクは短い鼻を器用に動かして食べる。"
+        case "pet_014":
+            return "テナガザルは長い腕で枝から枝へ移動する。"
+        case "pet_015":
+            return "ブルドッグはがっしりした体つきが特徴。"
+        case "pet_016":
+            return "シカの角は毎年生え替わる種類が多い。"
+        case "pet_017":
+            return "キツネは耳がよく小さな音も聞き分ける。"
+        case "pet_018":
+            return "エリマキトカゲは襟を広げて威嚇する。"
+        case "pet_019":
+            return "キリンの首の骨は人間と同じ7個。"
+        case "pet_020":
+            return "コアラはユーカリの葉を主食にする。"
+        case "pet_021":
+            return "オカピは森に暮らすキリンの仲間。"
+        case "pet_022":
+            return "カモノハシは卵を産む珍しい哺乳類。"
+        case "pet_023":
+            return "アライグマは前足を器用に使う。"
+        case "pet_024":
+            return "ハシビロコウはじっと待つ狩りが得意。"
+        case "pet_025":
+            return "トリケラトプスは3本の角を持つ草食恐竜。"
+        case "pet_026":
+            return "ハチは仲間に花の場所を知らせる。"
+        case "pet_027":
+            return "アメリカンショートヘアは丈夫で活発な猫。"
+        case "pet_028":
+            return "バリニーズは長い毛並みのシャム系の猫。"
+        case "pet_029":
+            return "ロシアンブルーは青みがかった銀色の毛が特徴。"
+        case "pet_030":
+            return "シバケンは日本原産の小型犬。"
+        case "pet_031":
+            return "ゴリラは群れで穏やかに暮らすことが多い。"
+        case "pet_032":
+            return "トカゲはしっぽを切って逃げる種類がいる。"
+        case "pet_033":
+            return "ミーアキャットは見張り役を立てる。"
+        case "pet_034":
+            return "カワウソは泳ぎが得意で遊び好き。"
+        case "pet_035":
+            return "フクロウは首を大きく回せる。"
+        case "pet_036":
+            return "インコは音まねが得意な種類もいる。"
+        case "pet_037":
+            return "クジャクのオスは美しい羽で求愛する。"
+        case "pet_038":
+            return "ブタは鼻で地面を探るのが得意。"
+        case "pet_039":
+            return "タヌキは日本の昔話にもよく登場する。"
+        case "pet_040":
+            return "レッサーパンダは長いしっぽでバランスをとる。"
+        case "pet_041":
+            return "アザラシは厚い脂肪で寒さから身を守る。"
+        case "pet_043":
+            return "スカンクは強いにおいで身を守る。"
+        case "pet_044":
+            return "ツバメは春に日本へ渡ってくる。"
+        case "pet_045":
+            return "トラのしま模様は個体ごとに違う。"
+        case "pet_046":
+            return "チーターは陸上で最速級の動物。"
+        case "pet_047":
+            return "シマウマのしま模様は仲間同士で見分けに役立つ。"
+        case "pet_048":
+            return "オオカミは群れで協力して行動する。"
         case "reward_000":
             return "幸せLv.5の報酬で仲間になる特別なキャラクター。"
         case "reward_001":
