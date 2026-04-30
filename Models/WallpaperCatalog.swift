@@ -19,12 +19,12 @@ enum WallpaperCatalog {
 
     static let all: [WallpaperItem] = [
         .init(id: "wallpaper_home", name: "ホーム", assetName: "Home_background"),
-        .init(id: "wallpaper_work_reward_5h", name: "5時間報酬", assetName: "concrete_background"),
-        .init(id: "wallpaper_work_reward_10h", name: "10時間報酬", assetName: "field_background"),
-        .init(id: "wallpaper_work_reward_15h", name: "15時間報酬", assetName: "beach_background"),
-        .init(id: "wallpaper_work_reward_20h", name: "20時間報酬", assetName: "office_background"),
-        .init(id: "wallpaper_work_reward_25h", name: "25時間報酬", assetName: "bath_background"),
-        .init(id: "wallpaper_work_reward_30h", name: "30時間報酬", assetName: "japanese_background")
+        .init(id: "wallpaper_work_reward_5h", name: "原っぱ", assetName: "field_background"),
+        .init(id: "wallpaper_work_reward_10h", name: "コンクリート", assetName: "concrete_background"),
+        .init(id: "wallpaper_work_reward_15h", name: "和室", assetName: "japanese_background"),
+        .init(id: "wallpaper_work_reward_20h", name: "オフィス", assetName: "office_background"),
+        .init(id: "wallpaper_work_reward_25h", name: "お風呂場", assetName: "bath_background"),
+        .init(id: "wallpaper_work_reward_30h", name: "ビーチ", assetName: "beach_background")
     ]
 
     static let defaultWallpaper: WallpaperItem = all[0]

@@ -392,8 +392,8 @@ private struct WorkRewardRow: View {
                     .font(.system(size: 13, weight: .semibold))
                     .foregroundStyle(.white.opacity(0.72))
 
-                Text(reward.rewardAssetName)
-                    .font(.system(size: 13, weight: .medium, design: .monospaced))
+                Text(reward.rewardItemName)
+                    .font(.system(size: 13, weight: .medium))
                     .foregroundStyle(.white.opacity(0.88))
                     .lineLimit(1)
                     .minimumScaleFactor(0.7)
@@ -737,6 +737,21 @@ final class WorkTimerPreparationViewModel: ObservableObject {
         let defaults = UserDefaults.standard
         let storedIDs = defaults.stringArray(forKey: focusClaimedRewardIDsKey) ?? []
         claimedRewardIDs = Set(storedIDs)
+        syncUnlockedRewardAssetsForClaimedRewards()
+    }
+
+    private func syncUnlockedRewardAssetsForClaimedRewards() {
+        guard !claimedRewardIDs.isEmpty else { return }
+
+        let defaults = UserDefaults.standard
+        let unlockedAssets = Set(defaults.stringArray(forKey: focusUnlockedRewardAssetNamesKey) ?? [])
+        let rewardAssetsForClaimedIDs = rewards
+            .filter { claimedRewardIDs.contains($0.id) }
+            .map(\.rewardAssetName)
+        let nextUnlockedAssets = unlockedAssets.union(rewardAssetsForClaimedIDs)
+
+        guard nextUnlockedAssets != unlockedAssets else { return }
+        defaults.set(Array(nextUnlockedAssets).sorted(), forKey: focusUnlockedRewardAssetNamesKey)
     }
 
     private static func makeDayKey(_ date: Date) -> String {
@@ -781,13 +796,17 @@ struct WorkFocusReward: Identifiable, Equatable, Hashable {
         "\(milestoneHours)時間"
     }
 
+    var rewardItemName: String {
+        WallpaperCatalog.displayName(for: rewardAssetName)
+    }
+
     static let defaultRewards: [WorkFocusReward] = [
-        WorkFocusReward(id: "work.reward.5h", milestoneHours: 5, rewardAssetName: "concrete_background"),
-        WorkFocusReward(id: "work.reward.10h", milestoneHours: 10, rewardAssetName: "field_background"),
-        WorkFocusReward(id: "work.reward.15h", milestoneHours: 15, rewardAssetName: "beach_background"),
+        WorkFocusReward(id: "work.reward.5h", milestoneHours: 5, rewardAssetName: "field_background"),
+        WorkFocusReward(id: "work.reward.10h", milestoneHours: 10, rewardAssetName: "concrete_background"),
+        WorkFocusReward(id: "work.reward.15h", milestoneHours: 15, rewardAssetName: "japanese_background"),
         WorkFocusReward(id: "work.reward.20h", milestoneHours: 20, rewardAssetName: "office_background"),
         WorkFocusReward(id: "work.reward.25h", milestoneHours: 25, rewardAssetName: "bath_background"),
-        WorkFocusReward(id: "work.reward.30h", milestoneHours: 30, rewardAssetName: "japanese_background")
+        WorkFocusReward(id: "work.reward.30h", milestoneHours: 30, rewardAssetName: "beach_background")
     ]
 }
 
