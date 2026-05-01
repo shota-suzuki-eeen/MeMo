@@ -2,7 +2,9 @@
 //  RootView.swift
 //  MeMo
 //
-//  Created by shota suzuki on 2026/03/20.
+//  Full RootView with the global mandatory onboarding presenter attached.
+//  Based on the current main branch structure.
+//  iOS 18.6+
 //
 
 import SwiftUI
@@ -12,13 +14,13 @@ import UIKit
 struct RootView: View {
     @Environment(\.modelContext) private var modelContext
     @Query private var appStates: [AppState]
+
     @StateObject private var hk = HealthKitManager()
-
-    // 起動処理の多重実行防止は ViewModel 側で担保
     @StateObject private var viewModel = RootViewModel()
+    @State private var onboardingViewModel = MemoOnboardingViewModel()
 
-    // App 側で environmentObject 注入済み
     @EnvironmentObject private var bgmManager: BGMManager
+
     @State private var isHomeBannerHiddenByChildScreen: Bool = false
     @State private var isHomeNavigationDestinationVisible: Bool = false
 
@@ -27,7 +29,9 @@ struct RootView: View {
             switch hk.authState {
             case .unknown:
                 AuthRequestView(
-                    onAuthorize: { Task { await viewModel.startAuthorizationIfNeeded(hk: hk) } },
+                    onAuthorize: {
+                        Task { await viewModel.startAuthorizationIfNeeded(hk: hk) }
+                    },
                     errorMessage: hk.errorMessage
                 )
 
@@ -46,10 +50,6 @@ struct RootView: View {
                         .allowsHitTesting(false)
 
                         if !isHomeBannerHiddenByChildScreen && !isHomeNavigationDestinationVisible {
-                            // ✅ Banner_HomeView
-                            // Home画面上部（メーターの上）に表示。
-                            // 思い出 / 設定 / 図鑑など、Home配下の遷移先では
-                            // 各画面からの通知で非表示にする。
                             AdBannerView(
                                 placement: .home,
                                 height: 76,
@@ -62,6 +62,10 @@ struct RootView: View {
                             .transition(.opacity)
                         }
                     }
+                    .memoOnboardingRoot(
+                        state: sharedState,
+                        viewModel: onboardingViewModel
+                    )
                     .onAppear {
                         isHomeBannerHiddenByChildScreen = false
                         AdMobManager.shared.prepareInterstitialGetIfNeeded(
@@ -153,7 +157,6 @@ private struct DeniedView: View {
     }
 }
 
-
 // MARK: - Home Banner Visibility Notifications
 
 extension Notification.Name {
@@ -163,7 +166,6 @@ extension Notification.Name {
     /// HomeViewへ戻ったタイミングで、HomeView上部のバナー広告を再表示するための通知。
     static let memoShowHomeBannerAd = Notification.Name("memo.showHomeBannerAd")
 }
-
 
 // MARK: - Navigation Depth Reader
 
@@ -183,6 +185,7 @@ private struct HomeNavigationDepthReader: UIViewControllerRepresentable {
 
     final class ObserverViewController: UIViewController {
         var onDepthChange: ((Int) -> Void)?
+
         private var timer: Timer?
         private var lastDepth: Int?
 
@@ -203,6 +206,7 @@ private struct HomeNavigationDepthReader: UIViewControllerRepresentable {
 
         func startMonitoringIfNeeded() {
             guard timer == nil else { return }
+
             let newTimer = Timer(timeInterval: 0.25, repeats: true) { [weak self] _ in
                 self?.publishDepthIfNeeded()
             }
