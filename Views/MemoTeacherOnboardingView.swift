@@ -355,35 +355,35 @@ private extension MemoOnboardingTarget {
         switch self {
         case .foodButton:
             let side: CGFloat = 96
-            let centerX: CGFloat = min(max(CGFloat(88), size.width * 0.22), size.width - CGFloat(88))
-            let centerY: CGFloat = min(max(CGFloat(320), size.height * 0.43), size.height - CGFloat(230))
+            let centerX: CGFloat = min(max(CGFloat(64), size.width * 0.20), size.width - CGFloat(88))
+            let centerY: CGFloat = min(max(CGFloat(320), size.height * 0.47), size.height - CGFloat(230))
             return CGRect(x: centerX - side / 2, y: centerY - side / 2, width: side, height: side)
 
         case .normalFood:
-            let width: CGFloat = min(CGFloat(190), size.width - CGFloat(64))
-            let height: CGFloat = 178
+            let width: CGFloat = min(CGFloat(190), size.width - CGFloat(128))
+            let height: CGFloat = 240
             let centerX: CGFloat = size.width / 2
-            let centerY: CGFloat = min(max(CGFloat(420), size.height - CGFloat(320)), size.height - CGFloat(230))
+            let centerY: CGFloat = min(max(CGFloat(420), size.height - CGFloat(210)), size.height - CGFloat(210))
             return CGRect(x: centerX - width / 2, y: centerY - height / 2, width: width, height: height)
 
         case .rareFoodTab:
-            let width: CGFloat = 82
+            let width: CGFloat = 120
             let height: CGFloat = 58
             let selectorCenterY: CGFloat = min(max(CGFloat(420), size.height - CGFloat(320)), size.height - CGFloat(230))
             let centerX: CGFloat = min(size.width - CGFloat(54), (size.width / 2) + CGFloat(148))
-            let centerY: CGFloat = selectorCenterY - CGFloat(112)
+            let centerY: CGFloat = selectorCenterY + CGFloat(38)
             return CGRect(x: centerX - width / 2, y: centerY - height / 2, width: width, height: height)
 
         case .rareFood:
-            let width: CGFloat = min(CGFloat(190), size.width - CGFloat(64))
-            let height: CGFloat = 178
+            let width: CGFloat = min(CGFloat(190), size.width - CGFloat(128))
+            let height: CGFloat = 240
             let centerX: CGFloat = size.width / 2
-            let centerY: CGFloat = min(max(CGFloat(420), size.height - CGFloat(320)), size.height - CGFloat(230))
+            let centerY: CGFloat = min(max(CGFloat(420), size.height - CGFloat(210)), size.height - CGFloat(210))
             return CGRect(x: centerX - width / 2, y: centerY - height / 2, width: width, height: height)
 
         case .fullnessMeter:
             let side: CGFloat = 142
-            let centerX: CGFloat = size.width - CGFloat(96)
+            let centerX: CGFloat = size.width - CGFloat(161)
             let centerY: CGFloat = 218
             return CGRect(x: centerX - side / 2, y: centerY - side / 2, width: side, height: side)
 
