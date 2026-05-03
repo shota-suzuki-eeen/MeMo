@@ -3,6 +3,7 @@
 //  MeMo
 //
 //  Updated for the step-based gacha specification with screen BGM switching and AdMob rewarded ads.
+//  Tutorial mode reuses the real gacha screen, animation, and result UI while making the first 10-pull ad-free.
 //
 
 import SwiftUI
@@ -178,6 +179,9 @@ struct GachaView: View {
     // アプリ起動時に AdMobManager.shared.start() で事前ロードされた広告をそのまま利用する
     @ObservedObject private var rewardedAdManager = AdMobManager.shared.rewardGacha
 
+    private let isTutorialMode: Bool
+    private let onTutorialFinished: (() -> Void)?
+
     @State private var phase: Phase = .idle
     @State private var drawMode: DrawMode = .single
     @State private var rewards: [GachaReward] = []
@@ -191,8 +195,17 @@ struct GachaView: View {
     @State private var lastDrawWasFreeAd: Bool = false
     @State private var toastMessage: String?
     @State private var showToast: Bool = false
+    @State private var tutorialFreeTenDrawStarted: Bool = false
 
     private static let pityThreshold = 100
+
+    init(
+        isTutorialMode: Bool = false,
+        onTutorialFinished: (() -> Void)? = nil
+    ) {
+        self.isTutorialMode = isTutorialMode
+        self.onTutorialFinished = onTutorialFinished
+    }
 
     private enum Phase {
         case idle
@@ -289,9 +302,12 @@ struct GachaView: View {
     }
 
     private var freeSlotStatusText: String {
+        if isTutorialMode {
+            return "チュートリアル限定：広告なしで無料10回を体験できます"
+        }
+
         guard let state else { return "-" }
         let now = Date()
-        state.gachaResetIfNeeded(now: now)
 
         if let slot = state.gachaAvailableFreeAdSlot(now: now) {
             return "\(slot.title)の枠が利用可能（\(slot.windowText)）"
@@ -309,17 +325,27 @@ struct GachaView: View {
 
     private var canSingleDraw: Bool {
         guard let state else { return false }
-        return phase == .idle && state.walletSteps >= DrawMode.single.cost
+        return !isTutorialMode && phase == .idle && state.walletSteps >= DrawMode.single.cost
     }
 
     private var canTenDraw: Bool {
         guard let state else { return false }
-        return phase == .idle && state.walletSteps >= DrawMode.ten.cost
+        return !isTutorialMode && phase == .idle && state.walletSteps >= DrawMode.ten.cost
     }
 
     private var canFreeTenDraw: Bool {
         guard let state else { return false }
+        if isTutorialMode {
+            return phase == .idle && tutorialFreeTenDrawStarted == false
+        }
         return phase == .idle && state.gachaCanUseFreeTenDraw(now: Date())
+    }
+
+    private var freeTenDrawButtonTitle: String {
+        if isTutorialMode {
+            return tutorialFreeTenDrawStarted ? "無料10回（体験済み）" : "無料10回"
+        }
+        return canFreeTenDraw ? "広告視聴で無料10回" : "広告無料10回（時間外 / 使用済み）"
     }
 
     var body: some View {
@@ -372,7 +398,11 @@ struct GachaView: View {
             tapPromptAnimating = true
             state?.ensureInitialPetsIfNeeded()
             state?.gachaResetIfNeeded(now: Date())
-            rewardedAdManager.loadIfNeeded()
+            if isTutorialMode == false {
+                rewardedAdManager.loadIfNeeded()
+            } else {
+                state?.memoMarkFirstVisitFreeTenDrawOffered()
+            }
         }
         .onDisappear {
             rollTask?.cancel()
@@ -404,21 +434,26 @@ struct GachaView: View {
 
     private func topBar(topInset: CGFloat) -> some View {
         HStack {
-            Button {
-                if phase == .idle {
-                    bgmManager.playSE(.push)
-                    dismiss()
-                }
-            } label: {
-                Image(systemName: "chevron.backward")
-                    .font(.system(size: 18, weight: .bold))
-                    .foregroundStyle(.white)
+            if isTutorialMode {
+                Color.clear
                     .frame(width: 42, height: 42)
-                    .background(Color.black.opacity(0.42), in: Circle())
+            } else {
+                Button {
+                    if phase == .idle {
+                        bgmManager.playSE(.push)
+                        dismiss()
+                    }
+                } label: {
+                    Image(systemName: "chevron.backward")
+                        .font(.system(size: 18, weight: .bold))
+                        .foregroundStyle(.white)
+                        .frame(width: 42, height: 42)
+                        .background(Color.black.opacity(0.42), in: Circle())
+                }
+                .buttonStyle(.plain)
+                .disabled(phase != .idle)
+                .opacity(phase == .idle ? 1 : 0.45)
             }
-            .buttonStyle(.plain)
-            .disabled(phase != .idle)
-            .opacity(phase == .idle ? 1 : 0.45)
 
             Spacer()
 
@@ -446,6 +481,11 @@ struct GachaView: View {
                     .scaledToFit()
                     .frame(width: machineWidth)
                     .padding(.top, 4)
+
+                if isTutorialMode {
+                    TutorialGachaTeacherNote()
+                        .frame(maxWidth: contentWidth)
+                }
 
                 actionButtons
                     .frame(maxWidth: contentWidth)
@@ -506,7 +546,16 @@ struct GachaView: View {
     }
 
     private var actionButtons: some View {
-        VStack(spacing: 12) {
+        let buttonsOpacity: Double = phase == .idle ? 1.0 : 0.5
+        let freeTenDrawAction: () -> Void = {
+            if isTutorialMode {
+                beginTutorialFreeTenDraw()
+            } else {
+                performRewardedAdThenFreeTenDraw()
+            }
+        }
+
+        return VStack(spacing: 12) {
             HStack(spacing: 14) {
                 drawButton(
                     title: "1回 / 500歩",
@@ -524,13 +573,13 @@ struct GachaView: View {
             }
 
             drawButton(
-                title: canFreeTenDraw ? "広告視聴で無料10回" : "広告無料10回（時間外 / 使用済み）",
+                title: freeTenDrawButtonTitle,
                 accent: Color(red: 0.45, green: 1.0, blue: 0.78),
                 isEnabled: canFreeTenDraw,
-                action: performRewardedAdThenFreeTenDraw
+                action: freeTenDrawAction
             )
         }
-        .opacity(phase == .idle ? 1 : 0.5)
+        .opacity(buttonsOpacity)
     }
 
     private func drawButton(title: String, accent: Color, isEnabled: Bool, action: @escaping () -> Void) -> some View {
@@ -575,6 +624,7 @@ struct GachaView: View {
     private func startPaidDraw(mode: DrawMode) {
         guard let state else { return }
         guard phase == .idle else { return }
+        guard isTutorialMode == false else { return }
         guard state.walletSteps >= mode.cost else {
             showToast("歩数が足りません")
             return
@@ -616,6 +666,13 @@ struct GachaView: View {
         beginDraw(mode: .ten, isFreeAd: true, freeSlot: slot)
     }
 
+    private func beginTutorialFreeTenDraw() {
+        guard phase == .idle else { return }
+        guard tutorialFreeTenDrawStarted == false else { return }
+        tutorialFreeTenDrawStarted = true
+        beginDraw(mode: .ten, isFreeAd: true, freeSlot: nil)
+    }
+
     private func beginDraw(mode: DrawMode, isFreeAd: Bool, freeSlot: GachaFreeAdSlot?) {
         guard let state else { return }
 
@@ -628,7 +685,7 @@ struct GachaView: View {
         lastDrawWasFreeAd = isFreeAd
         lastFreeAdSlot = freeSlot
         phase = .rolling
-        rewards = makeRewards(count: mode.count, state: state)
+        rewards = (isTutorialMode && isFreeAd) ? makeTutorialRewards(state: state) : makeRewards(count: mode.count, state: state)
         revealOverlayReward = nil
         machineAnimationStart = Date()
         tapPromptAnimating = true
@@ -656,6 +713,37 @@ struct GachaView: View {
             applyReward(reward, state: state)
             return reward
         }
+    }
+
+    private func makeTutorialRewards(state: AppState) -> [GachaReward] {
+        _ = state.memoMarkFirstVisitFreeTenDrawOffered()
+        _ = state.memoConsumeFirstVisitFreeTenDraw()
+
+        let petID = state.memoAwardTutorialGachaCharacterIfNeeded()
+        let petName = PetMaster.all.first(where: { $0.id == petID })?.name ?? "新しいキャラクター"
+        let characterReward = GachaReward(
+            rarity: .gold,
+            kind: .character(petID: petID),
+            title: petName,
+            subtitle: "キャラクター / SR",
+            imageName: PetMaster.assetName(for: petID)
+        )
+
+        let foodRewards: [GachaReward] = (0..<9).compactMap { _ in
+            guard let food = FoodCatalog.all.randomElement() else { return nil }
+            _ = state.addFood(foodId: food.id, count: 1)
+            return GachaReward(
+                rarity: food.isShopEligible ? .blue : .red,
+                kind: .food(foodID: food.id),
+                title: food.name,
+                subtitle: food.isShopEligible ? "ごはん / N" : "ごはん / R",
+                imageName: food.assetName
+            )
+        }
+
+        state.gachaResetPity()
+        _ = state.memoMarkFirstVisitFreeTenDrawCompleted()
+        return ([characterReward] + foodRewards).shuffled()
     }
 
     private func rollRarity(state: AppState) -> GachaRarity {
@@ -837,7 +925,11 @@ struct GachaView: View {
             VStack(spacing: 10) {
                 TapPromptView(isAnimating: tapPromptAnimating, count: 1)
 
-                if let slot = lastFreeAdSlot, lastDrawWasFreeAd {
+                if isTutorialMode {
+                    Text("チュートリアル限定 / 広告なし")
+                        .font(.system(size: 13, weight: .semibold))
+                        .foregroundStyle(.white.opacity(0.86))
+                } else if let slot = lastFreeAdSlot, lastDrawWasFreeAd {
                     Text("無料10回（\(slot.windowText)）")
                         .font(.system(size: 13, weight: .semibold))
                         .foregroundStyle(.white.opacity(0.86))
@@ -1086,7 +1178,12 @@ struct GachaView: View {
         rewards = []
         lastFreeAdSlot = nil
         lastDrawWasFreeAd = false
-        rewardedAdManager.loadIfNeeded()
+
+        if isTutorialMode {
+            onTutorialFinished?()
+        } else {
+            rewardedAdManager.loadIfNeeded()
+        }
     }
 
     private func persistState() {
@@ -1118,6 +1215,34 @@ struct GachaView: View {
                 }
             }
         }
+    }
+}
+
+fileprivate struct TutorialGachaTeacherNote: View {
+    var body: some View {
+        VStack(alignment: .leading, spacing: 10) {
+            HStack(spacing: 10) {
+                Text("👩‍🏫")
+                    .font(.system(size: 24))
+
+                Text("ガチャを体験してみよう")
+                    .font(.system(size: 18, weight: .black))
+                    .foregroundStyle(.primary)
+
+                Spacer(minLength: 0)
+            }
+
+            Text("今回はチュートリアル限定で、広告なしの無料10回を引けるよ。実際のガチャと同じ演出で体験してみよう！")
+                .font(.system(size: 14, weight: .semibold))
+                .foregroundStyle(.primary)
+                .lineSpacing(3)
+        }
+        .padding(14)
+        .background(.ultraThinMaterial, in: RoundedRectangle(cornerRadius: 22, style: .continuous))
+        .overlay(
+            RoundedRectangle(cornerRadius: 22, style: .continuous)
+                .stroke(Color.white.opacity(0.45), lineWidth: 1)
+        )
     }
 }
 

@@ -2,7 +2,8 @@
 //  ZukanView.swift
 //  MeMo
 //
-//  Updated for character / wallpaper switching UI and AdMob interstitial display.
+//  Updated for character / wallpaper switching UI, AdMob interstitial display,
+//  and tutorial-mode character switching through the real Zukan screen.
 //
 
 import SwiftUI
@@ -25,6 +26,20 @@ struct ZukanView: View {
     @State private var selectedSection: ZukanSection = .character
     @State private var characterCurrentPage: Int = 0
     @State private var wallpaperCurrentPage: Int = 0
+
+    private let isTutorialMode: Bool
+    private let tutorialTargetPetID: String?
+    private let onTutorialSwitchFinished: (() -> Void)?
+
+    init(
+        isTutorialMode: Bool = false,
+        tutorialTargetPetID: String? = nil,
+        onTutorialSwitchFinished: (() -> Void)? = nil
+    ) {
+        self.isTutorialMode = isTutorialMode
+        self.tutorialTargetPetID = tutorialTargetPetID
+        self.onTutorialSwitchFinished = onTutorialSwitchFinished
+    }
 
     private var state: AppState? { appStates.first }
 
@@ -74,12 +89,18 @@ struct ZukanView: View {
                         selectedSection: selectedSection,
                         onSelect: { section in
                             guard selectedSection != section else { return }
+                            guard isTutorialMode == false else { return }
                             bgmManager.playSE(.push)
                             selectedSection = section
                             clampPages(state: state)
                         }
                     )
+                    .opacity(isTutorialMode ? 0.72 : 1.0)
                     .zIndex(1)
+
+                    if isTutorialMode {
+                        tutorialInstructionCard
+                    }
 
                     currentSelectionCard(state: state)
                     ownedItemsPanel(state: state)
@@ -114,10 +135,17 @@ struct ZukanView: View {
         .onAppear {
             NotificationCenter.default.post(name: .memoHideHomeBannerAd, object: nil)
             bgmManager.switchBackground(to: .zukan)
-            AdMobManager.shared.prepareInterstitialCharacterSet()
+            if isTutorialMode == false {
+                AdMobManager.shared.prepareInterstitialCharacterSet()
+            }
             guard let state else { return }
 
             state.ensureInitialPetsIfNeeded()
+            if isTutorialMode {
+                _ = state.memoAwardTutorialGachaCharacterIfNeeded()
+                selectedSection = .character
+                selectedPetID = tutorialTargetPetID ?? state.memoTutorialGachaCharacterPetID
+            }
             syncCharacterSelectionAndPage(state: state)
             syncWallpaperSelectionAndPage()
             clampPages(state: state)
@@ -140,6 +168,33 @@ struct ZukanView: View {
         }
     }
 
+    private var tutorialInstructionCard: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            HStack(spacing: 10) {
+                Text("👩‍🏫")
+                    .font(.system(size: 24))
+
+                Text("キャラクターを切り替えよう")
+                    .font(.system(size: 18, weight: .black))
+                    .foregroundStyle(.primary)
+
+                Spacer(minLength: 0)
+            }
+
+            Text("ガチャで出会ったキャラクターを選んで、実際の「お世話する」ボタンで切り替えてみよう。今回は広告なしで切り替えられるよ。")
+                .font(.system(size: 14, weight: .semibold))
+                .foregroundStyle(.primary)
+                .lineSpacing(3)
+                .frame(maxWidth: .infinity, alignment: .leading)
+        }
+        .padding(14)
+        .background(.ultraThinMaterial, in: RoundedRectangle(cornerRadius: 20, style: .continuous))
+        .overlay(
+            RoundedRectangle(cornerRadius: 20, style: .continuous)
+                .stroke(Color.white.opacity(0.45), lineWidth: 1)
+        )
+    }
+
     @ViewBuilder
     private func currentSelectionCard(state: AppState) -> some View {
         switch selectedSection {
@@ -149,6 +204,7 @@ struct ZukanView: View {
             let selectedImageName = PetMaster.assetName(for: selectedPetID)
             let descriptionText = PetMaster.description(for: selectedPetID)
             let isCurrentPet = state.normalizedCurrentPetID == selectedPetID
+            let isSwitchDisabled = isCurrentPet && isTutorialMode == false
 
             VStack(alignment: .leading, spacing: 12) {
                 Text("現在選択中のキャラクター")
@@ -187,8 +243,8 @@ struct ZukanView: View {
                                 .padding(.vertical, 12)
                         }
                         .buttonStyle(.borderedProminent)
-                        .disabled(isCurrentPet)
-                        .opacity(isCurrentPet ? 0.65 : 1.0)
+                        .disabled(isSwitchDisabled)
+                        .opacity(isSwitchDisabled ? 0.65 : 1.0)
                     }
                     .frame(maxWidth: .infinity, minHeight: 200, maxHeight: 240, alignment: .topLeading)
                 }
@@ -351,13 +407,20 @@ struct ZukanView: View {
         bgmManager.playSE(.push)
 
         let applySelection = {
-            state.currentPetID = id
+            if isTutorialMode, id == state.memoTutorialGachaCharacterPetID {
+                _ = state.memoSwitchToTutorialGachaCharacter()
+            } else {
+                state.currentPetID = id
+            }
             selectedPetID = id
             characterCurrentPage = viewModel.pageIndex(for: id, state: state)
             save(state: state, forceWidgetReload: true)
         }
 
-        if isDeveloperMode {
+        if isTutorialMode {
+            applySelection()
+            onTutorialSwitchFinished?()
+        } else if isDeveloperMode {
             applySelection()
         } else {
             AdMobManager.shared.showInterstitialCharacterSetThenRun(applySelection)
@@ -365,6 +428,7 @@ struct ZukanView: View {
     }
 
     private func handleWallpaperSetTapped() {
+        guard isTutorialMode == false else { return }
         guard let selectedWallpaperAssetName else { return }
         bgmManager.playSE(.push)
         currentHomeWallpaperAssetName = selectedWallpaperAssetName
@@ -381,7 +445,10 @@ struct ZukanView: View {
         }
 
         let preferredPetID: String
-        if let selectedPetID, visiblePetIDs.contains(selectedPetID) {
+        let tutorialPreferredPetID = isTutorialMode ? (tutorialTargetPetID ?? state.memoTutorialGachaCharacterPetID) : nil
+        if let tutorialPreferredPetID, visiblePetIDs.contains(tutorialPreferredPetID) {
+            preferredPetID = tutorialPreferredPetID
+        } else if let selectedPetID, visiblePetIDs.contains(selectedPetID) {
             preferredPetID = selectedPetID
         } else if visiblePetIDs.contains(state.normalizedCurrentPetID) {
             preferredPetID = state.normalizedCurrentPetID
