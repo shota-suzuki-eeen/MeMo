@@ -422,14 +422,44 @@ private extension MemoOnboardingTarget {
 
         case .gachaButton:
             let side: CGFloat = 96
-            let centerX: CGFloat = size.width - CGFloat(88)
-            let centerY: CGFloat = size.height - CGFloat(150)
+
+            // HomeView の BottomButtons と同じ並びに合わせる。
+            // menu / gatya / work / step の2番目が gatya_button。
+            let buttonSize: CGFloat = 68
+            let spacing: CGFloat = 16
+            let horizontalPadding: CGFloat = 18
+            let bottomPadding: CGFloat = -38
+            let scopeOffsetX: CGFloat = -3 // -で左、+で右
+            let itemCount: CGFloat = 4
+
+            let rowWidth = (buttonSize * itemCount) + (spacing * (itemCount - 1))
+            let availableWidth = max(0, size.width - (horizontalPadding * 2))
+            let rowStartX = horizontalPadding + max(0, (availableWidth - rowWidth) / 2)
+
+            let centerX = rowStartX + buttonSize + spacing + (buttonSize / 2) + scopeOffsetX
+            let centerY = size.height - bottomPadding - (buttonSize / 2)
+
             return CGRect(x: centerX - side / 2, y: centerY - side / 2, width: side, height: side)
 
         case .zukanButton:
             let side: CGFloat = 96
-            let centerX: CGFloat = max(CGFloat(88), size.width - CGFloat(190))
-            let centerY: CGFloat = size.height - CGFloat(150)
+
+            // HomeView の BottomButtons と同じ並びに合わせる。
+            // menu / gatya / work / step のうち、図鑑への入口になる menu_button にスコープを当てる。
+            let buttonSize: CGFloat = 68
+            let spacing: CGFloat = 16
+            let horizontalPadding: CGFloat = 18
+            let bottomPadding: CGFloat = -38
+            let scopeOffsetX: CGFloat = -12 // -で左、+で右
+            let itemCount: CGFloat = 4
+
+            let rowWidth = (buttonSize * itemCount) + (spacing * (itemCount - 1))
+            let availableWidth = max(0, size.width - (horizontalPadding * 2))
+            let rowStartX = horizontalPadding + max(0, (availableWidth - rowWidth) / 2)
+
+            let centerX = rowStartX + (buttonSize / 2) + scopeOffsetX
+            let centerY = size.height - bottomPadding - (buttonSize / 2)
+
             return CGRect(x: centerX - side / 2, y: centerY - side / 2, width: side, height: side)
 
         case .freeTenGachaButton:

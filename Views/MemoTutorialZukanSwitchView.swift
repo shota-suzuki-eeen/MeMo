@@ -3,7 +3,7 @@
 //  MeMo
 //
 //  Mandatory onboarding character switch bridge.
-//  The tutorial now follows the real Home menu flow and then uses the real ZukanView.
+//  The tutorial opens the menu window first, then uses the real ZukanView.
 //  iOS 18.6+
 //
 
@@ -17,8 +17,8 @@ struct MemoTutorialZukanSwitchView: View {
     @AppStorage(WallpaperCatalog.selectedHomeWallpaperAssetNameKey)
     private var selectedHomeWallpaperAssetName: String = WallpaperCatalog.defaultWallpaper.assetName
 
-    @State private var phase: Phase = .menuButton
-    @State private var showMenuPopup: Bool = false
+    @State private var phase: Phase = .pictureButton
+    @State private var showMenuPopup: Bool = true
     @State private var isPulsing: Bool = false
 
     private enum Phase: Equatable {

@@ -3,7 +3,7 @@
 //  MeMo
 //
 //  Mandatory onboarding gacha bridge.
-//  The tutorial now uses the real GachaView UI, animation, and result presentation.
+//  The tutorial opens the real GachaView directly from the onboarding spotlight.
 //  iOS 18.6+
 //
 
