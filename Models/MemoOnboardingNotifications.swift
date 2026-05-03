@@ -13,6 +13,7 @@ extension Notification.Name {
     static let memoOnboardingRequestFoodTutorial = Notification.Name("memo.onboarding.requestFoodTutorial")
     static let memoOnboardingRequestToiletTutorial = Notification.Name("memo.onboarding.requestToiletTutorial")
     static let memoOnboardingFoodDidFeed = Notification.Name("memo.onboarding.foodDidFeed")
+    static let memoOnboardingTutorialFoodSelectionStarted = Notification.Name("memo.onboarding.tutorialFoodSelectionStarted")
     static let memoOnboardingToiletScratchStarted = Notification.Name("memo.onboarding.toiletScratchStarted")
     static let memoOnboardingToiletDidBecomeClean = Notification.Name("memo.onboarding.toiletDidBecomeClean")
     static let memoOnboardingStartFirstFreeGachaRequested = Notification.Name("memo.onboarding.startFirstFreeGachaRequested")
@@ -48,6 +49,24 @@ enum MemoOnboardingNotifier {
             object: nil,
             userInfo: [MemoOnboardingNotificationUserInfoKey.foodID: foodID]
         )
+    }
+
+    static func notifyTutorialFoodSelectionStarted(foodID: String?) {
+        var userInfo: [String: Any] = [:]
+        if let foodID {
+            userInfo[MemoOnboardingNotificationUserInfoKey.foodID] = foodID
+        }
+
+        NotificationCenter.default.post(
+            name: .memoOnboardingTutorialFoodSelectionStarted,
+            object: nil,
+            userInfo: userInfo
+        )
+    }
+
+    static func notifyTutorialFoodSelectionCancelled() {
+        // Down-swipe cancellation is intentionally ignored during the mandatory food tutorial.
+        // Keeping this no-op preserves compatibility if HomeView still calls the old hook.
     }
 
     static func notifyToiletScratchStarted() {

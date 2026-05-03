@@ -13,6 +13,7 @@ import Observation
 final class MemoOnboardingViewModel {
     var activeScreen: MemoOnboardingScreen?
     var isPresented: Bool = false
+    var foodInteractionPhase: MemoOnboardingFoodInteractionPhase = .choosing
 
     @ObservationIgnored
     private var pendingScreens: [MemoOnboardingScreen] = []
@@ -60,6 +61,7 @@ final class MemoOnboardingViewModel {
 
     func presentFoodResultIfNeeded(_ foodID: String, state: AppState?) {
         guard let state else { return }
+        foodInteractionPhase = .choosing
 
         if state.memoShouldRunMandatoryOnboarding {
             if foodID == state.memoTutorialNormalFoodID {
@@ -84,17 +86,37 @@ final class MemoOnboardingViewModel {
         switch activeScreen {
         case .foodGiveNormal:
             guard state.memoHasTutorialNormalFoodActuallyBeenFed else { return }
+            foodInteractionPhase = .choosing
             _ = state.memoMarkTutorialFoodFed(foodID: state.memoTutorialNormalFoodID)
             moveMandatory(to: .foodNormalResult, state: state)
 
         case .foodGiveRare:
             guard state.memoHasTutorialRareFoodActuallyBeenFed else { return }
+            foodInteractionPhase = .choosing
             _ = state.memoMarkTutorialFoodFed(foodID: state.memoTutorialRareFoodID)
             moveMandatory(to: .foodRareResult, state: state)
 
         default:
             break
         }
+    }
+
+    func handleTutorialFoodSelectionStarted(foodID: String?, state: AppState?) {
+        guard let screen = activeScreen else { return }
+        guard screen == .foodGiveNormal || screen == .foodGiveRare else { return }
+
+        if let state, let foodID {
+            switch screen {
+            case .foodGiveNormal:
+                guard foodID == state.memoTutorialNormalFoodID else { return }
+            case .foodGiveRare:
+                guard foodID == state.memoTutorialRareFoodID else { return }
+            default:
+                break
+            }
+        }
+
+        foodInteractionPhase = .pendingSwipe
     }
 
     func presentToiletScratchIfNeeded(state: AppState?) {
@@ -181,31 +203,42 @@ final class MemoOnboardingViewModel {
 
         switch screen {
         case .foodButton:
+            foodInteractionPhase = .choosing
             state.memoStartMandatoryOnboardingIfNeeded()
             state.memoPrepareFoodTutorialItemsIfNeeded()
             moveMandatory(to: .foodGiveNormal, state: state)
             return .saveOnly
 
         case .foodButtonForRare:
+            foodInteractionPhase = .choosing
             state.memoPrepareFoodTutorialItemsIfNeeded()
             moveMandatory(to: .foodRareTab, state: state)
             return .saveOnly
 
         case .foodRareTab:
+            foodInteractionPhase = .choosing
             moveMandatory(to: .foodGiveRare, state: state)
             return .saveOnly
 
-        case .foodGiveNormal, .foodGiveRare:
-            // The actual HomeView food selector performs the feeding.
-            // We only wait for ownedFoodCountsData / foodDidFeed notification to confirm progress.
+        case .foodGiveNormal:
+            // The first tap only puts the real HomeView food item into its temporary decision state.
+            // The user must then swipe up on the real selected item to feed it.
+            foodInteractionPhase = .pendingSwipe
+            return .none
+
+        case .foodGiveRare:
+            // Same as normal food: keep the tutorial on the real control and wait for the actual feed event.
+            foodInteractionPhase = .pendingSwipe
             return .none
 
         case .gachaButton:
+            foodInteractionPhase = .choosing
             state.memoSaveMandatoryOnboardingStep(.gachaButton)
             hideCurrentPresentation()
             return .openTutorialGacha
 
         case .zukanButton:
+            foodInteractionPhase = .choosing
             state.memoSaveMandatoryOnboardingStep(.zukanButton)
             hideCurrentPresentation()
             return .openTutorialZukan
@@ -234,11 +267,13 @@ final class MemoOnboardingViewModel {
             pendingScreens.removeFirst()
             activeScreen = next
             isPresented = true
+            updateFoodInteractionPhase(for: next)
             return
         }
 
         activeScreen = nil
         isPresented = false
+        foodInteractionPhase = .choosing
     }
 
     func resetQueue() {
@@ -250,6 +285,7 @@ final class MemoOnboardingViewModel {
         pendingScreens.removeAll()
         activeScreen = screen
         isPresented = true
+        updateFoodInteractionPhase(for: screen)
     }
 
     private func presentMandatory(_ screen: MemoOnboardingScreen, state: AppState) {
@@ -262,11 +298,13 @@ final class MemoOnboardingViewModel {
         pendingScreens.removeAll()
         activeScreen = nil
         isPresented = false
+        foodInteractionPhase = .choosing
     }
 
     private func present(_ screen: MemoOnboardingScreen) {
         guard activeScreen != screen else {
             isPresented = true
+            updateFoodInteractionPhase(for: screen, preserveFoodPhaseWhenPossible: true)
             return
         }
 
@@ -279,6 +317,21 @@ final class MemoOnboardingViewModel {
 
         activeScreen = screen
         isPresented = true
+        updateFoodInteractionPhase(for: screen)
+    }
+
+    private func updateFoodInteractionPhase(
+        for screen: MemoOnboardingScreen,
+        preserveFoodPhaseWhenPossible: Bool = false
+    ) {
+        switch screen {
+        case .foodGiveNormal, .foodGiveRare:
+            if preserveFoodPhaseWhenPossible == false {
+                foodInteractionPhase = .choosing
+            }
+        default:
+            foodInteractionPhase = .choosing
+        }
     }
 }
 

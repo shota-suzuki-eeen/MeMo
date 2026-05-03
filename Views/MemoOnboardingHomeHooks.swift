@@ -73,6 +73,15 @@ enum MemoOnboardingHomeHooks {
         MemoOnboardingNotifier.request(.foodGiveRare, force: true)
     }
 
+    static func tutorialFoodSelectionStarted(foodID: String?) {
+        MemoOnboardingNotifier.notifyTutorialFoodSelectionStarted(foodID: foodID)
+    }
+
+    static func tutorialFoodSelectionCancelled() {
+        // Down-swipe cancellation should not move the mandatory food tutorial back.
+        // Keep this hook as a no-op so existing HomeView calls remain safe.
+    }
+
     static func foodDidFeed(foodID: String) {
         MemoOnboardingNotifier.notifyFoodDidFeed(foodID: foodID)
     }

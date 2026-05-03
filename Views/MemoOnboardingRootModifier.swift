@@ -35,6 +35,11 @@ struct MemoOnboardingRootModifier: ViewModifier {
             .onReceive(NotificationCenter.default.publisher(for: .memoOnboardingRequestToiletTutorial)) { _ in
                 viewModel.presentToiletTutorialIfNeeded(state: state)
             }
+            .onReceive(NotificationCenter.default.publisher(for: .memoOnboardingTutorialFoodSelectionStarted)) { notification in
+                let foodID = notification.userInfo?[MemoOnboardingNotificationUserInfoKey.foodID] as? String
+                viewModel.handleTutorialFoodSelectionStarted(foodID: foodID, state: state)
+                saveIfPossible()
+            }
             .onReceive(NotificationCenter.default.publisher(for: .memoOnboardingFoodDidFeed)) { notification in
                 guard let foodID = notification.userInfo?[MemoOnboardingNotificationUserInfoKey.foodID] as? String else { return }
                 viewModel.presentFoodResultIfNeeded(foodID, state: state)

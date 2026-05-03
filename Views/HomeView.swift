@@ -153,6 +153,18 @@ struct HomeView: View {
         return foods.first(where: { $0.id == selectedFoodID }) ?? foods.first
     }
 
+    private var isFoodPendingCancelDisabledForMandatoryTutorial: Bool {
+        guard pendingFoodFeedID != nil else { return false }
+        guard state.memoShouldRunMandatoryOnboarding else { return false }
+
+        switch state.memoMandatoryOnboardingCurrentStep {
+        case .some(.foodGiveNormal), .some(.foodGiveRare):
+            return true
+        default:
+            return false
+        }
+    }
+
     private var visibleToiletPoops: [AppState.ToiletPoopItem] {
         state.toiletPoops().filter { !$0.isCleared }
     }
@@ -947,6 +959,7 @@ struct HomeView: View {
                 pendingFoodID: pendingFoodFeedID,
                 dragOffset: foodSelectorDragOffset,
                 isFeedingAnimationRunning: isFoodFeedingAnimationRunning,
+                allowsPendingCancel: !isFoodPendingCancelDisabledForMandatoryTutorial,
                 onMoveSelection: { delta in
                     moveFoodSelection(delta)
                 },
@@ -1954,7 +1967,10 @@ struct HomeView: View {
         stopFoodSelectorHorizontalRattleIfNeeded()
 
         if pendingFoodFeedID != nil {
-            foodSelectorDragOffset = CGSize(width: 0, height: value.translation.height)
+            let resolvedHeight = isFoodPendingCancelDisabledForMandatoryTutorial
+                ? min(0, value.translation.height)
+                : value.translation.height
+            foodSelectorDragOffset = CGSize(width: 0, height: resolvedHeight)
             return
         }
 
@@ -1988,6 +2004,13 @@ struct HomeView: View {
             }
 
             if isCancelSwipe {
+                if isFoodPendingCancelDisabledForMandatoryTutorial {
+                    withAnimation(.spring(response: 0.28, dampingFraction: 0.9)) {
+                        foodSelectorDragOffset = .zero
+                    }
+                    return
+                }
+
                 cancelPendingFoodSelection()
                 return
             }
@@ -3988,6 +4011,7 @@ private struct FoodSelectionCarousel: View {
     let pendingFoodID: String?
     let dragOffset: CGSize
     let isFeedingAnimationRunning: Bool
+    let allowsPendingCancel: Bool
     let onMoveSelection: (Int) -> Void
     let onFeed: () -> Void
     let onToggleRarity: () -> Void
@@ -4014,8 +4038,27 @@ private struct FoodSelectionCarousel: View {
         guard isPendingMode else { return nil }
 
         if dragOffset.height <= -HomeView.Layout.foodSelectorPendingDecisionThreshold { return "あげる" }
-        if dragOffset.height >= HomeView.Layout.foodSelectorPendingDecisionThreshold { return "やめる" }
+        if allowsPendingCancel,
+           dragOffset.height >= HomeView.Layout.foodSelectorPendingDecisionThreshold {
+            return "やめる"
+        }
         return nil
+    }
+
+    private var pendingInstructionText: String {
+        allowsPendingCancel
+            ? "上フリックであげる / 下フリックでキャンセル"
+            : "上フリックであげる"
+    }
+
+    private var accessibilityHintText: String {
+        if isPendingMode {
+            return allowsPendingCancel
+                ? "上フリックであげるか、下フリックでキャンセルします"
+                : "上フリックでごはんをあげます"
+        }
+
+        return "横スクロールでごはんを選び、タップで仮決定してから、上フリックであげるか下フリックでキャンセルします"
     }
 
     private var selectedIndex: Int {
@@ -4106,7 +4149,7 @@ private struct FoodSelectionCarousel: View {
                         .font(.system(size: 14, weight: .bold))
                         .foregroundStyle(.white)
 
-                    Text("上フリックであげる / 下フリックでキャンセル")
+                    Text(pendingInstructionText)
                         .font(.system(size: 11, weight: .medium))
                         .foregroundStyle(.white.opacity(0.82))
                         .multilineTextAlignment(.center)
@@ -4159,7 +4202,7 @@ private struct FoodSelectionCarousel: View {
         )
         .accessibilityElement(children: .combine)
         .accessibilityLabel("ごはんセレクター")
-        .accessibilityHint("横スクロールでごはんを選び、タップで仮決定してから、上フリックであげるか下フリックでキャンセルします")
+        .accessibilityHint(accessibilityHintText)
     }
 
     private func countText(for foodID: String) -> String {

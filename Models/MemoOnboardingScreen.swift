@@ -20,6 +20,11 @@ enum MemoOnboardingTarget: String, Codable, Hashable {
     case zukanSwitchButton
 }
 
+enum MemoOnboardingFoodInteractionPhase: String, Codable, Hashable {
+    case choosing
+    case pendingSwipe
+}
+
 enum MemoOnboardingScreen: String, CaseIterable, Identifiable, Codable, Hashable {
     // MARK: - Mandatory first-run tutorial
     case appPurpose
@@ -114,7 +119,7 @@ enum MemoOnboardingScreen: String, CaseIterable, Identifiable, Codable, Hashable
         case .foodButton:
             return "あれ？お腹が減っているみたい！"
         case .foodGiveNormal:
-            return "まずはNのごはんをあげてみよう。"
+            return "まずはNのごはんをタップして仮決定しよう。"
         case .foodNormalResult:
             return "いいね！Nのごはんで満腹度が上がったよ。"
         case .foodButtonForRare:
@@ -122,7 +127,7 @@ enum MemoOnboardingScreen: String, CaseIterable, Identifiable, Codable, Hashable
         case .foodRareTab:
             return "Rのごはんに切り替えてみよう。"
         case .foodGiveRare:
-            return "Rのごはんを実際にあげてみよう。"
+            return "Rのごはんをタップして仮決定しよう。"
         case .foodRareResult:
             return "すごい！Rのごはんは満腹度に加えて、幸せ度も上がるよ。"
         case .foodFullnessReminder:

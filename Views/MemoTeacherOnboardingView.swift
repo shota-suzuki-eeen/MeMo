@@ -23,6 +23,7 @@ struct MemoTeacherOnboardingOverlay: View {
                     MemoOnboardingSpotlightOverlay(
                         screen: screen,
                         state: state,
+                        foodInteractionPhase: viewModel.foodInteractionPhase,
                         onTargetActivated: {
                             handleSpotlightTargetActivated()
                         },
@@ -144,16 +145,48 @@ private struct MemoTeacherOnboardingCard: View {
 private struct MemoOnboardingSpotlightOverlay: View {
     let screen: MemoOnboardingScreen
     let state: AppState?
+    let foodInteractionPhase: MemoOnboardingFoodInteractionPhase
     let onTargetActivated: () -> Void
     let onPrimaryAction: () -> Void
 
     @State private var isPulsing: Bool = false
 
     private var messageText: String {
+        switch screen {
+        case .foodGiveNormal:
+            let foodName = state?.memoTutorialNormalFoodName ?? "Nのごはん"
+            if foodInteractionPhase == .pendingSwipe {
+                return "\(foodName)を仮決定できたよ。上方向にスワイプすると、ごはんをあげられるよ。"
+            }
+            return "その画面のまま、\(foodName)をタップして仮決定しよう。"
+
+        case .foodGiveRare:
+            let foodName = state?.memoTutorialRareFoodName ?? "Rのごはん"
+            if foodInteractionPhase == .pendingSwipe {
+                return "\(foodName)を仮決定できたよ。上方向にスワイプすると、ごはんをあげられるよ。"
+            }
+            return "その画面のまま、\(foodName)をタップして仮決定しよう。"
+
+        default:
+            break
+        }
+
         if let state {
             return state.memoFoodTutorialMessage(for: screen)
         }
         return screen.message
+    }
+
+    private var primaryPromptText: String {
+        if foodInteractionPhase == .pendingSwipe {
+            switch screen {
+            case .foodGiveNormal, .foodGiveRare:
+                return "上にスワイプしてみよう！"
+            default:
+                break
+            }
+        }
+        return screen.primaryButtonTitle
     }
 
     private var target: MemoOnboardingTarget {
@@ -162,7 +195,12 @@ private struct MemoOnboardingSpotlightOverlay: View {
 
     var body: some View {
         GeometryReader { proxy in
-            let targetFrame = target.frame(in: proxy.size)
+            let targetFrame = target.frame(in: proxy.size, foodInteractionPhase: foodInteractionPhase)
+            let passThroughFrame = target.passThroughFrame(
+                in: proxy.size,
+                spotlightFrame: targetFrame,
+                foodInteractionPhase: foodInteractionPhase
+            )
             let bubbleWidth = min(proxy.size.width - 32, 344)
             let bubbleY = target.messageCenterY(in: proxy.size, targetFrame: targetFrame)
 
@@ -180,7 +218,7 @@ private struct MemoOnboardingSpotlightOverlay: View {
                         .position(x: proxy.size.width / 2, y: bubbleY)
 
                     MemoOnboardingTouchGate(
-                        passThroughFrame: targetFrame,
+                        passThroughFrame: passThroughFrame,
                         onPassThroughHit: onTargetActivated
                     )
                     .frame(width: proxy.size.width, height: proxy.size.height)
@@ -269,7 +307,7 @@ private struct MemoOnboardingSpotlightOverlay: View {
 
             if showsPrimaryButton {
                 Button(action: onPrimaryAction) {
-                    Text(screen.primaryButtonTitle)
+                    Text(primaryPromptText)
                         .font(.system(size: 17, weight: .black))
                         .foregroundStyle(.white)
                         .frame(maxWidth: .infinity)
@@ -278,13 +316,13 @@ private struct MemoOnboardingSpotlightOverlay: View {
                 }
                 .buttonStyle(.plain)
             } else {
-                Text(screen.primaryButtonTitle)
+                Text(primaryPromptText)
                     .font(.system(size: 17, weight: .black))
                     .foregroundStyle(.white)
                     .frame(maxWidth: .infinity)
                     .frame(height: 46)
                     .background(Color.accentColor, in: RoundedRectangle(cornerRadius: 16, style: .continuous))
-                    .accessibilityLabel(screen.primaryButtonTitle)
+                    .accessibilityLabel(primaryPromptText)
             }
         }
         .padding(16)
@@ -351,7 +389,10 @@ private extension MemoOnboardingTarget {
         }
     }
 
-    func frame(in size: CGSize) -> CGRect {
+    func frame(
+        in size: CGSize,
+        foodInteractionPhase: MemoOnboardingFoodInteractionPhase = .choosing
+    ) -> CGRect {
         switch self {
         case .foodButton:
             let side: CGFloat = 96
@@ -360,11 +401,7 @@ private extension MemoOnboardingTarget {
             return CGRect(x: centerX - side / 2, y: centerY - side / 2, width: side, height: side)
 
         case .normalFood:
-            let width: CGFloat = min(CGFloat(190), size.width - CGFloat(128))
-            let height: CGFloat = 240
-            let centerX: CGFloat = size.width / 2
-            let centerY: CGFloat = min(max(CGFloat(420), size.height - CGFloat(210)), size.height - CGFloat(210))
-            return CGRect(x: centerX - width / 2, y: centerY - height / 2, width: width, height: height)
+            return foodSpotlightFrame(in: size, phase: foodInteractionPhase)
 
         case .rareFoodTab:
             let width: CGFloat = 120
@@ -375,11 +412,7 @@ private extension MemoOnboardingTarget {
             return CGRect(x: centerX - width / 2, y: centerY - height / 2, width: width, height: height)
 
         case .rareFood:
-            let width: CGFloat = min(CGFloat(190), size.width - CGFloat(128))
-            let height: CGFloat = 240
-            let centerX: CGFloat = size.width / 2
-            let centerY: CGFloat = min(max(CGFloat(420), size.height - CGFloat(210)), size.height - CGFloat(210))
-            return CGRect(x: centerX - width / 2, y: centerY - height / 2, width: width, height: height)
+            return foodSpotlightFrame(in: size, phase: foodInteractionPhase)
 
         case .fullnessMeter:
             let side: CGFloat = 142
@@ -415,6 +448,23 @@ private extension MemoOnboardingTarget {
         }
     }
 
+    func passThroughFrame(
+        in size: CGSize,
+        spotlightFrame: CGRect,
+        foodInteractionPhase: MemoOnboardingFoodInteractionPhase
+    ) -> CGRect {
+        switch self {
+        case .normalFood, .rareFood:
+            return foodItemOnlyFrame(
+                in: size,
+                phase: foodInteractionPhase,
+                spotlightFrame: spotlightFrame
+            )
+        default:
+            return spotlightFrame
+        }
+    }
+
     func messageCenterY(in size: CGSize, targetFrame: CGRect) -> CGFloat {
         let preferredGap: CGFloat = 128
         let cardHalfHeight: CGFloat = 106
@@ -424,6 +474,30 @@ private extension MemoOnboardingTarget {
         }
 
         return min(size.height - cardHalfHeight - CGFloat(18), targetFrame.maxY + preferredGap)
+    }
+
+    private func foodSpotlightFrame(
+        in size: CGSize,
+        phase: MemoOnboardingFoodInteractionPhase
+    ) -> CGRect {
+        let width: CGFloat = min(CGFloat(218), size.width - CGFloat(96))
+        let height: CGFloat = phase == .pendingSwipe ? 252 : 238
+        let centerX: CGFloat = size.width / 2
+        let baseCenterY: CGFloat = min(max(CGFloat(420), size.height - CGFloat(210)), size.height - CGFloat(210))
+        let centerY: CGFloat = phase == .pendingSwipe ? baseCenterY - CGFloat(44) : baseCenterY
+        return CGRect(x: centerX - width / 2, y: centerY - height / 2, width: width, height: height)
+    }
+
+    private func foodItemOnlyFrame(
+        in size: CGSize,
+        phase: MemoOnboardingFoodInteractionPhase,
+        spotlightFrame: CGRect
+    ) -> CGRect {
+        let width: CGFloat = min(CGFloat(142), max(CGFloat(112), spotlightFrame.width - CGFloat(62)))
+        let height: CGFloat = phase == .pendingSwipe ? 186 : 176
+        let centerX: CGFloat = spotlightFrame.midX
+        let centerY: CGFloat = phase == .pendingSwipe ? spotlightFrame.midY - CGFloat(2) : spotlightFrame.midY + CGFloat(6)
+        return CGRect(x: centerX - width / 2, y: centerY - height / 2, width: width, height: height)
     }
 }
 
