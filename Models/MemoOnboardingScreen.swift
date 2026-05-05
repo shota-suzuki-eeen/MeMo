@@ -115,55 +115,55 @@ enum MemoOnboardingScreen: String, CaseIterable, Identifiable, Codable, Hashable
     var message: String {
         switch self {
         case .appPurpose:
-            return "ミーモは、歩くことをちょっと楽しくする健康管理アプリだよ。\n歩数をためてガチャを引き、ごはんやキャラクターを集めながら、お気に入りの子をお世話していこうね。"
+            return "ミーモは、歩くことをちょっと楽しくする健康管理アプリだよ。\n歩数をためてガチャを引き、ごはんやキャラクターを集めながら、お気に入りのミーモをお世話していこうね。"
         case .foodButton:
             return "あれ？お腹が減っているみたい！"
         case .foodGiveNormal:
-            return "まずはNのごはんをタップして仮決定しよう。"
+            return "まずはN（ノーマル）のごはんをタップして仮決定しよう。"
         case .foodNormalResult:
             return "いいね！Nのごはんで満腹度が上がったよ。"
         case .foodButtonForRare:
-            return "次はRのごはんだよ。もう一度ごはんボタンをタップしてみよう。"
+            return "次はR（レア）のごはんだよ。もう一度ごはんボタンをタップしてみよう。"
         case .foodRareTab:
             return "Rのごはんに切り替えてみよう。"
         case .foodGiveRare:
-            return "Rのごはんをタップして仮決定しよう。"
+            return "Rのごはんをタップしてあげる準備しよう。"
         case .foodRareResult:
             return "すごい！Rのごはんは満腹度に加えて、幸せ度も上がるよ。"
         case .foodFullnessReminder:
             return "満腹度が0のままだと、少しずつ幸せ度が下がってしまうよ。\nお腹が空いていたら、こまめにごはんをあげてね。"
         case .gachaButton:
-            return "ごはんや仲間はガチャで手に入るよ。ガチャ画面に移動してみよう！"
+            return "ごはんやミーモはガチャで手に入るよ。ガチャ画面に移動してみよう！"
         case .gachaCharacterResult:
-            return "すごい！キャラクターをゲットしたみたい！\n早速お世話してみよう！"
+            return "すごい！ミーモをゲットしたみたい！\n早速お世話してみよう！"
         case .zukanButton:
-            return "図鑑で仲間を確認できるよ。ゲットしたキャラクターに切り替えてみよう！"
+            return "図鑑でミーモを確認できるよ。ゲットしたミーモに切り替えてみよう！"
         case .tutorialFinished:
-            return "チュートリアルはここまで！\n他にもたくさんの機能やキャラクターがいるからお楽しみに。\n楽しく歩いて、毎日を健康にすごそう！"
+            return "チュートリアルはここまで！\n他にもたくさんの機能やミーモがいるからお楽しみに。\n毎日歩いて、楽しく健康管理をしよう！"
         case .home:
             return "このアプリでは、歩数がコインのような役割になるよ。歩いて、ガチャをして、ごはんやキャラクターを集めながら、楽しく健康管理していこうね。"
         case .step:
-            return "今日の歩数を見られるよ。歩いたぶんだけ、ミーモで使える歩数通貨が増えていくよ。"
+            return "今日の歩数を見られるよ。歩いたぶんだけ、ミーモで使える通貨が増えていくよ。"
         case .gacha:
-            return "歩数を使うと、ごはんやキャラクターが手に入るよ。"
+            return "歩数を使って、ごはんやキャラクターが手に入るよ。"
         case .zukan:
-            return "出会ったキャラクターをここで見返せるよ。少しずつ仲間を増やしていこうね。"
+            return "出会ったキャラクターをここで見返したり、お世話するミーモを切り替えられるよ！\nたくさん集めて図鑑を完成させよう！"
         case .memories:
-            return "今日の歩きや、お気に入りの瞬間を思い出として残せるよ。あとで見返すと、ちょっと楽しいよ。"
+            return "撮影した思い出を見返すことができるよ！\nお気に入りのミーモとたくさんお出かけしよう！"
         case .settings:
-            return "通知や音などを調整できるよ。自分が続けやすい形にしておこうね。"
+            return "通知や音などを調整できるよ。\n自分なりにカスタマイズしてみよう。"
         case .foodTutorialIntro:
-            return "まずはごはんをあげてみよう。NのごはんとRのごはんを1つずつ用意しておいたよ。"
+            return "まずはごはんをあげてみよう。N（ノーマル）のごはんとR（レア）のごはんを1つずつ用意しておいたよ。"
         case .foodTutorialNormalResult:
             return "Nのごはんは、満腹度が増えるよ。おなかがすいている時に使ってあげようね。"
         case .foodTutorialRareResult:
             return "Rのごはんは、満腹度に加えて幸せ度も増えるよ。ガチャで手に入る特別なごはんだよ。"
         case .foodTutorialDone:
-            return "ごはんは主にガチャで手に入るよ。歩いて、集めて、好きなキャラクターをお世話していこうね。"
+            return "ごはんはガチャで手に入るよ。歩いて、集めて、好きなキャラクターをお世話していこうね。"
         case .toiletTutorialIntro:
             return "トイレのマークが出たら、おそうじが必要だよ。きれいにしてあげると、また気持ちよく過ごせるね。"
         case .toiletTutorialScratch:
-            return "汚れはタップだけでは取れないよ。指でこするように動かして、少しずつきれいにしてあげよう。"
+            return "汚れは指こすって、お掃除してあげよう。"
         }
     }
 

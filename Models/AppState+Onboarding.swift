@@ -493,25 +493,19 @@ extension AppState {
     func memoFoodTutorialMessage(for screen: MemoOnboardingScreen) -> String {
         switch screen {
         case .foodButton:
-            return "あれ？お腹が減っているみたい！\n光っている実際のごはんボタンをタップしてみよう。"
+            return "おや？お腹が減っているみたい！\n光っている「ごはんボタン」をタップしてみよう。"
         case .foodGiveNormal:
-            return "その画面のまま、\(memoTutorialNormalFoodName)をタップしてあげてみよう。Nのごはんだよ。"
+            return "\(memoTutorialNormalFoodName)をタップしてあげてみよう。\nN（ノーマル）のごはんだよ。"
         case .foodNormalResult:
-            return "上手！\(memoTutorialNormalFoodName)で満腹度が上がったよ。ここが満腹度メーターだよ。"
+            return "上手！\(memoTutorialNormalFoodName)をあげたことで満腹度が上がったみたい！\nここが満腹度メーターだよ。"
         case .foodButtonForRare:
-            return "次はRのごはんだよ。もう一度、実際のごはんボタンをタップしてみよう。"
+            return "次はR（レア）のごはんだよ！\nもう一度「ごはんボタン」をタップしてみよう。"
         case .foodRareTab:
-            return "Rのごはんに切り替えてみよう。光っている切り替え部分をタップしてね。"
+            return "R（レア）のごはんに切り替えてみよう！\n光っている切り替え部分をタップしてね。"
         case .foodGiveRare:
-            return "その画面のまま、\(memoTutorialRareFoodName)をタップしてあげてみよう。Rのごはんだよ。"
+            return "\(memoTutorialRareFoodName)をタップしてあげてみよう。\nR（レア）のごはんだよ。"
         case .foodRareResult:
-            return "いいね！\(memoTutorialRareFoodName)で満腹度と幸せ度が上がったよ。"
-        case .foodTutorialIntro:
-            return "まずはごはんをあげてみよう。\(memoTutorialNormalFoodName)と\(memoTutorialRareFoodName)を1つずつ用意しておいたよ。"
-        case .foodTutorialNormalResult:
-            return "\(memoTutorialNormalFoodName)はNのごはん。満腹度が増えるよ。おなかがすいている時に使ってあげようね。"
-        case .foodTutorialRareResult:
-            return "\(memoTutorialRareFoodName)はRのごはん。満腹度に加えて幸せ度も増えるよ。ガチャで手に入る特別なごはんだよ。"
+            return "覚えておこう！\n\(memoTutorialRareFoodName)で満腹度と幸せ度が上がったよ。\n💡R（レア）のご飯をあげると「満腹度」と一緒に「幸せ度」も増加するみたい！"
         default:
             return screen.message
         }
