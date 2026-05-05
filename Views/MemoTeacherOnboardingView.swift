@@ -154,18 +154,18 @@ private struct MemoOnboardingSpotlightOverlay: View {
     private var messageText: String {
         switch screen {
         case .foodGiveNormal:
-            let foodName = state?.memoTutorialNormalFoodName ?? "Nのごはん"
+            let foodName = state?.memoTutorialNormalFoodName ?? "N（ノーマル）のごはん"
             if foodInteractionPhase == .pendingSwipe {
-                return "\(foodName)を仮決定できたよ。上方向にスワイプすると、ごはんをあげられるよ。"
+                return "\(foodName)を準備できたよ。\n上方向にスワイプしてごはんをあげよう！"
             }
-            return "その画面のまま、\(foodName)をタップして仮決定しよう。"
+            return "画面の\(foodName)をタップしてあげる準備をしよう。"
 
         case .foodGiveRare:
-            let foodName = state?.memoTutorialRareFoodName ?? "Rのごはん"
+            let foodName = state?.memoTutorialRareFoodName ?? "R（レア）のごはん"
             if foodInteractionPhase == .pendingSwipe {
-                return "\(foodName)を仮決定できたよ。上方向にスワイプすると、ごはんをあげられるよ。"
+                return "\(foodName)を準備できたよ。\n上方向にスワイプしてごはんをあげよう！"
             }
-            return "その画面のまま、\(foodName)をタップして仮決定しよう。"
+            return "画面の\(foodName)をタップしてあげる準備をしよう。"
 
         default:
             break

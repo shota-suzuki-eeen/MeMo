@@ -129,7 +129,7 @@ enum MemoOnboardingScreen: String, CaseIterable, Identifiable, Codable, Hashable
         case .foodGiveRare:
             return "Rのごはんをタップしてあげる準備しよう。"
         case .foodRareResult:
-            return "すごい！Rのごはんは満腹度に加えて、幸せ度も上がるよ。"
+            return "すごい！Rのごはんは満腹度に加えて、幸せ度も上がるよ。\n「幸せ度」が上がると特別なキャラクターがもらえるみたい！"
         case .foodFullnessReminder:
             return "満腹度が0のままだと、少しずつ幸せ度が下がってしまうよ。\nお腹が空いていたら、こまめにごはんをあげてね。"
         case .gachaButton:
@@ -137,11 +137,11 @@ enum MemoOnboardingScreen: String, CaseIterable, Identifiable, Codable, Hashable
         case .gachaCharacterResult:
             return "すごい！ミーモをゲットしたみたい！\n早速お世話してみよう！"
         case .zukanButton:
-            return "図鑑でミーモを確認できるよ。ゲットしたミーモに切り替えてみよう！"
+            return "図鑑でミーモを確認できるよ。\nゲットしたミーモに切り替えてみよう！"
         case .tutorialFinished:
             return "チュートリアルはここまで！\n他にもたくさんの機能やミーモがいるからお楽しみに。\n毎日歩いて、楽しく健康管理をしよう！"
         case .home:
-            return "このアプリでは、歩数がコインのような役割になるよ。歩いて、ガチャをして、ごはんやキャラクターを集めながら、楽しく健康管理していこうね。"
+            return "このアプリでは、歩数がコインのような役割になるよ。\n歩いて、ガチャをして、ごはんやキャラクターを集めながら、楽しく健康管理していこう！"
         case .step:
             return "今日の歩数を見られるよ。歩いたぶんだけ、ミーモで使える通貨が増えていくよ。"
         case .gacha:
@@ -161,9 +161,9 @@ enum MemoOnboardingScreen: String, CaseIterable, Identifiable, Codable, Hashable
         case .foodTutorialDone:
             return "ごはんはガチャで手に入るよ。歩いて、集めて、好きなキャラクターをお世話していこうね。"
         case .toiletTutorialIntro:
-            return "トイレのマークが出たら、おそうじが必要だよ。きれいにしてあげると、また気持ちよく過ごせるね。"
+            return "おっと！\nトイレのマークが出たら、おそうじが必要だよ！"
         case .toiletTutorialScratch:
-            return "汚れは指こすって、お掃除してあげよう。"
+            return "汚れは指こすって、お掃除してあげよう。\nキレイにしてあげると、「幸せ度」が増加するよ。"
         }
     }
 

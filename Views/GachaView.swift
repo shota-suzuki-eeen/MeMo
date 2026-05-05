@@ -1232,7 +1232,7 @@ fileprivate struct TutorialGachaTeacherNote: View {
                 Spacer(minLength: 0)
             }
 
-            Text("今回はチュートリアル限定で、広告なしの無料10回を引けるよ。実際のガチャと同じ演出で体験してみよう！")
+            Text("ガチャは集めた歩数を消費してごはんやキャラクターを獲得できるよ！\n今回はチュートリアル限定で、無料で10回を引けるようにしておいたよ！\nガチャを引いてみよう！")
                 .font(.system(size: 14, weight: .semibold))
                 .foregroundStyle(.primary)
                 .lineSpacing(3)
