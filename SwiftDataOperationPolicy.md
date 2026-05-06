@@ -14,6 +14,7 @@ MeMoは外部DBを持たず、SwiftDataとDocuments配下のファイル保存�
 - `kcal` など古い仕様由来の名称を、現在の仕様に合わせて `steps` へ修正する
 - 互換性維持のためだけに残していた computed property やコメントを削除する
 - 今後の運用ルールをコメントとして明文化する
+- 将来のサブスクリプション導入に備え、課金状態の参照口を SwiftData から分離しておく
 
 ## リリース後の禁止事項
 
@@ -25,6 +26,7 @@ MeMoは外部DBを持たず、SwiftDataとDocuments配下のファイル保存�
 - `.modelContainer(for:)` から既存モデルを外す
 - Documents配下の保存ディレクトリ名やファイル名ルールを移行なしで変更する
 - `Data` に保存しているJSON構造を、旧データが読めない形に変更する
+- サブスクリプション状態を、StoreKitの権利状態と同期しないローカル値だけで正扱いする
 
 ## リリース後に許可される変更
 
@@ -77,6 +79,17 @@ var newDisplayName: Int {
 - `decodeIfPresent` を使い、古いデータでも読み込めるようにする
 - 旧データを新データへ変換する移行処理を用意する
 
+## サブスクリプション導入時の注意
+
+サブスクリプション状態は、SwiftDataのユーザーデータとは分離して扱う。
+
+- `AppState` に `isSubscribed` や `isPremium` のような課金状態を正として保存しない
+- StoreKit 2 の現在の権利状態を正とする
+- ViewやManagerはStoreKitへ直接依存せず、`SubscriptionAccessManager` と `MonetizationPolicy` を経由する
+- バナー広告・インタースティシャル広告などの受動的な広告表示は `MonetizationPolicy.shouldShowPassiveAdvertising` へ集約する
+- リワード広告は、無料ガチャなど報酬獲得導線と紐づくため、受動的広告とは別ポリシーで扱う
+- 将来プレミアム特典を追加する場合は、既存ユーザーの保存データをロック・削除しない
+
 ## リリース前チェックリスト
 
 - [ ] `@Model` の保存プロパティ名が今後も使える名称になっている
@@ -85,3 +98,4 @@ var newDisplayName: Int {
 - [ ] Documents保存のディレクトリ名が確定している
 - [ ] JSON保存している `Data` の構造が今後の拡張を考慮している
 - [ ] リリース後に変更禁止の箇所へコメントが入っている
+- [ ] サブスクリプション状態を SwiftData のユーザーデータ本体から分離している

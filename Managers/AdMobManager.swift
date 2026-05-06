@@ -3,6 +3,7 @@
 //  MeMo
 //
 //  Updated for AdMob production IDs.
+//  Prepared for future subscription-based passive ad hiding.
 //
 
 import Foundation
@@ -119,6 +120,13 @@ final class AdMobManager: ObservableObject {
 
     private init() {}
 
+    private var shouldUsePassiveAds: Bool {
+        MonetizationPolicy.shouldShowPassiveAdvertising(
+            isDeveloperMode: DeveloperModeStore.isEnabled,
+            hasPremiumAccess: SubscriptionAccessManager.shared.hasPremiumAccess
+        )
+    }
+
     func start() {
         guard !didStart else { return }
         didStart = true
@@ -138,7 +146,11 @@ final class AdMobManager: ObservableObject {
         MobileAds.shared.start()
         #endif
 
+        // リワード広告は無料10回ガチャなどユーザー操作に紐づくため、
+        // 将来のプレミアム特典とは別に扱えるようにしておく。
         rewardGacha.load()
+
+        guard shouldUsePassiveAds else { return }
         interstitialCharacterSet.load()
         evaluateInterstitialGetPreload()
     }
@@ -148,20 +160,32 @@ final class AdMobManager: ObservableObject {
     }
 
     func prepareInterstitialCharacterSet() {
+        guard shouldUsePassiveAds else { return }
         interstitialCharacterSet.loadIfNeeded()
     }
 
     func prepareInterstitialGetIfNeeded(isRewardClaimable: Bool) {
+        guard shouldUsePassiveAds else { return }
         guard isRewardClaimable else { return }
         interstitialGet.loadIfNeeded()
     }
 
     func showInterstitialCharacterSetThenRun(_ action: @escaping () -> Void) {
+        guard shouldUsePassiveAds else {
+            action()
+            return
+        }
+
         prepareInterstitialCharacterSet()
         interstitialCharacterSet.show(onDismiss: action)
     }
 
     func showInterstitialGetThenRun(_ action: @escaping () -> Void = {}) {
+        guard shouldUsePassiveAds else {
+            action()
+            return
+        }
+
         guard !isShowingGetInterstitial else {
             action()
             return
@@ -208,6 +232,8 @@ final class AdMobManager: ObservableObject {
     }
 
     private func evaluateInterstitialGetPreload() {
+        guard shouldUsePassiveAds else { return }
+
         let hasWorkReward = hasClaimableWorkFocusReward()
         let hasHappinessReward = hasClaimableHappinessReward()
         prepareInterstitialGetIfNeeded(isRewardClaimable: hasWorkReward || hasHappinessReward)
@@ -286,12 +312,19 @@ struct AdMobBannerView: UIViewRepresentable {
 
     func makeCoordinator() -> Coordinator { Coordinator() }
 
+    private var shouldUsePassiveAds: Bool {
+        MonetizationPolicy.shouldShowPassiveAdvertising(
+            isDeveloperMode: DeveloperModeStore.isEnabled,
+            hasPremiumAccess: SubscriptionAccessManager.shared.hasPremiumAccess
+        )
+    }
+
     #if canImport(GoogleMobileAds)
     func makeUIView(context: Context) -> BannerView {
         let banner = BannerView(adSize: AdSizeBanner)
         banner.backgroundColor = .clear
 
-        guard !DeveloperModeStore.isEnabled else {
+        guard shouldUsePassiveAds else {
             context.coordinator.lastLoadedAdUnitID = nil
             return banner
         }
@@ -307,7 +340,7 @@ struct AdMobBannerView: UIViewRepresentable {
     func updateUIView(_ uiView: BannerView, context: Context) {
         uiView.backgroundColor = .clear
 
-        guard !DeveloperModeStore.isEnabled else {
+        guard shouldUsePassiveAds else {
             uiView.rootViewController = nil
             context.coordinator.lastLoadedAdUnitID = nil
             return
@@ -341,6 +374,15 @@ struct BannerArea: View {
     var contentHeight: CGFloat = 50
     var topOffset: CGFloat = 10
 
+    @ObservedObject private var subscriptionAccessManager = SubscriptionAccessManager.shared
+
+    private var shouldUsePassiveAds: Bool {
+        MonetizationPolicy.shouldShowPassiveAdvertising(
+            isDeveloperMode: DeveloperModeStore.isEnabled,
+            hasPremiumAccess: subscriptionAccessManager.hasPremiumAccess
+        )
+    }
+
     var body: some View {
         GeometryReader { proxy in
             let rawW = max(1, proxy.size.width)
@@ -350,7 +392,7 @@ struct BannerArea: View {
             ZStack {
                 Color.clear
 
-                if !DeveloperModeStore.isEnabled {
+                if shouldUsePassiveAds {
                     AdMobBannerView(adUnitID: adUnitID, width: w)
                         .frame(width: w, height: adH)
                         .clipped()
@@ -359,7 +401,7 @@ struct BannerArea: View {
                 }
             }
         }
-        .frame(height: DeveloperModeStore.isEnabled ? 0 : height)
+        .frame(height: shouldUsePassiveAds ? height : 0)
     }
 
     private func normalizeBannerWidth(_ rawW: CGFloat) -> CGFloat {
