@@ -3398,6 +3398,16 @@ private struct HomeHappinessRewardsContent: View {
         Array(rewardDefinitions.reversed())
     }
 
+    private var focusedRewardLevel: Int? {
+        if let claimableLevel {
+            return claimableLevel
+        }
+        if let nextRewardLevel {
+            return nextRewardLevel
+        }
+        return nil
+    }
+
     private var currentProgressLevel: Double {
         let safeMaxPoints = max(happinessMaxPoints, 1)
         let fractionalLevel = Double(max(0, min(happinessPoint, safeMaxPoints - 1))) / Double(safeMaxPoints)
@@ -3424,41 +3434,62 @@ private struct HomeHappinessRewardsContent: View {
         VStack(alignment: .leading, spacing: 14) {
             summaryCard
 
-            ScrollView(.vertical, showsIndicators: false) {
-                HStack(alignment: .top, spacing: 18) {
-                    HomeHappinessRewardsProgressColumn(
-                        rewards: descendingRewards,
-                        currentLevelProgress: currentProgressLevel,
-                        rowHeight: rewardRowHeight,
-                        spacing: rewardRowSpacing
-                    )
-                    .frame(
-                        width: 32,
-                        height: HomeHappinessRewardsProgressColumn.contentHeight(
-                            rewardCount: descendingRewards.count,
+            ScrollViewReader { proxy in
+                ScrollView(.vertical, showsIndicators: false) {
+                    HStack(alignment: .top, spacing: 18) {
+                        HomeHappinessRewardsProgressColumn(
+                            rewards: descendingRewards,
+                            currentLevelProgress: currentProgressLevel,
                             rowHeight: rewardRowHeight,
                             spacing: rewardRowSpacing
                         )
-                    )
-
-                    LazyVStack(spacing: rewardRowSpacing) {
-                        ForEach(descendingRewards) { reward in
-                            HomeHappinessRewardRow(
-                                reward: reward,
-                                isClaimed: claimedRewardLevels.contains(reward.level),
-                                canClaim: !claimedRewardLevels.contains(reward.level) && happinessLevel >= reward.level,
-                                remainingLevels: max(0, reward.level - happinessLevel),
-                                onClaim: {
-                                    onClaim(reward.level)
-                                }
+                        .frame(
+                            width: 32,
+                            height: HomeHappinessRewardsProgressColumn.contentHeight(
+                                rewardCount: descendingRewards.count,
+                                rowHeight: rewardRowHeight,
+                                spacing: rewardRowSpacing
                             )
-                            .frame(height: rewardRowHeight)
+                        )
+
+                        LazyVStack(spacing: rewardRowSpacing) {
+                            ForEach(descendingRewards) { reward in
+                                HomeHappinessRewardRow(
+                                    reward: reward,
+                                    isClaimed: claimedRewardLevels.contains(reward.level),
+                                    canClaim: !claimedRewardLevels.contains(reward.level) && happinessLevel >= reward.level,
+                                    remainingLevels: max(0, reward.level - happinessLevel),
+                                    onClaim: {
+                                        onClaim(reward.level)
+                                    }
+                                )
+                                .frame(height: rewardRowHeight)
+                                .id(reward.level)
+                            }
                         }
                     }
+                    .padding(.top, 8)
+                    .padding(.bottom, 4)
                 }
-                .padding(.top, 8)
-                .padding(.bottom, 4)
+                .onAppear {
+                    scrollToFocusedReward(proxy: proxy, animated: false)
+                }
+                .onChange(of: focusedRewardLevel) { _, _ in
+                    scrollToFocusedReward(proxy: proxy, animated: true)
+                }
             }
+        }
+    }
+
+    private func scrollToFocusedReward(proxy: ScrollViewProxy, animated: Bool) {
+        guard let focusedRewardLevel else { return }
+
+        if animated {
+            withAnimation(.easeOut(duration: 0.24)) {
+                proxy.scrollTo(focusedRewardLevel, anchor: .center)
+            }
+        } else {
+            proxy.scrollTo(focusedRewardLevel, anchor: .center)
         }
     }
 
@@ -3503,29 +3534,37 @@ private struct HomeHappinessRewardRow: View {
     let onClaim: () -> Void
 
     var body: some View {
-        HStack(spacing: 14) {
+        HStack(spacing: 10) {
             Image(reward.assetName)
                 .resizable()
                 .scaledToFit()
-                .frame(width: 88, height: 88)
-                .padding(6)
+                .frame(width: 78, height: 78)
+                .padding(5)
                 .background(
-                    RoundedRectangle(cornerRadius: 20, style: .continuous)
+                    RoundedRectangle(cornerRadius: 18, style: .continuous)
                         .fill(Color.white.opacity(0.14))
                 )
                 .overlay(
-                    RoundedRectangle(cornerRadius: 20, style: .continuous)
+                    RoundedRectangle(cornerRadius: 18, style: .continuous)
                         .stroke(Color.white.opacity(0.12), lineWidth: 1)
                 )
+                .layoutPriority(0)
 
             VStack(alignment: .leading, spacing: 6) {
                 Text("Lv.\(reward.level)")
                     .font(.system(size: 20, weight: .heavy, design: .rounded))
                     .foregroundStyle(.white)
+                    .lineLimit(1)
+                    .minimumScaleFactor(0.75)
+                    .fixedSize(horizontal: true, vertical: false)
+                    .frame(minWidth: 64, alignment: .leading)
+                    .layoutPriority(3)
 
                 Text("キャラクター報酬")
                     .font(.system(size: 13, weight: .semibold))
                     .foregroundStyle(.white.opacity(0.72))
+                    .lineLimit(2)
+                    .minimumScaleFactor(0.82)
 
                 Text(reward.characterName)
                     .font(.system(size: 14, weight: .bold))
@@ -3533,12 +3572,14 @@ private struct HomeHappinessRewardRow: View {
                     .lineLimit(1)
                     .minimumScaleFactor(0.75)
             }
-
-            Spacer(minLength: 8)
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .layoutPriority(2)
 
             trailingStatusView
+                .frame(minWidth: 58, alignment: .trailing)
+                .layoutPriority(1)
         }
-        .padding(.horizontal, 16)
+        .padding(.horizontal, 12)
         .padding(.vertical, 14)
         .frame(maxWidth: .infinity)
         .background(
@@ -3573,10 +3614,13 @@ private struct HomeHappinessRewardRow: View {
                 Text("未達成")
                     .font(.system(size: 12, weight: .bold))
                     .foregroundStyle(.white.opacity(0.76))
+                    .lineLimit(1)
 
                 Text("あと\(remainingLevels)Lv")
                     .font(.system(size: 12, weight: .semibold))
                     .foregroundStyle(.white.opacity(0.90))
+                    .lineLimit(2)
+                    .minimumScaleFactor(0.8)
                     .multilineTextAlignment(.trailing)
             }
         }
@@ -3590,7 +3634,9 @@ private struct HomeHappinessRewardRow: View {
         Text(title)
             .font(.system(size: 13, weight: .bold))
             .foregroundStyle(foregroundColor)
-            .padding(.horizontal, 14)
+            .lineLimit(1)
+            .minimumScaleFactor(0.8)
+            .padding(.horizontal, 12)
             .padding(.vertical, 10)
             .background(
                 RoundedRectangle(cornerRadius: 16, style: .continuous)
