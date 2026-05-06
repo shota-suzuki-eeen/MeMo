@@ -384,7 +384,7 @@ private extension MemoOnboardingTarget {
             return 28
         case .normalFood, .rareFood, .rareFoodTab:
             return 26
-        case .fullnessMeter:
+        case .fullnessMeter, .happinessMeter:
             return 68
         }
     }
@@ -407,7 +407,7 @@ private extension MemoOnboardingTarget {
             let width: CGFloat = 120
             let height: CGFloat = 58
             let selectorCenterY: CGFloat = min(max(CGFloat(420), size.height - CGFloat(320)), size.height - CGFloat(230))
-            let centerX: CGFloat = min(size.width - CGFloat(54), (size.width / 2) + CGFloat(148))
+            let centerX: CGFloat = min(size.width - CGFloat(54), (size.width / 2) + CGFloat(138))
             let centerY: CGFloat = selectorCenterY + CGFloat(38)
             return CGRect(x: centerX - width / 2, y: centerY - height / 2, width: width, height: height)
 
@@ -420,16 +420,20 @@ private extension MemoOnboardingTarget {
             let centerY: CGFloat = 218
             return CGRect(x: centerX - side / 2, y: centerY - side / 2, width: side, height: side)
 
+        case .happinessMeter:
+            let side: CGFloat = 142
+            let centerX: CGFloat = 86
+            let centerY: CGFloat = 210
+            return CGRect(x: centerX - side / 2, y: centerY - side / 2, width: side, height: side)
+
         case .gachaButton:
             let side: CGFloat = 96
 
-            // HomeView の BottomButtons と同じ並びに合わせる。
-            // menu / gatya / work / step の2番目が gatya_button。
             let buttonSize: CGFloat = 68
             let spacing: CGFloat = 16
             let horizontalPadding: CGFloat = 18
             let bottomPadding: CGFloat = -38
-            let scopeOffsetX: CGFloat = -3 // -で左、+で右
+            let scopeOffsetX: CGFloat = -3
             let itemCount: CGFloat = 4
 
             let rowWidth = (buttonSize * itemCount) + (spacing * (itemCount - 1))
@@ -444,13 +448,11 @@ private extension MemoOnboardingTarget {
         case .zukanButton:
             let side: CGFloat = 96
 
-            // HomeView の BottomButtons と同じ並びに合わせる。
-            // menu / gatya / work / step のうち、図鑑への入口になる menu_button にスコープを当てる。
             let buttonSize: CGFloat = 68
             let spacing: CGFloat = 16
             let horizontalPadding: CGFloat = 18
             let bottomPadding: CGFloat = -38
-            let scopeOffsetX: CGFloat = -12 // -で左、+で右
+            let scopeOffsetX: CGFloat = -12
             let itemCount: CGFloat = 4
 
             let rowWidth = (buttonSize * itemCount) + (spacing * (itemCount - 1))

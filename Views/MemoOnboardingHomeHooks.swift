@@ -15,23 +15,25 @@ enum MemoOnboardingHomeHooks {
         if state.memoShouldRunMandatoryOnboarding {
             state.memoStartMandatoryOnboardingIfNeeded()
             MemoOnboardingNotifier.request(state.memoMandatoryOnboardingCurrentStep ?? .appPurpose, force: true)
-        } else {
-            MemoOnboardingNotifier.request(.home)
+            return
+        }
+
+        // Home itself no longer has a first-visit explanation.
+        // If the first toilet flag is already active when Home appears, surface that event tutorial instead.
+        if state.hasToiletFlag {
+            toiletFlagAppeared(state: state)
         }
     }
 
     static func stepScreenAppeared() {
-        MemoOnboardingNotifier.request(.step)
+        // Removed from the active tutorial flow.
+        // Keep the hook as a no-op so older call sites remain compile-safe.
     }
 
     static func gachaScreenAppeared(state: AppState) {
-        guard state.memoMandatoryOnboardingCompleted else { return }
-        if state.memoCanUseFirstVisitFreeTenDraw {
-            state.memoMarkFirstVisitFreeTenDrawOffered()
-            MemoOnboardingNotifier.request(.gacha, force: true)
-        } else {
-            MemoOnboardingNotifier.request(.gacha)
-        }
+        // Removed from the active first-visit tutorial flow.
+        // The mandatory gacha tutorial is still driven by MemoOnboardingViewModel.
+        _ = state
     }
 
     static func zukanScreenAppeared(state: AppState? = nil) {
@@ -50,6 +52,18 @@ enum MemoOnboardingHomeHooks {
         MemoOnboardingNotifier.request(.settings)
     }
 
+    static func workTimerPreparationScreenAppeared() {
+        MemoOnboardingNotifier.request(.workFocusRewardIntro)
+    }
+
+    static func runScreenAppeared() {
+        MemoOnboardingNotifier.request(.workRouteRecordIntro)
+    }
+
+    static func cameraCaptureScreenAppeared() {
+        MemoOnboardingNotifier.request(.cameraCapture)
+    }
+
     static func foodBubbleTapped(state: AppState) {
         guard state.memoFoodTutorialCompleted == false else { return }
         state.memoPrepareFoodTutorialItemsIfNeeded()
@@ -62,8 +76,6 @@ enum MemoOnboardingHomeHooks {
             default:
                 MemoOnboardingNotifier.request(.foodGiveNormal, force: true)
             }
-        } else {
-            MemoOnboardingNotifier.requestFoodTutorial()
         }
     }
 
@@ -87,6 +99,7 @@ enum MemoOnboardingHomeHooks {
     }
 
     static func toiletFlagAppeared(state: AppState) {
+        guard state.memoMandatoryOnboardingCompleted else { return }
         guard state.memoToiletTutorialCompleted == false else { return }
         state.memoPrepareToiletTutorialFlagIfNeeded()
         MemoOnboardingNotifier.requestToiletTutorial()

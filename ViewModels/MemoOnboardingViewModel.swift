@@ -3,6 +3,7 @@
 //  MeMo
 //
 //  MVVM coordinator for mandatory onboarding and small tutorials.
+//  Updated to avoid auto-presenting removed legacy first-visit Home tutorial.
 //  iOS 18.6+
 //
 
@@ -28,7 +29,9 @@ final class MemoOnboardingViewModel {
             return
         }
 
-        presentIfNeeded(.home, state: state)
+        // The previous implementation auto-presented `.home` here.
+        // That screen is no longer part of the active tutorial flow, so after the mandatory tutorial
+        // completes we wait for each concrete screen/event hook to request its own first-time guide.
     }
 
     func presentIfNeeded(_ screen: MemoOnboardingScreen, state: AppState?, force: Bool = false) {
@@ -54,6 +57,7 @@ final class MemoOnboardingViewModel {
 
     func presentToiletTutorialIfNeeded(state: AppState?) {
         guard let state else { return }
+        guard state.memoMandatoryOnboardingCompleted else { return }
         guard state.memoToiletTutorialCompleted == false else { return }
         state.memoPrepareToiletTutorialFlagIfNeeded()
         present(.toiletTutorialIntro)
@@ -121,6 +125,7 @@ final class MemoOnboardingViewModel {
 
     func presentToiletScratchIfNeeded(state: AppState?) {
         guard let state else { return }
+        guard state.memoMandatoryOnboardingCompleted else { return }
         guard state.memoToiletTutorialCompleted == false else { return }
         if state.memoMarkToiletTutorialScratchShown() {
             present(.toiletTutorialScratch)
@@ -221,13 +226,10 @@ final class MemoOnboardingViewModel {
             return .saveOnly
 
         case .foodGiveNormal:
-            // The first tap only puts the real HomeView food item into its temporary decision state.
-            // The user must then swipe up on the real selected item to feed it.
             foodInteractionPhase = .pendingSwipe
             return .none
 
         case .foodGiveRare:
-            // Same as normal food: keep the tutorial on the real control and wait for the actual feed event.
             foodInteractionPhase = .pendingSwipe
             return .none
 

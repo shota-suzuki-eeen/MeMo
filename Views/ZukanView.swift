@@ -181,7 +181,7 @@ struct ZukanView: View {
                 Spacer(minLength: 0)
             }
 
-            Text("ガチャで出会ったキャラクターを選んで、実際の「お世話する」ボタンで切り替えてみよう。今回は広告なしで切り替えられるよ。")
+            Text("ガチャで出会ったキャラクターを選んで、「お世話する」ボタンで切り替えてみよう!")
                 .font(.system(size: 14, weight: .semibold))
                 .foregroundStyle(.primary)
                 .lineSpacing(3)

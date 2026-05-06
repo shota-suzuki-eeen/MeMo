@@ -31,6 +31,9 @@ struct HomeView: View {
     @State private var showCaptureModeDialog: Bool = false
     @State private var selectedCaptureMode: CameraCaptureView.Mode?
 
+    @State private var workOnboardingViewModel = MemoOnboardingViewModel()
+    @State private var stepOnboardingViewModel = MemoOnboardingViewModel()
+    @State private var cameraOnboardingViewModel = MemoOnboardingViewModel()
 
     @State private var displayedStepProgress: Double = 0
     @State private var displayedFullnessLevel: Int = 0
@@ -442,7 +445,7 @@ struct HomeView: View {
         static let foodSelectorPendingDecisionThreshold: CGFloat = 44
         static let foodSelectorPendingOffsetY: CGFloat = 44
         static let foodSelectorPendingActionTextOffsetY: CGFloat = 0
-        static let foodSelectorToggleOffsetX: CGFloat = 148
+        static let foodSelectorToggleOffsetX: CGFloat = 138
         static let foodSelectorToggleOffsetY: CGFloat = -18
 
         static let fullnessLabelOffsetY: CGFloat = 44
@@ -537,6 +540,7 @@ struct HomeView: View {
             }
             .onAppear {
                 isHomeVisible = true
+                MemoOnboardingHomeHooks.homeAppeared(state: state)
 
                 _ = state.normalizeFixedDailyStepGoal()
                 syncCharacterBaseFromState(force: true)
@@ -613,6 +617,7 @@ struct HomeView: View {
                 isToiletTicketCleaning = false
 
                 if state.hasToiletFlag {
+                    MemoOnboardingHomeHooks.toiletFlagAppeared(state: state)
                     toiletPoopActivePoint.removeAll()
 
                     if showFoodSelector {
@@ -702,9 +707,17 @@ struct HomeView: View {
                 } onCaptureWithPlace: { image, placeName, lat, lon in
                     saveTodayPhoto(image, placeName: placeName, latitude: lat, longitude: lon)
                 }
+                .memoOnboardingRoot(state: state, viewModel: cameraOnboardingViewModel)
+                .onAppear {
+                    cameraOnboardingViewModel.presentIfNeeded(.cameraCapture, state: state)
+                }
             }
             .fullScreenCover(isPresented: $showWorkTimerPreparation) {
                 WorkTimerPreparationView()
+                    .memoOnboardingRoot(state: state, viewModel: workOnboardingViewModel)
+                    .onAppear {
+                        workOnboardingViewModel.presentIfNeeded(.workFocusRewardIntro, state: state)
+                    }
             }
             .fullScreenCover(isPresented: $showGachaView) {
                 GachaView()
@@ -713,6 +726,10 @@ struct HomeView: View {
             .fullScreenCover(isPresented: $showStepEnjoy) {
                 NavigationStack {
                     StepView(state: state, hk: hk, onSave: { save() })
+                }
+                .memoOnboardingRoot(state: state, viewModel: stepOnboardingViewModel)
+                .onAppear {
+                    stepOnboardingViewModel.presentIfNeeded(.workRouteRecordIntro, state: state)
                 }
             }
     }
@@ -1732,6 +1749,7 @@ struct HomeView: View {
             return
         }
 
+        MemoOnboardingHomeHooks.toiletScratchStarted()
         let current = currentToiletPoopProgress(id: poop.id)
 
         if let lastPoint = toiletPoopActivePoint[poop.id], scratchRect.contains(lastPoint) {
@@ -1856,6 +1874,7 @@ struct HomeView: View {
         resetFoodSelectorDragState()
         selectedFoodRarityTab = selectedFoodRarityTab.next
         syncFoodSelectorSelection()
+        MemoOnboardingHomeHooks.rareFoodTabTappedDuringTutorial(state: state)
 
         Task { @MainActor in
             Haptics.tap(style: .soft)
@@ -2079,6 +2098,7 @@ struct HomeView: View {
         }
 
         pendingFoodFeedID = selectedFood.id
+        MemoOnboardingHomeHooks.tutorialFoodSelectionStarted(foodID: selectedFood.id)
         resetFoodSelectorDragState()
 
         Task { @MainActor in
@@ -2110,6 +2130,7 @@ struct HomeView: View {
             resetFoodSelectorDragState()
             pendingFoodFeedID = foodID
         }
+        MemoOnboardingHomeHooks.tutorialFoodSelectionStarted(foodID: foodID)
 
         Task { @MainActor in
             Haptics.tap(style: .soft)
@@ -2253,6 +2274,7 @@ struct HomeView: View {
             syncToiletPoopsIfNeeded(containerSize: homeContentSize, now: now, persistChanges: persistChanges)
             syncCharacterBaseFromState(force: true)
             updateToiletWiggle()
+            MemoOnboardingHomeHooks.toiletFlagAppeared(state: state)
         }
         return didRaise
     }
@@ -2433,7 +2455,7 @@ struct HomeView: View {
         syncDisplayedHappiness(animated: happinessBonus > 0)
 
         bgmManager.playSE(.eat)
-
+        MemoOnboardingHomeHooks.foodDidFeed(foodID: foodId)
 
         syncFoodSelectorSelection()
         updateWidgetSnapshot(forceReload: true)
@@ -2569,6 +2591,7 @@ struct HomeView: View {
         }
 
         bgmManager.playSE(.push)
+        MemoOnboardingHomeHooks.foodBubbleTapped(state: state)
 
         if showFoodSelector {
             closeFoodSelector()
@@ -2668,6 +2691,7 @@ struct HomeView: View {
         let now = Date()
         let r = state.resolveToilet(now: now)
         guard r.didResolve else { return }
+        MemoOnboardingHomeHooks.toiletDidBecomeClean()
 
         toiletPoopActivePoint.removeAll()
         toiletTicketClearingPoopIDs.removeAll()
@@ -3323,7 +3347,7 @@ private struct HomeTopInfoPopup: View {
                 HomeTopInfoValueBlock(
                     label: "現在の所持通貨",
                     valueText: "\(walletCoinCount)",
-                    caption: "歩いたぶんだけコインとしてたまります"
+                    caption: "歩数がそのままコインとしてたまります"
                 )
             }
 
@@ -3332,7 +3356,7 @@ private struct HomeTopInfoPopup: View {
                 HomeTopInfoValueBlock(
                     label: "今日の歩数",
                     valueText: "\(todayStepCount)",
-                    caption: "その日の歩数を確認できます"
+                    caption: "今日の歩数を確認できます"
                 )
 
                 HomeTopInfoValueBlock(
@@ -3789,7 +3813,7 @@ private struct RightSideButtons: View {
                     }
                     .buttonStyle(.plain)
                 } else {
-                    NavigationLink { MemoriesView() } label: {
+                    NavigationLink { MemoriesView().memoOnboardingScreen(.memories) } label: {
                         MenuPopupActionIcon(imageName: "omoide_button", buttonSize: buttonSize)
                     }
                     .simultaneousGesture(TapGesture().onEnded {
@@ -3810,7 +3834,7 @@ private struct RightSideButtons: View {
                     }
                     .buttonStyle(.plain)
                 } else {
-                    NavigationLink { ZukanView() } label: {
+                    NavigationLink { ZukanView().memoOnboardingScreen(.zukan) } label: {
                         MenuPopupActionIcon(imageName: "picture_button", buttonSize: buttonSize)
                     }
                     .simultaneousGesture(TapGesture().onEnded {
@@ -3828,7 +3852,7 @@ private struct RightSideButtons: View {
                     }
                     .buttonStyle(.plain)
                 } else {
-                    NavigationLink { SettingsView() } label: {
+                    NavigationLink { SettingsView().memoOnboardingScreen(.settings) } label: {
                         MenuPopupActionIcon(imageName: "option_button", buttonSize: buttonSize)
                     }
                     .simultaneousGesture(TapGesture().onEnded {
@@ -4047,14 +4071,14 @@ private struct FoodSelectionCarousel: View {
 
     private var pendingInstructionText: String {
         allowsPendingCancel
-            ? "上フリックであげる / 下フリックでキャンセル"
+            ? "上フリックであげる / 下フリックで戻る"
             : "上フリックであげる"
     }
 
     private var accessibilityHintText: String {
         if isPendingMode {
             return allowsPendingCancel
-                ? "上フリックであげるか、下フリックでキャンセルします"
+                ? "上フリックであげるか、下フリックで戻ります"
                 : "上フリックでごはんをあげます"
         }
 
@@ -4186,7 +4210,7 @@ private struct FoodSelectionCarousel: View {
                             .font(.system(size: 14, weight: .bold))
                             .foregroundStyle(.white)
 
-                        Text("横スクロールで選ぶ / タップで仮決定 / 上フリックであげる / 下フリックでキャンセル")
+                        Text("横スクロールで選ぶ / タップで準備 / 上フリックであげる / 下フリックで戻る")
                             .font(.system(size: 11, weight: .medium))
                             .foregroundStyle(.white.opacity(0.8))
                             .multilineTextAlignment(.center)
@@ -4235,7 +4259,7 @@ private struct FoodRarityToggleButton: View {
             .background(Color.black.opacity(0.42), in: Capsule())
         }
         .buttonStyle(.plain)
-        .shadow(color: .black.opacity(0.18), radius: 8, x: 0, y: 4)
+        .shadow(color: .black, radius: 8, x: -2, y: 4)
         .accessibilityLabel("ご飯表示切り替え")
         .accessibilityHint("タップするたびにNとRを切り替えます")
     }

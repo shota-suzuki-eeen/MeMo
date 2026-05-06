@@ -22,6 +22,7 @@ struct MemoOnboardingRootModifier: ViewModifier {
         content
             .onAppear {
                 viewModel.bootIfNeeded(state: state)
+                presentToiletTutorialForCurrentFlagIfNeeded()
                 saveIfPossible()
             }
             .onReceive(NotificationCenter.default.publisher(for: .memoOnboardingRequestScreen)) { notification in
@@ -59,6 +60,10 @@ struct MemoOnboardingRootModifier: ViewModifier {
             }
             .onChange(of: state.happinessLevel) { _, _ in
                 viewModel.syncActualFoodProgressIfNeeded(state: state)
+                saveIfPossible()
+            }
+            .onChange(of: state.toiletFlagAt) { _, _ in
+                presentToiletTutorialForCurrentFlagIfNeeded()
                 saveIfPossible()
             }
             .onReceive(NotificationCenter.default.publisher(for: .memoOnboardingToiletScratchStarted)) { _ in
@@ -103,6 +108,13 @@ struct MemoOnboardingRootModifier: ViewModifier {
                 )
                 .zIndex(20_000)
             }
+    }
+
+    private func presentToiletTutorialForCurrentFlagIfNeeded() {
+        guard state.memoMandatoryOnboardingCompleted else { return }
+        guard state.hasToiletFlag else { return }
+        guard state.memoToiletTutorialCompleted == false else { return }
+        viewModel.presentToiletTutorialIfNeeded(state: state)
     }
 
     private func saveIfPossible() {
