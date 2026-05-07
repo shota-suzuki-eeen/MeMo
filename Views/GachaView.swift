@@ -94,6 +94,70 @@ fileprivate struct GachaProbabilityRow: Identifiable {
     var id: String { rarity.id }
 }
 
+fileprivate enum GachaFirstVisitFreeTenDrawStorage {
+    private static let tutorialPetIDKey = "memo.onboarding.gacha.tutorialPetID"
+    private static let consumedKey = "memo.onboarding.gacha.firstVisitFreeTenDrawConsumed"
+    private static let offeredKey = "memo.onboarding.gacha.firstVisitFreeTenDrawOffered"
+    private static let completedKey = "memo.onboarding.gacha.firstVisitFreeTenDrawCompleted"
+
+    @discardableResult
+    static func markOffered(defaults: UserDefaults = .standard) -> Bool {
+        guard defaults.bool(forKey: offeredKey) == false else { return false }
+        defaults.set(true, forKey: offeredKey)
+        return true
+    }
+
+    @discardableResult
+    static func consume(defaults: UserDefaults = .standard) -> Bool {
+        guard defaults.bool(forKey: consumedKey) == false else { return false }
+        defaults.set(true, forKey: consumedKey)
+        defaults.set(true, forKey: offeredKey)
+        return true
+    }
+
+    @discardableResult
+    static func markCompleted(defaults: UserDefaults = .standard) -> Bool {
+        guard defaults.bool(forKey: completedKey) == false else { return false }
+        defaults.set(true, forKey: completedKey)
+        return true
+    }
+
+    static func tutorialCharacterPetID(state: AppState, defaults: UserDefaults = .standard) -> String {
+        if let stored = defaults.string(forKey: tutorialPetIDKey),
+           PetMaster.all.contains(where: { $0.id == stored }) {
+            return stored
+        }
+
+        let owned = Set(state.ownedPetIDs())
+        let candidates = PetMaster.all.filter {
+            !owned.contains($0.id)
+            && !PetMaster.isHappinessRewardPetID($0.id)
+            && $0.id != state.normalizedCurrentPetID
+        }
+        let fallbackCandidates = PetMaster.all.filter {
+            !PetMaster.isHappinessRewardPetID($0.id)
+            && $0.id != state.normalizedCurrentPetID
+        }
+
+        let selected = candidates.randomElement()?.id
+            ?? fallbackCandidates.randomElement()?.id
+            ?? "pet_001"
+        defaults.set(selected, forKey: tutorialPetIDKey)
+        return selected
+    }
+
+    @discardableResult
+    static func awardTutorialCharacterIfNeeded(state: AppState) -> String {
+        let petID = tutorialCharacterPetID(state: state)
+        var owned = state.ownedPetIDs()
+        if owned.contains(petID) == false {
+            owned.append(petID)
+            state.setOwnedPetIDs(owned)
+        }
+        return petID
+    }
+}
+
 fileprivate enum GachaCatalog {
     static let normalFoodIDs: [String] = [
         "barger", "beer", "cake", "carry", "coffee", "coke", "gyuudon", "icecream", "karaage",
@@ -394,14 +458,16 @@ struct GachaView: View {
         }
         .statusBarHidden()
         .onAppear {
-            bgmManager.switchBackground(to: .gacha)
-            tapPromptAnimating = true
-            state?.ensureInitialPetsIfNeeded()
-            state?.gachaResetIfNeeded(now: Date())
-            if isTutorialMode == false {
-                rewardedAdManager.loadIfNeeded()
-            } else {
-                state?.memoMarkFirstVisitFreeTenDrawOffered()
+            Task { @MainActor in
+                bgmManager.switchBackground(to: .gacha)
+                tapPromptAnimating = true
+                state?.ensureInitialPetsIfNeeded()
+                state?.gachaResetIfNeeded(now: Date())
+                if isTutorialMode == false {
+                    rewardedAdManager.loadIfNeeded()
+                } else {
+                    GachaFirstVisitFreeTenDrawStorage.markOffered()
+                }
             }
         }
         .onDisappear {
@@ -716,10 +782,10 @@ struct GachaView: View {
     }
 
     private func makeTutorialRewards(state: AppState) -> [GachaReward] {
-        _ = state.memoMarkFirstVisitFreeTenDrawOffered()
-        _ = state.memoConsumeFirstVisitFreeTenDraw()
+        _ = GachaFirstVisitFreeTenDrawStorage.markOffered()
+        _ = GachaFirstVisitFreeTenDrawStorage.consume()
 
-        let petID = state.memoAwardTutorialGachaCharacterIfNeeded()
+        let petID = GachaFirstVisitFreeTenDrawStorage.awardTutorialCharacterIfNeeded(state: state)
         let petName = PetMaster.all.first(where: { $0.id == petID })?.name ?? "新しいキャラクター"
         let characterReward = GachaReward(
             rarity: .gold,
@@ -742,7 +808,7 @@ struct GachaView: View {
         }
 
         state.gachaResetPity()
-        _ = state.memoMarkFirstVisitFreeTenDrawCompleted()
+        _ = GachaFirstVisitFreeTenDrawStorage.markCompleted()
         return ([characterReward] + foodRewards).shuffled()
     }
 
