@@ -354,9 +354,10 @@ private struct WorkFocusRewardsView: View {
             }
             .onAppear {
                 guard !didInitialScrollToBottom else { return }
-                didInitialScrollToBottom = true
 
                 DispatchQueue.main.async {
+                    guard !didInitialScrollToBottom else { return }
+                    didInitialScrollToBottom = true
                     proxy.scrollTo(bottomAnchorID, anchor: .bottom)
                 }
             }
@@ -470,7 +471,6 @@ private struct WorkRewardsProgressColumn: View {
         GeometryReader { geo in
             let fullHeight = geo.size.height
             let fillHeight = resolvedFillHeight(fullHeight: fullHeight)
-            let ascendingMilestones = rewards.map(\.milestoneHours).sorted()
 
             ZStack(alignment: .bottom) {
                 Capsule()
@@ -1097,12 +1097,14 @@ private final class WorkTimerRunningViewModel: ObservableObject {
 
         guard timerTask == nil else { return }
 
-        timerTask = Task { @MainActor in
+        timerTask = Task { @MainActor [weak self] in
+            guard let self else { return }
+
             while !Task.isCancelled {
                 try? await Task.sleep(nanoseconds: 1_000_000_000)
                 if Task.isCancelled { break }
-                if isPaused || isCompleted { continue }
-                tick()
+                if self.isPaused || self.isCompleted { continue }
+                self.tick()
             }
         }
     }
@@ -1272,12 +1274,14 @@ private final class WorkSessionAmbientAudioController {
         let stepCount = max(1, Int((safeDuration / 0.05).rounded(.up)))
         let sleepNanoseconds = UInt64((safeDuration / Double(stepCount)) * 1_000_000_000)
 
-        fadeTask = Task { @MainActor in
+        fadeTask = Task { @MainActor [weak self, weak player] in
+            guard let self, let player else { return }
+
             for step in 0...stepCount {
                 guard !Task.isCancelled else { return }
                 let progress = Float(step) / Float(stepCount)
                 let nextVolume = startVolume + ((endVolume - startVolume) * progress)
-                player.volume = max(0, min(targetVolume, nextVolume))
+                player.volume = max(0, min(self.targetVolume, nextVolume))
 
                 if step < stepCount {
                     try? await Task.sleep(nanoseconds: sleepNanoseconds)
@@ -1285,7 +1289,7 @@ private final class WorkSessionAmbientAudioController {
             }
 
             completion?()
-            fadeTask = nil
+            self.fadeTask = nil
         }
     }
 

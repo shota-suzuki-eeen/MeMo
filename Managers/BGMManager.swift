@@ -16,31 +16,31 @@ final class BGMManager: NSObject, ObservableObject, AVAudioPlayerDelegate {
 
     // MARK: - Notifications used by StepViewModel
 
-    static let stepSessionDidEnterWorkoutNotification = Notification.Name(
+    nonisolated static let stepSessionDidEnterWorkoutNotification = Notification.Name(
         "BGMManager.stepSessionDidEnterWorkoutNotification"
     )
 
-    static let stepSessionDidExitWorkoutNotification = Notification.Name(
+    nonisolated static let stepSessionDidExitWorkoutNotification = Notification.Name(
         "BGMManager.stepSessionDidExitWorkoutNotification"
     )
 
     // MARK: - Notifications used by Home sound hooks
 
-    static let happinessHeartDidAppearNotification = Notification.Name(
+    nonisolated static let happinessHeartDidAppearNotification = Notification.Name(
         "BGMManager.happinessHeartDidAppearNotification"
     )
 
-    static let manualToiletCleanupDidFinishNotification = Notification.Name(
+    nonisolated static let manualToiletCleanupDidFinishNotification = Notification.Name(
         "BGMManager.manualToiletCleanupDidFinishNotification"
     )
 
     // MARK: - Notifications used by full-screen ads
 
-    static let adPlaybackDidBeginNotification = Notification.Name(
+    nonisolated static let adPlaybackDidBeginNotification = Notification.Name(
         "BGMManager.adPlaybackDidBeginNotification"
     )
 
-    static let adPlaybackDidEndNotification = Notification.Name(
+    nonisolated static let adPlaybackDidEndNotification = Notification.Name(
         "BGMManager.adPlaybackDidEndNotification"
     )
 

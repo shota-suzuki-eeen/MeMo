@@ -393,8 +393,10 @@ final class StepViewModel: ObservableObject {
     private func startTimer() {
         stopTimer()
         timer = Timer.scheduledTimer(withTimeInterval: 1, repeats: true) { [weak self] _ in
-            Task { @MainActor in
-                self?.refreshElapsedTime()
+            guard let viewModel = self else { return }
+
+            Task { @MainActor [viewModel] in
+                viewModel.refreshElapsedTime()
             }
         }
         if let timer {

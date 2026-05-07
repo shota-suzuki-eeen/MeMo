@@ -53,7 +53,7 @@ final class LocationTrackingManager: NSObject, ObservableObject {
     }
 
     func refreshAuthorizationState() {
-        authorizationState = Self.convert(CLLocationManager.authorizationStatus())
+        authorizationState = Self.convert(locationManager.authorizationStatus)
         updateBackgroundLocationCapability()
     }
 
@@ -175,29 +175,36 @@ final class LocationTrackingManager: NSObject, ObservableObject {
 
 extension LocationTrackingManager: CLLocationManagerDelegate {
     nonisolated func locationManagerDidChangeAuthorization(_ manager: CLLocationManager) {
-        Task { @MainActor in
-            self.authorizationState = Self.convert(manager.authorizationStatus)
-            self.updateBackgroundLocationCapability()
+        let trackingManager = self
+        let status = manager.authorizationStatus
 
-            if !self.authorizationState.isAuthorized {
-                self.stopTracking(resetPreviousLocation: true)
+        Task { @MainActor [trackingManager, status] in
+            trackingManager.authorizationState = Self.convert(status)
+            trackingManager.updateBackgroundLocationCapability()
+
+            if !trackingManager.authorizationState.isAuthorized {
+                trackingManager.stopTracking(resetPreviousLocation: true)
             }
         }
     }
 
     nonisolated func locationManager(_ manager: CLLocationManager, didUpdateLocations locations: [CLLocation]) {
-        Task { @MainActor in
-            guard self.isTracking else { return }
+        let trackingManager = self
 
-            for location in locations where self.shouldAccept(location) {
-                self.appendAcceptedLocation(location)
+        Task { @MainActor [trackingManager, locations] in
+            guard trackingManager.isTracking else { return }
+
+            for location in locations where trackingManager.shouldAccept(location) {
+                trackingManager.appendAcceptedLocation(location)
             }
         }
     }
 
     nonisolated func locationManager(_ manager: CLLocationManager, didFailWithError error: Error) {
-        Task { @MainActor in
-            self.latestHorizontalAccuracy = nil
+        let trackingManager = self
+
+        Task { @MainActor [trackingManager] in
+            trackingManager.latestHorizontalAccuracy = nil
         }
     }
 }

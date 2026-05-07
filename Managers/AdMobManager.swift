@@ -193,10 +193,15 @@ final class AdMobManager: ObservableObject {
 
         isShowingGetInterstitial = true
         interstitialGet.show { [weak self] in
-            Task { @MainActor in
-                self?.isShowingGetInterstitial = false
+            guard let manager = self else {
                 action()
-                self?.evaluateInterstitialGetPreload()
+                return
+            }
+
+            Task { @MainActor [manager] in
+                manager.isShowingGetInterstitial = false
+                action()
+                manager.evaluateInterstitialGetPreload()
             }
         }
     }
@@ -209,8 +214,10 @@ final class AdMobManager: ObservableObject {
             object: nil,
             queue: .main
         ) { [weak self] _ in
-            Task { @MainActor in
-                self?.handleRewardDefaultChanges()
+            guard let manager = self else { return }
+
+            Task { @MainActor [manager] in
+                manager.handleRewardDefaultChanges()
             }
         }
     }
@@ -472,20 +479,21 @@ final class RewardedAdManager: NSObject, ObservableObject {
         rewardedAd = nil
 
         RewardedAd.load(with: adUnitID, request: Request()) { [weak self] ad, error in
-            Task { @MainActor in
-                guard let self else { return }
-                self.isLoading = false
+            guard let manager = self else { return }
+
+            Task { @MainActor [manager, ad, error] in
+                manager.isLoading = false
 
                 if let error {
-                    self.lastErrorMessage = error.localizedDescription
-                    self.isReady = false
-                    self.rewardedAd = nil
+                    manager.lastErrorMessage = error.localizedDescription
+                    manager.isReady = false
+                    manager.rewardedAd = nil
                     return
                 }
 
-                self.rewardedAd = ad
-                self.rewardedAd?.fullScreenContentDelegate = self
-                self.isReady = (ad != nil)
+                manager.rewardedAd = ad
+                manager.rewardedAd?.fullScreenContentDelegate = manager
+                manager.isReady = (ad != nil)
             }
         }
         #else
@@ -536,8 +544,10 @@ final class RewardedAdManager: NSObject, ObservableObject {
         AdPlaybackAudioMuteController.begin()
 
         ad.present(from: root) { [weak self] in
-            Task { @MainActor in
-                self?.didEarnRewardDuringPresentation = true
+            guard let manager = self else { return }
+
+            Task { @MainActor [manager] in
+                manager.didEarnRewardDuringPresentation = true
             }
         }
 
@@ -623,20 +633,21 @@ final class InterstitialAdManager: NSObject, ObservableObject {
         interstitialAd = nil
 
         InterstitialAd.load(with: adUnitID, request: Request()) { [weak self] ad, error in
-            Task { @MainActor in
-                guard let self else { return }
-                self.isLoading = false
+            guard let manager = self else { return }
+
+            Task { @MainActor [manager, ad, error] in
+                manager.isLoading = false
 
                 if let error {
-                    self.lastErrorMessage = error.localizedDescription
-                    self.isReady = false
-                    self.interstitialAd = nil
+                    manager.lastErrorMessage = error.localizedDescription
+                    manager.isReady = false
+                    manager.interstitialAd = nil
                     return
                 }
 
-                self.interstitialAd = ad
-                self.interstitialAd?.fullScreenContentDelegate = self
-                self.isReady = (ad != nil)
+                manager.interstitialAd = ad
+                manager.interstitialAd?.fullScreenContentDelegate = manager
+                manager.isReady = (ad != nil)
             }
         }
         #else

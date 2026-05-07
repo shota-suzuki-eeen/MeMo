@@ -8,6 +8,10 @@
 
 import Foundation
 
+private enum HappinessNotificationName {
+    static let heartDidAppear = Notification.Name("BGMManager.happinessHeartDidAppearNotification")
+}
+
 extension AppState {
     static let happinessMaxPointsPerLevel: Int = 100
     static let happinessMaxLevel: Int = 20
@@ -278,7 +282,7 @@ extension AppState {
         let requestedPoints = min(availablePoints, totalTouchCount / AppState.happinessTouchesPerPoint)
 
         for _ in 0..<safeCount {
-            NotificationCenter.default.post(name: BGMManager.happinessHeartDidAppearNotification, object: nil)
+            NotificationCenter.default.post(name: HappinessNotificationName.heartDidAppear, object: nil)
         }
 
         var actualGainedPoints = 0

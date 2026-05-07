@@ -44,7 +44,12 @@ struct RootView: View {
                         HomeView(state: sharedState, hk: hk)
 
                         HomeNavigationDepthReader { depth in
-                            isHomeNavigationDestinationVisible = depth > 1
+                            let nextValue = depth > 1
+
+                            DispatchQueue.main.async {
+                                guard isHomeNavigationDestinationVisible != nextValue else { return }
+                                isHomeNavigationDestinationVisible = nextValue
+                            }
                         }
                         .frame(width: 0, height: 0)
                         .allowsHitTesting(false)
