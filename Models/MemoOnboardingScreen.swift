@@ -165,9 +165,9 @@ enum MemoOnboardingScreen: String, CaseIterable, Identifiable, Codable, Hashable
         case .cameraCapture:
             return "お世話中のミーモと一緒に写真を撮って思い出を記録しよう！\n撮影した写真は「思い出」に保存されるよ！\n位置情報の共有をONにすると撮影場所もわかるようになるよ！"
         case .toiletTutorialIntro:
-            return "おっと！\nトイレのマークが出たら、おそうじが必要だよ！"
+            return "おっと！ミーモが大ピンチ！\nトイレのマークが出たら、おそうじが必要だよ！"
         case .toiletTutorialScratch:
-            return "汚れは指こすって、お掃除してあげよう。\nキレイにしてあげると、「幸せ度」が増加するよ。"
+            return "汚れは指でこすって、お掃除してあげよう。\nキレイにしてあげると、「幸せ度」が増加するよ。"
         case .home:
             return "このアプリでは、歩数がコインのような役割になるよ。\n歩いて、ガチャをして、ごはんやキャラクターを集めながら、楽しく健康管理していこう！"
         case .step:
@@ -212,7 +212,7 @@ enum MemoOnboardingScreen: String, CaseIterable, Identifiable, Codable, Hashable
         case .foodTutorialDone:
             return "ばっちり"
         case .toiletTutorialIntro:
-            return "おそうじする"
+            return "タップして次へ"
         case .toiletTutorialScratch:
             return "やってみる"
         case .foodButton, .foodButtonForRare, .foodRareTab, .foodGiveNormal, .foodGiveRare, .gachaButton, .zukanButton:

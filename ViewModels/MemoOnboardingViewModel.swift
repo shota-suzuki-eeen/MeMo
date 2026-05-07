@@ -192,8 +192,11 @@ final class MemoOnboardingViewModel {
 
         case .toiletTutorialIntro:
             state.memoPrepareToiletTutorialFlagIfNeeded()
-            MemoOnboardingNotifier.requestToiletTutorial()
-            dismiss(markCurrentAsSeen: false, state: state)
+            _ = state.memoMarkToiletTutorialScratchShown()
+            pendingScreens.removeAll()
+            activeScreen = .toiletTutorialScratch
+            isPresented = true
+            updateFoodInteractionPhase(for: .toiletTutorialScratch)
 
         case .toiletTutorialScratch:
             dismiss(markCurrentAsSeen: false, state: state)
