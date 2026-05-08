@@ -129,6 +129,37 @@ extension AppState {
         return true
     }
 
+    @discardableResult
+    func memoSkipAllOnboardingForIPadIfNeeded() -> Bool {
+        guard MemoDevice.isIPad else { return false }
+
+        var didChange = false
+
+        @discardableResult
+        func setTrueIfNeeded(_ key: String) -> Bool {
+            guard memoOnboardingDefaults.bool(forKey: key) == false else { return false }
+            memoOnboardingDefaults.set(true, forKey: key)
+            return true
+        }
+
+        if memoMandatoryOnboardingCurrentStep != nil {
+            memoMandatoryOnboardingCurrentStep = nil
+            didChange = true
+        }
+
+        didChange = setTrueIfNeeded(MemoOnboardingStorageKeys.mandatoryStarted) || didChange
+        didChange = setTrueIfNeeded(MemoOnboardingStorageKeys.mandatoryCompleted) || didChange
+        didChange = setTrueIfNeeded(MemoOnboardingStorageKeys.foodTutorialCompleted) || didChange
+        didChange = setTrueIfNeeded(MemoOnboardingStorageKeys.toiletTutorialCompleted) || didChange
+
+        for screen in MemoOnboardingScreen.allCases where screen.shouldRememberAsScreenVisit {
+            let key = MemoOnboardingStorageKeys.screenPrefix + screen.rawValue
+            didChange = setTrueIfNeeded(key) || didChange
+        }
+
+        return didChange
+    }
+
     // MARK: - Screen visit flags
 
     func memoOnboardingHasSeen(_ screen: MemoOnboardingScreen) -> Bool {

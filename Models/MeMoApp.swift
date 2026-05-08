@@ -61,6 +61,8 @@ private struct MemoAppRootContainer: View {
     var body: some View {
         RootView()
             .environmentObject(bgmManager)
+            // iPadではiPhone相当のキャンバスに収め、既存のiPhone UIを崩さず中央表示する
+            .memoIPadPhoneCanvas()
             // SwiftUI側の色環境を切り替える
             .preferredColorScheme(appearanceMode.colorScheme)
             // UIKit / Window側にも反映して、設定変更直後に確実に切り替える
@@ -181,5 +183,76 @@ struct MemoInterfaceStyleApplier: UIViewControllerRepresentable {
                 }
             }
         }
+    }
+}
+
+// MARK: - Device Layout Support
+
+enum MemoDevice {
+    static var isIPad: Bool {
+        UIDevice.current.userInterfaceIdiom == .pad
+    }
+}
+
+private struct MemoIPadPhoneCanvasModifier: ViewModifier {
+    private enum Layout {
+        // iPhone 16 / 15 Pro 系に近い論理サイズ。既存iPhone UIの固定座標を崩さない基準にする。
+        static let phoneSize = CGSize(width: 393, height: 852)
+        // iPad内で端に触れないように、収まる範囲で少しだけ縮小する。
+        static let preferredScale: CGFloat = 0.96
+        static let minimumOuterPadding: CGFloat = 24
+        static let minimumScale: CGFloat = 0.65
+        static let cornerRadius: CGFloat = 42
+    }
+
+    @ViewBuilder
+    func body(content: Content) -> some View {
+        if MemoDevice.isIPad {
+            GeometryReader { proxy in
+                let scale = canvasScale(for: proxy.size)
+
+                ZStack {
+                    Color(uiColor: .secondarySystemBackground)
+                        .ignoresSafeArea()
+
+                    content
+                        .frame(width: Layout.phoneSize.width, height: Layout.phoneSize.height)
+                        .background(Color(uiColor: .systemBackground))
+                        .clipShape(RoundedRectangle(cornerRadius: Layout.cornerRadius, style: .continuous))
+                        .overlay(
+                            RoundedRectangle(cornerRadius: Layout.cornerRadius, style: .continuous)
+                                .stroke(Color.primary.opacity(0.08), lineWidth: 1)
+                        )
+                        .shadow(color: .black.opacity(0.18), radius: 28, x: 0, y: 14)
+                        .scaleEffect(scale)
+                        .frame(
+                            width: Layout.phoneSize.width * scale,
+                            height: Layout.phoneSize.height * scale
+                        )
+                        .accessibilityLabel("MeMo iPhone layout on iPad")
+                }
+                .frame(width: proxy.size.width, height: proxy.size.height)
+                .ignoresSafeArea(.keyboard, edges: .bottom)
+            }
+        } else {
+            content
+        }
+    }
+
+    private func canvasScale(for containerSize: CGSize) -> CGFloat {
+        let usableWidth = max(1, containerSize.width - (Layout.minimumOuterPadding * 2))
+        let usableHeight = max(1, containerSize.height - (Layout.minimumOuterPadding * 2))
+        let fitScale = min(
+            usableWidth / Layout.phoneSize.width,
+            usableHeight / Layout.phoneSize.height
+        )
+
+        return max(Layout.minimumScale, min(Layout.preferredScale, fitScale))
+    }
+}
+
+extension View {
+    func memoIPadPhoneCanvas() -> some View {
+        modifier(MemoIPadPhoneCanvasModifier())
     }
 }

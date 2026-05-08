@@ -18,96 +18,105 @@ struct MemoOnboardingRootModifier: ViewModifier {
     @State private var isShowingTutorialGacha: Bool = false
     @State private var isShowingTutorialZukan: Bool = false
 
+    @ViewBuilder
     func body(content: Content) -> some View {
-        content
-            .onAppear {
-                viewModel.bootIfNeeded(state: state)
-                presentToiletTutorialForCurrentFlagIfNeeded()
-                saveIfPossible()
-            }
-            .onReceive(NotificationCenter.default.publisher(for: .memoOnboardingRequestScreen)) { notification in
-                guard let screen = notification.object as? MemoOnboardingScreen else { return }
-                let force = notification.userInfo?[MemoOnboardingNotificationUserInfoKey.force] as? Bool ?? false
-                viewModel.presentIfNeeded(screen, state: state, force: force)
-            }
-            .onReceive(NotificationCenter.default.publisher(for: .memoOnboardingRequestFoodTutorial)) { _ in
-                viewModel.presentFoodTutorialIfNeeded(state: state)
-            }
-            .onReceive(NotificationCenter.default.publisher(for: .memoOnboardingRequestToiletTutorial)) { _ in
-                viewModel.presentToiletTutorialIfNeeded(state: state)
-            }
-            .onReceive(NotificationCenter.default.publisher(for: .memoOnboardingTutorialFoodSelectionStarted)) { notification in
-                let foodID = notification.userInfo?[MemoOnboardingNotificationUserInfoKey.foodID] as? String
-                viewModel.handleTutorialFoodSelectionStarted(foodID: foodID, state: state)
-                saveIfPossible()
-            }
-            .onReceive(NotificationCenter.default.publisher(for: .memoOnboardingFoodDidFeed)) { notification in
-                guard let foodID = notification.userInfo?[MemoOnboardingNotificationUserInfoKey.foodID] as? String else { return }
-                viewModel.presentFoodResultIfNeeded(foodID, state: state)
-                saveIfPossible()
-            }
-            .onChange(of: state.ownedFoodCountsData) { _, _ in
-                viewModel.syncActualFoodProgressIfNeeded(state: state)
-                saveIfPossible()
-            }
-            .onChange(of: state.satisfactionLevel) { _, _ in
-                viewModel.syncActualFoodProgressIfNeeded(state: state)
-                saveIfPossible()
-            }
-            .onChange(of: state.happinessPoint) { _, _ in
-                viewModel.syncActualFoodProgressIfNeeded(state: state)
-                saveIfPossible()
-            }
-            .onChange(of: state.happinessLevel) { _, _ in
-                viewModel.syncActualFoodProgressIfNeeded(state: state)
-                saveIfPossible()
-            }
-            .onChange(of: state.toiletFlagAt) { _, _ in
-                presentToiletTutorialForCurrentFlagIfNeeded()
-                saveIfPossible()
-            }
-            .onReceive(NotificationCenter.default.publisher(for: .memoOnboardingToiletScratchStarted)) { _ in
-                viewModel.presentToiletScratchIfNeeded(state: state)
-                saveIfPossible()
-            }
-            .onReceive(NotificationCenter.default.publisher(for: .memoOnboardingToiletDidBecomeClean)) { _ in
-                viewModel.completeToiletTutorialIfNeeded(state: state)
-                saveIfPossible()
-            }
-            .fullScreenCover(isPresented: $isShowingTutorialGacha) {
-                MemoTutorialGachaView(state: state) {
-                    isShowingTutorialGacha = false
-                    viewModel.resumeAfterTutorialGacha(state: state)
+        if MemoDevice.isIPad {
+            content
+                .onAppear {
+                    _ = state.memoSkipAllOnboardingForIPadIfNeeded()
                     saveIfPossible()
-                    MemoOnboardingNotifier.notifyTutorialGachaFinished()
                 }
-                .interactiveDismissDisabled(true)
-            }
-            .fullScreenCover(isPresented: $isShowingTutorialZukan) {
-                MemoTutorialZukanSwitchView(state: state) {
-                    isShowingTutorialZukan = false
-                    viewModel.resumeAfterTutorialZukan(state: state)
+        } else {
+            content
+                .onAppear {
+                    viewModel.bootIfNeeded(state: state)
+                    presentToiletTutorialForCurrentFlagIfNeeded()
                     saveIfPossible()
-                    MemoOnboardingNotifier.notifyTutorialZukanFinished()
                 }
-                .interactiveDismissDisabled(true)
-            }
-            .overlay {
-                MemoTeacherOnboardingOverlay(
-                    state: state,
-                    viewModel: viewModel,
-                    onNeedsSave: {
+                .onReceive(NotificationCenter.default.publisher(for: .memoOnboardingRequestScreen)) { notification in
+                    guard let screen = notification.object as? MemoOnboardingScreen else { return }
+                    let force = notification.userInfo?[MemoOnboardingNotificationUserInfoKey.force] as? Bool ?? false
+                    viewModel.presentIfNeeded(screen, state: state, force: force)
+                }
+                .onReceive(NotificationCenter.default.publisher(for: .memoOnboardingRequestFoodTutorial)) { _ in
+                    viewModel.presentFoodTutorialIfNeeded(state: state)
+                }
+                .onReceive(NotificationCenter.default.publisher(for: .memoOnboardingRequestToiletTutorial)) { _ in
+                    viewModel.presentToiletTutorialIfNeeded(state: state)
+                }
+                .onReceive(NotificationCenter.default.publisher(for: .memoOnboardingTutorialFoodSelectionStarted)) { notification in
+                    let foodID = notification.userInfo?[MemoOnboardingNotificationUserInfoKey.foodID] as? String
+                    viewModel.handleTutorialFoodSelectionStarted(foodID: foodID, state: state)
+                    saveIfPossible()
+                }
+                .onReceive(NotificationCenter.default.publisher(for: .memoOnboardingFoodDidFeed)) { notification in
+                    guard let foodID = notification.userInfo?[MemoOnboardingNotificationUserInfoKey.foodID] as? String else { return }
+                    viewModel.presentFoodResultIfNeeded(foodID, state: state)
+                    saveIfPossible()
+                }
+                .onChange(of: state.ownedFoodCountsData) { _, _ in
+                    viewModel.syncActualFoodProgressIfNeeded(state: state)
+                    saveIfPossible()
+                }
+                .onChange(of: state.satisfactionLevel) { _, _ in
+                    viewModel.syncActualFoodProgressIfNeeded(state: state)
+                    saveIfPossible()
+                }
+                .onChange(of: state.happinessPoint) { _, _ in
+                    viewModel.syncActualFoodProgressIfNeeded(state: state)
+                    saveIfPossible()
+                }
+                .onChange(of: state.happinessLevel) { _, _ in
+                    viewModel.syncActualFoodProgressIfNeeded(state: state)
+                    saveIfPossible()
+                }
+                .onChange(of: state.toiletFlagAt) { _, _ in
+                    presentToiletTutorialForCurrentFlagIfNeeded()
+                    saveIfPossible()
+                }
+                .onReceive(NotificationCenter.default.publisher(for: .memoOnboardingToiletScratchStarted)) { _ in
+                    viewModel.presentToiletScratchIfNeeded(state: state)
+                    saveIfPossible()
+                }
+                .onReceive(NotificationCenter.default.publisher(for: .memoOnboardingToiletDidBecomeClean)) { _ in
+                    viewModel.completeToiletTutorialIfNeeded(state: state)
+                    saveIfPossible()
+                }
+                .fullScreenCover(isPresented: $isShowingTutorialGacha) {
+                    MemoTutorialGachaView(state: state) {
+                        isShowingTutorialGacha = false
+                        viewModel.resumeAfterTutorialGacha(state: state)
                         saveIfPossible()
-                    },
-                    onOpenTutorialGacha: {
-                        isShowingTutorialGacha = true
-                    },
-                    onOpenTutorialZukan: {
-                        isShowingTutorialZukan = true
+                        MemoOnboardingNotifier.notifyTutorialGachaFinished()
                     }
-                )
-                .zIndex(20_000)
-            }
+                    .interactiveDismissDisabled(true)
+                }
+                .fullScreenCover(isPresented: $isShowingTutorialZukan) {
+                    MemoTutorialZukanSwitchView(state: state) {
+                        isShowingTutorialZukan = false
+                        viewModel.resumeAfterTutorialZukan(state: state)
+                        saveIfPossible()
+                        MemoOnboardingNotifier.notifyTutorialZukanFinished()
+                    }
+                    .interactiveDismissDisabled(true)
+                }
+                .overlay {
+                    MemoTeacherOnboardingOverlay(
+                        state: state,
+                        viewModel: viewModel,
+                        onNeedsSave: {
+                            saveIfPossible()
+                        },
+                        onOpenTutorialGacha: {
+                            isShowingTutorialGacha = true
+                        },
+                        onOpenTutorialZukan: {
+                            isShowingTutorialZukan = true
+                        }
+                    )
+                    .zIndex(20_000)
+                }
+        }
     }
 
     private func presentToiletTutorialForCurrentFlagIfNeeded() {
