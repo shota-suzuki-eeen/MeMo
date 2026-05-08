@@ -25,10 +25,10 @@ struct AdBannerView: View {
     @AppStorage("isDeveloperMode") private var isDeveloperMode: Bool = false
 
     var placement: Placement = .home
-    var height: CGFloat = 70
+    var height: CGFloat = 50
     var maxBannerWidth: CGFloat? = 320
     var contentHeight: CGFloat = 50
-    var topOffset: CGFloat = 10
+    var topOffset: CGFloat = 0
 
     var body: some View {
         Group {

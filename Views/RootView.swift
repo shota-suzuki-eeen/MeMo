@@ -24,6 +24,11 @@ struct RootView: View {
     @State private var isHomeBannerHiddenByChildScreen: Bool = false
     @State private var isHomeNavigationDestinationVisible: Bool = false
 
+    private enum HomeBannerLayout {
+        static let height: CGFloat = 50
+        static let maxWidth: CGFloat = 320
+    }
+
     var body: some View {
         Group {
             switch hk.authState {
@@ -57,10 +62,10 @@ struct RootView: View {
                         if !isHomeBannerHiddenByChildScreen && !isHomeNavigationDestinationVisible {
                             AdBannerView(
                                 placement: .home,
-                                height: 76,
-                                maxBannerWidth: 320,
-                                contentHeight: 50,
-                                topOffset: 10
+                                height: HomeBannerLayout.height,
+                                maxBannerWidth: HomeBannerLayout.maxWidth,
+                                contentHeight: HomeBannerLayout.height,
+                                topOffset: 0
                             )
                             .allowsHitTesting(false)
                             .zIndex(10_000)
