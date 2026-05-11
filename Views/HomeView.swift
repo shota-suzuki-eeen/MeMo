@@ -718,20 +718,40 @@ struct HomeView: View {
                     .onAppear {
                         workOnboardingViewModel.presentIfNeeded(.workFocusRewardIntro, state: state)
                     }
+                    .memoIPadPresentedPhoneCanvas()
             }
             .fullScreenCover(isPresented: $showGachaView) {
                 GachaView()
                     .environmentObject(bgmManager)
+                    .memoIPadPresentedPhoneCanvas()
             }
             .fullScreenCover(isPresented: $showStepEnjoy) {
-                NavigationStack {
-                    StepView(state: state, hk: hk, onSave: { save() })
-                }
+                stepEnjoyPresentedView
+            }
+    }
+
+    @ViewBuilder
+    private var stepEnjoyPresentedView: some View {
+        if MemoDevice.isIPad {
+            // iPadのみ、UIKit側で切り抜くのではなく SwiftUI ルート側で phone canvas を作る。
+            // これにより StepView 内部の ScrollView / topBar / screenSwitcher が最初から393幅でレイアウトされ、
+            // アクティビティ画面の左右見切れを防ぐ。
+            StepView(state: state, hk: hk, onSave: { save() })
                 .memoOnboardingRoot(state: state, viewModel: stepOnboardingViewModel)
                 .onAppear {
                     stepOnboardingViewModel.presentIfNeeded(.workRouteRecordIntro, state: state)
                 }
+                .memoIPadPresentedPhoneCanvas()
+        } else {
+            // iPhoneは既存仕様を維持。
+            NavigationStack {
+                StepView(state: state, hk: hk, onSave: { save() })
             }
+            .memoOnboardingRoot(state: state, viewModel: stepOnboardingViewModel)
+            .onAppear {
+                stepOnboardingViewModel.presentIfNeeded(.workRouteRecordIntro, state: state)
+            }
+        }
     }
 
     private var homeRootView: some View {

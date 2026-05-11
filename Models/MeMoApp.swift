@@ -22,6 +22,11 @@ struct MeMoApp: App {
     init() {
         // ✅ AdMob 初期化（アプリ起動時に1回だけ）
         AdMobManager.shared.start()
+
+        // iPad の SwiftUI fullScreenCover は RootView の phone canvas 外に出るため、
+        // presented hosting controller 自体を HomeView と同じ固定サイズへ寄せる。
+        // installIfNeeded() は一度だけ適用される。
+        MemoIPadPresentedPhoneCanvas.installIfNeeded()
     }
 
     var body: some Scene {
@@ -196,63 +201,79 @@ enum MemoDevice {
 
 private struct MemoIPadPhoneCanvasModifier: ViewModifier {
     private enum Layout {
-        // iPhone 16 / 15 Pro 系に近い論理サイズ。既存iPhone UIの固定座標を崩さない基準にする。
+        // HomeView の iPad 基準サイズ。既存 iPhone UI の固定座標を崩さない。
         static let phoneSize = CGSize(width: 393, height: 852)
-        // iPad内で端に触れないように、収まる範囲で少しだけ縮小する。
-        static let preferredScale: CGFloat = 0.96
-        static let minimumOuterPadding: CGFloat = 24
-        static let minimumScale: CGFloat = 0.65
         static let cornerRadius: CGFloat = 42
     }
 
     @ViewBuilder
     func body(content: Content) -> some View {
         if MemoDevice.isIPad {
-            GeometryReader { proxy in
-                let scale = canvasScale(for: proxy.size)
+            ZStack {
+                Color.clear
+                    .ignoresSafeArea()
 
-                ZStack {
-                    Color(uiColor: .secondarySystemBackground)
-                        .ignoresSafeArea()
-
-                    content
-                        .frame(width: Layout.phoneSize.width, height: Layout.phoneSize.height)
-                        .background(Color(uiColor: .systemBackground))
-                        .clipShape(RoundedRectangle(cornerRadius: Layout.cornerRadius, style: .continuous))
-                        .overlay(
-                            RoundedRectangle(cornerRadius: Layout.cornerRadius, style: .continuous)
-                                .stroke(Color.primary.opacity(0.08), lineWidth: 1)
-                        )
-                        .shadow(color: .black.opacity(0.18), radius: 28, x: 0, y: 14)
-                        .scaleEffect(scale)
-                        .frame(
-                            width: Layout.phoneSize.width * scale,
-                            height: Layout.phoneSize.height * scale
-                        )
-                        .accessibilityLabel("MeMo iPhone layout on iPad")
-                }
-                .frame(width: proxy.size.width, height: proxy.size.height)
-                .ignoresSafeArea(.keyboard, edges: .bottom)
+                content
+                    .frame(width: Layout.phoneSize.width, height: Layout.phoneSize.height)
+                    .background(Color(uiColor: .systemBackground))
+                    .clipShape(RoundedRectangle(cornerRadius: Layout.cornerRadius, style: .continuous))
+                    .overlay(
+                        RoundedRectangle(cornerRadius: Layout.cornerRadius, style: .continuous)
+                            .stroke(Color.primary.opacity(0.08), lineWidth: 1)
+                    )
+                    .shadow(color: .black.opacity(0.18), radius: 28, x: 0, y: 14)
+                    .accessibilityLabel("MeMo iPhone layout on iPad")
             }
+            .frame(maxWidth: .infinity, maxHeight: .infinity)
+            .background(
+                MemoTransparentWindowBackgroundApplier()
+                    .frame(width: 0, height: 0)
+                    .allowsHitTesting(false)
+            )
+            .ignoresSafeArea(.keyboard, edges: .bottom)
         } else {
             content
         }
-    }
-
-    private func canvasScale(for containerSize: CGSize) -> CGFloat {
-        let usableWidth = max(1, containerSize.width - (Layout.minimumOuterPadding * 2))
-        let usableHeight = max(1, containerSize.height - (Layout.minimumOuterPadding * 2))
-        let fitScale = min(
-            usableWidth / Layout.phoneSize.width,
-            usableHeight / Layout.phoneSize.height
-        )
-
-        return max(Layout.minimumScale, min(Layout.preferredScale, fitScale))
     }
 }
 
 extension View {
     func memoIPadPhoneCanvas() -> some View {
         modifier(MemoIPadPhoneCanvasModifier())
+    }
+}
+
+// MARK: - Transparent Window Background
+
+private struct MemoTransparentWindowBackgroundApplier: UIViewRepresentable {
+    func makeUIView(context: Context) -> UIView {
+        let view = UIView(frame: .zero)
+        view.backgroundColor = .clear
+        DispatchQueue.main.async {
+            makeWindowTransparent(from: view)
+        }
+        return view
+    }
+
+    func updateUIView(_ uiView: UIView, context: Context) {
+        DispatchQueue.main.async {
+            makeWindowTransparent(from: uiView)
+        }
+    }
+
+    private func makeWindowTransparent(from view: UIView) {
+        guard MemoDevice.isIPad else { return }
+
+        var current: UIView? = view
+        var depth = 0
+
+        while let targetView = current, depth < 8 {
+            targetView.backgroundColor = .clear
+            current = targetView.superview
+            depth += 1
+        }
+
+        view.window?.backgroundColor = .clear
+        view.window?.rootViewController?.view.backgroundColor = .clear
     }
 }

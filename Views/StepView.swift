@@ -48,6 +48,13 @@ struct StepView: View {
         static let bottomCardCornerRadius: CGFloat = 30
         static let closeButtonSize: CGFloat = 40
 
+        // iPhone は既存値を維持し、iPad の fixed phone canvas 表示時だけ
+        // 角丸クリップ・ステータスバー付近から内側へ逃がす。
+        static let closeButtonHorizontalPadding: CGFloat = 20
+        static let closeButtonTopPadding: CGFloat = 8
+        static let closeButtonHorizontalPaddingIPad: CGFloat = 24
+        static let closeButtonTopPaddingIPad: CGFloat = 52
+
         static let switcherBottomPadding: CGFloat = 42
         static let switcherSpacing: CGFloat = 34
         static let switcherHorizontalPadding: CGFloat = 26
@@ -55,9 +62,61 @@ struct StepView: View {
 
         static let activityBottomPadding: CGFloat = 180
         static let countdownImageSize: CGFloat = 240
+
+        // iPad の fullScreenCover 表示では、外側が iPad サイズでも
+        // StepView 自体は HomeView と同じ phone canvas サイズでレイアウトする。
+        static let iPadPresentedCanvasSize = CGSize(width: 393, height: 852)
+    }
+
+    private var closeButtonHorizontalPadding: CGFloat {
+        MemoDevice.isIPad ? Layout.closeButtonHorizontalPaddingIPad : Layout.closeButtonHorizontalPadding
+    }
+
+    private var closeButtonTopPadding: CGFloat {
+        MemoDevice.isIPad ? Layout.closeButtonTopPaddingIPad : Layout.closeButtonTopPadding
+    }
+
+    private func resolvedCanvasSize(containerSize: CGSize) -> CGSize {
+        guard MemoDevice.isIPad else { return containerSize }
+
+        let width = min(Layout.iPadPresentedCanvasSize.width, max(containerSize.width, 1))
+        let height = min(Layout.iPadPresentedCanvasSize.height, max(containerSize.height, 1))
+
+        return CGSize(width: width, height: height)
     }
 
     var body: some View {
+        Group {
+            if MemoDevice.isIPad {
+                iPadPresentedStepContent
+            } else {
+                iPhoneOriginalStepContent
+            }
+        }
+        .navigationBarHidden(true)
+        .task {
+            viewModel.configureIfNeeded()
+            _ = hk.todaySteps
+        }
+        .onAppear {
+            bgmManager.switchBackground(to: .main)
+        }
+        .onChange(of: scenePhase) { _, newValue in
+            viewModel.handleScenePhase(newValue)
+        }
+        .onChange(of: viewModel.locationAuthorizationState) { _, newValue in
+            handleAuthorizationChanged(newValue)
+        }
+        .onChange(of: viewModel.sessionState) { _, newValue in
+            handleSessionStateChanged(newValue)
+        }
+        .onDisappear {
+            cancelCountdownFlow()
+            bgmManager.restoreDefaultBackground()
+        }
+    }
+
+    private var iPhoneOriginalStepContent: some View {
         ZStack {
             surfaceBackground
                 .ignoresSafeArea()
@@ -86,27 +145,53 @@ struct StepView: View {
             topBar
             countdownOverlay
         }
-        .navigationBarHidden(true)
-        .task {
-            viewModel.configureIfNeeded()
-            _ = hk.todaySteps
+    }
+
+    private var iPadPresentedStepContent: some View {
+        GeometryReader { proxy in
+            let canvasSize = resolvedCanvasSize(containerSize: proxy.size)
+
+            stepContent
+                .frame(width: canvasSize.width, height: canvasSize.height)
+                .clipped()
+                .frame(
+                    width: max(proxy.size.width, 1),
+                    height: max(proxy.size.height, 1),
+                    alignment: .center
+                )
         }
-        .onAppear {
-            bgmManager.switchBackground(to: .main)
+    }
+
+    private var stepContent: some View {
+        ZStack {
+            surfaceBackground
+
+            if shouldShowFocusedMapBackground {
+                StepFocusedMapBackground(
+                    points: backdropRoutePoints,
+                    followsUserLocation: shouldFollowUserLocation,
+                    isCondensed: isPrimarySwitcherScreen
+                )
+                .transition(.opacity)
+            }
+
+            contentView
+                .frame(maxWidth: .infinity, maxHeight: .infinity)
+
+            if shouldShowScreenSwitcher {
+                VStack {
+                    Spacer()
+                    screenSwitcher
+                        .padding(.bottom, Layout.switcherBottomPadding)
+                }
+                .transition(.move(edge: .bottom).combined(with: .opacity))
+            }
+
+            topBar
+            countdownOverlay
         }
-        .onChange(of: scenePhase) { _, newValue in
-            viewModel.handleScenePhase(newValue)
-        }
-        .onChange(of: viewModel.locationAuthorizationState) { _, newValue in
-            handleAuthorizationChanged(newValue)
-        }
-        .onChange(of: viewModel.sessionState) { _, newValue in
-            handleSessionStateChanged(newValue)
-        }
-        .onDisappear {
-            cancelCountdownFlow()
-            bgmManager.restoreDefaultBackground()
-        }
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
+        .clipped()
     }
 
     private var backdropRoutePoints: [WorkoutRoutePoint] {
@@ -148,15 +233,34 @@ struct StepView: View {
 
     @ViewBuilder
     private var surfaceBackground: some View {
-        ZStack {
-            Image("step_background")
-                .resizable()
-                .scaledToFill()
-                .ignoresSafeArea()
+        if MemoDevice.isIPad {
+            GeometryReader { geometry in
+                ZStack {
+                    Image("step_background")
+                        .resizable()
+                        .scaledToFill()
+                        .frame(width: geometry.size.width, height: geometry.size.height)
+                        .clipped()
 
-            if colorScheme == .dark && selectedScreen == .activity {
-                Color.black.opacity(0.18)
+                    if colorScheme == .dark && selectedScreen == .activity {
+                        Color.black.opacity(0.18)
+                            .frame(width: geometry.size.width, height: geometry.size.height)
+                    }
+                }
+                .frame(width: geometry.size.width, height: geometry.size.height)
+            }
+            .allowsHitTesting(false)
+        } else {
+            ZStack {
+                Image("step_background")
+                    .resizable()
+                    .scaledToFill()
                     .ignoresSafeArea()
+
+                if colorScheme == .dark && selectedScreen == .activity {
+                    Color.black.opacity(0.18)
+                        .ignoresSafeArea()
+                }
             }
         }
     }
@@ -178,8 +282,8 @@ struct StepView: View {
                 }
                 .buttonStyle(.plain)
             }
-            .padding(.horizontal, 20)
-            .padding(.top, 8)
+            .padding(.horizontal, closeButtonHorizontalPadding)
+            .padding(.top, closeButtonTopPadding)
 
             Spacer()
         }
@@ -273,18 +377,37 @@ struct StepView: View {
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .bottom)
     }
 
+    @ViewBuilder
     private var activityContentView: some View {
-        MemoStepActivityDashboardView(
-            records: workoutRecords,
-            bottomInset: Layout.activityBottomPadding,
-            characterAssetName: PetMaster.assetName(for: state.normalizedCurrentPetID),
-            plainBackgroundAssetName: "Home_background",
-            isPickerPresented: $isActivityPickerPresented
-        ) {
-            bgmManager.playSE(.push)
-            isActivityPickerPresented = false
-            withAnimation(.spring(response: 0.28, dampingFraction: 0.86)) {
-                selectedScreen = .run
+        if MemoDevice.isIPad {
+            MemoStepActivityDashboardView(
+                records: workoutRecords,
+                bottomInset: Layout.activityBottomPadding,
+                characterAssetName: PetMaster.assetName(for: state.normalizedCurrentPetID),
+                plainBackgroundAssetName: "Home_background",
+                isPickerPresented: $isActivityPickerPresented
+            ) {
+                bgmManager.playSE(.push)
+                isActivityPickerPresented = false
+                withAnimation(.spring(response: 0.28, dampingFraction: 0.86)) {
+                    selectedScreen = .run
+                }
+            }
+            .frame(maxWidth: .infinity, maxHeight: .infinity)
+            .clipped()
+        } else {
+            MemoStepActivityDashboardView(
+                records: workoutRecords,
+                bottomInset: Layout.activityBottomPadding,
+                characterAssetName: PetMaster.assetName(for: state.normalizedCurrentPetID),
+                plainBackgroundAssetName: "Home_background",
+                isPickerPresented: $isActivityPickerPresented
+            ) {
+                bgmManager.playSE(.push)
+                isActivityPickerPresented = false
+                withAnimation(.spring(response: 0.28, dampingFraction: 0.86)) {
+                    selectedScreen = .run
+                }
             }
         }
     }
