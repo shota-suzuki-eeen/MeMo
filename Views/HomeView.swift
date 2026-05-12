@@ -1063,6 +1063,19 @@ struct HomeView: View {
                     showRightMenuPopup = false
                     showCaptureModeDialog = true
                 },
+                onWalk: {
+                    if isToiletLocked {
+                        showToiletLockedMessage()
+                        return
+                    }
+                    withAnimation(.easeInOut(duration: 0.18)) {
+                        showRightMenuPopup = false
+                    }
+                    NotificationCenter.default.post(
+                        name: Notification.Name("memo.showWalkStart"),
+                        object: nil
+                    )
+                },
                 onDismiss: {
                     bgmManager.playSE(.push)
                     withAnimation(.easeInOut(duration: 0.18)) {
@@ -3807,9 +3820,16 @@ private struct CenterMenuPopup: View {
     let isToiletLocked: Bool
     let onBlocked: () -> Void
     let onCamera: () -> Void
+    let onWalk: () -> Void
     let onDismiss: () -> Void
     let buttonSize: CGFloat
     let spacing: CGFloat
+
+    @State private var currentPage: Int = 0
+
+    private var clampedPage: Int {
+        min(1, max(0, currentPage))
+    }
 
     var body: some View {
         ZStack(alignment: .topTrailing) {
@@ -3817,13 +3837,40 @@ private struct CenterMenuPopup: View {
                 .resizable()
                 .scaledToFit()
 
-            RightSideButtons(
-                onCamera: onCamera,
-                isToiletLocked: isToiletLocked,
-                onBlocked: onBlocked,
-                buttonSize: buttonSize,
-                spacing: spacing
-            )
+            VStack(spacing: 10) {
+                Group {
+                    if clampedPage == 0 {
+                        RightSideButtons(
+                            onCamera: onCamera,
+                            onWalk: onWalk,
+                            isToiletLocked: isToiletLocked,
+                            onBlocked: onBlocked,
+                            buttonSize: buttonSize,
+                            spacing: spacing
+                        )
+                    } else {
+                        MenuSettingsPage(
+                            isToiletLocked: isToiletLocked,
+                            onBlocked: onBlocked,
+                            buttonSize: buttonSize,
+                            spacing: spacing
+                        )
+                    }
+                }
+                .frame(width: HomeView.Layout.menuPopupGridWidth, alignment: .leading)
+                .animation(.easeInOut(duration: 0.18), value: clampedPage)
+
+                MenuPageControl(
+                    currentPage: clampedPage,
+                    pageCount: 2,
+                    onSelectPage: { page in
+                        withAnimation(.easeInOut(duration: 0.18)) {
+                            currentPage = page
+                        }
+                    }
+                )
+                .padding(.top, 2)
+            }
             .frame(width: HomeView.Layout.menuPopupGridWidth, alignment: .leading)
             .padding(.top, HomeView.Layout.menuPopupContentTopPadding)
             .padding(.bottom, HomeView.Layout.menuPopupContentBottomPadding)
@@ -3847,6 +3894,9 @@ private struct CenterMenuPopup: View {
         }
         .frame(maxWidth: HomeView.Layout.menuPopupMaxWidth)
         .shadow(color: .black.opacity(0.22), radius: 18, x: 0, y: 10)
+        .onAppear {
+            currentPage = 0
+        }
     }
 }
 
@@ -3854,6 +3904,7 @@ private struct RightSideButtons: View {
     @EnvironmentObject private var bgmManager: BGMManager
 
     let onCamera: () -> Void
+    let onWalk: () -> Void
     let isToiletLocked: Bool
     let onBlocked: () -> Void
     let buttonSize: CGFloat
@@ -3909,6 +3960,36 @@ private struct RightSideButtons: View {
                     .buttonStyle(.plain)
                 }
 
+                Button(action: {
+                    bgmManager.playSE(.push)
+                    if isToiletLocked {
+                        onBlocked()
+                    } else {
+                        onWalk()
+                    }
+                }) {
+                    MenuPopupActionIcon(imageName: "walk_button", buttonSize: buttonSize)
+                }
+                .buttonStyle(.plain)
+                .accessibilityLabel("お散歩")
+            }
+            .frame(maxWidth: .infinity, alignment: .leading)
+        }
+        .frame(width: HomeView.Layout.menuPopupGridWidth, alignment: .leading)
+    }
+}
+
+private struct MenuSettingsPage: View {
+    @EnvironmentObject private var bgmManager: BGMManager
+
+    let isToiletLocked: Bool
+    let onBlocked: () -> Void
+    let buttonSize: CGFloat
+    let spacing: CGFloat
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: spacing) {
+            HStack(spacing: spacing) {
                 if isToiletLocked {
                     Button(action: {
                         bgmManager.playSE(.push)
@@ -3926,10 +4007,49 @@ private struct RightSideButtons: View {
                     })
                     .buttonStyle(.plain)
                 }
+
+                Spacer(minLength: 0)
+                    .frame(width: buttonSize, height: buttonSize)
+            }
+            .frame(maxWidth: .infinity, alignment: .leading)
+
+            HStack(spacing: spacing) {
+                Spacer(minLength: 0)
+                    .frame(width: buttonSize, height: buttonSize)
+
+                Spacer(minLength: 0)
+                    .frame(width: buttonSize, height: buttonSize)
             }
             .frame(maxWidth: .infinity, alignment: .leading)
         }
         .frame(width: HomeView.Layout.menuPopupGridWidth, alignment: .leading)
+    }
+}
+
+private struct MenuPageControl: View {
+    let currentPage: Int
+    let pageCount: Int
+    let onSelectPage: (Int) -> Void
+
+    var body: some View {
+        HStack(spacing: 12) {
+            ForEach(0..<pageCount, id: \.self) { page in
+                Button(action: {
+                    onSelectPage(page)
+                }) {
+                    Circle()
+                        .fill(page == currentPage ? Color.white.opacity(0.94) : Color.white.opacity(0.34))
+                        .frame(width: page == currentPage ? 12 : 9, height: page == currentPage ? 12 : 9)
+                        .overlay(
+                            Circle()
+                                .stroke(Color.black.opacity(0.16), lineWidth: 1)
+                        )
+                }
+                .buttonStyle(.plain)
+                .accessibilityLabel("メニュー\(page + 1)ページ目")
+            }
+        }
+        .frame(width: HomeView.Layout.menuPopupGridWidth, alignment: .center)
     }
 }
 

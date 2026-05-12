@@ -5,6 +5,7 @@
 //  Full RootView with the global mandatory onboarding presenter attached.
 //  Based on the current main branch structure.
 //  iOS 18.6+
+//  お散歩機能の開始ポップアップ・全画面お散歩画面・グローバルリザルト表示を追加。
 //
 
 import SwiftUI
@@ -21,8 +22,15 @@ struct RootView: View {
 
     @EnvironmentObject private var bgmManager: BGMManager
 
+    @ObservedObject private var walkStore = WalkChallengeStore.shared
+    @ObservedObject private var walkWeatherManager = WalkWeatherManager.shared
+    @ObservedObject private var walkStartAd = AdMobManager.shared.rewardWalkStart
+
     @State private var isHomeBannerHiddenByChildScreen: Bool = false
     @State private var isHomeNavigationDestinationVisible: Bool = false
+    @State private var showWalkStartPopup: Bool = false
+    @State private var showWalkView: Bool = false
+    @State private var walkStartMessage: String?
 
     private enum HomeBannerLayout {
         static let height: CGFloat = 50
@@ -71,6 +79,29 @@ struct RootView: View {
                             .zIndex(10_000)
                             .transition(.opacity)
                         }
+
+                        walkStartPopupLayer
+
+                        if let pendingResult = walkStore.pendingResult {
+                            WalkResultOverlayView(result: pendingResult) { multiplier in
+                                _ = walkStore.claimPendingResult(
+                                    multiplier: multiplier,
+                                    state: sharedState
+                                )
+                                saveRootState()
+                            }
+                            .environmentObject(bgmManager)
+                            .zIndex(20_000)
+                            .transition(.opacity.combined(with: .scale(scale: 0.96)))
+                        }
+                    }
+                    .fullScreenCover(isPresented: $showWalkView) {
+                        WalkView(
+                            state: sharedState,
+                            onSave: { saveRootState() }
+                        )
+                        .environmentObject(bgmManager)
+                        .memoIPadPresentedPhoneCanvas()
                     }
                     .memoOnboardingRoot(
                         state: sharedState,
@@ -78,9 +109,17 @@ struct RootView: View {
                     )
                     .onAppear {
                         isHomeBannerHiddenByChildScreen = false
+                        walkStore.bootstrap()
+                        walkStore.refresh()
+                        AdMobManager.shared.prepareRewardWalkStart()
+                        AdMobManager.shared.prepareRewardWalkDouble()
+                        Task { await walkWeatherManager.refreshRainStatus() }
                         AdMobManager.shared.prepareInterstitialGetIfNeeded(
                             isRewardClaimable: sharedState.nextClaimableHappinessRewardLevel() != nil
                         )
+                    }
+                    .onReceive(NotificationCenter.default.publisher(for: .memoShowWalkStart)) { _ in
+                        handleWalkMenuRequest()
                     }
                     .onReceive(NotificationCenter.default.publisher(for: .memoHideHomeBannerAd)) { _ in
                         withAnimation(.easeInOut(duration: 0.18)) {
@@ -109,6 +148,113 @@ struct RootView: View {
                 hk: hk,
                 bgmManager: bgmManager
             )
+        }
+    }
+
+    @ViewBuilder
+    private var walkStartPopupLayer: some View {
+        if showWalkStartPopup {
+            Color.black.opacity(0.34)
+                .ignoresSafeArea()
+                .transition(.opacity)
+                .zIndex(15_000)
+                .onTapGesture { closeWalkStartPopup() }
+
+            VStack(spacing: 10) {
+                WalkStartPopupView(
+                    isRainy: walkWeatherManager.isRainyToday,
+                    canUseRainFreeStart: walkStore.canUseRainFreeStart(isRainy: walkWeatherManager.isRainyToday),
+                    isAdReady: walkStartAd.isReady,
+                    isAdLoading: walkStartAd.isLoading,
+                    onLater: { closeWalkStartPopup() },
+                    onStartWithAd: { startWalkWithAd() },
+                    onStartRainFree: { startWalkRainFree() }
+                )
+
+                if let walkStartMessage {
+                    Text(walkStartMessage)
+                        .font(.system(size: 13, weight: .bold))
+                        .foregroundStyle(.white)
+                        .multilineTextAlignment(.center)
+                        .padding(.horizontal, 14)
+                        .padding(.vertical, 8)
+                        .background(.black.opacity(0.42))
+                        .clipShape(RoundedRectangle(cornerRadius: 14, style: .continuous))
+                        .transition(.opacity.combined(with: .move(edge: .bottom)))
+                }
+            }
+            .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .center)
+            .padding(.horizontal, 18)
+            .ignoresSafeArea()
+            .zIndex(15_001)
+            .transition(.scale(scale: 0.94).combined(with: .opacity))
+        }
+    }
+
+    private func handleWalkMenuRequest() {
+        walkStore.bootstrap()
+        walkStore.refresh()
+        walkStartMessage = nil
+
+        if walkStore.isSessionActive {
+            closeWalkStartPopup()
+            showWalkView = true
+            return
+        }
+
+        AdMobManager.shared.prepareRewardWalkStart()
+        Task { await walkWeatherManager.refreshRainStatus() }
+
+        withAnimation(.easeInOut(duration: 0.18)) {
+            showWalkStartPopup = true
+        }
+    }
+
+    private func closeWalkStartPopup() {
+        walkStartMessage = nil
+        withAnimation(.easeInOut(duration: 0.18)) {
+            showWalkStartPopup = false
+        }
+    }
+
+    private func startWalkRainFree() {
+        walkStartMessage = nil
+        guard walkStore.startSession(isRainFreeStart: true) else {
+            walkStartMessage = "今日はすでに雨の日チャレンジを使用済みです。"
+            return
+        }
+
+        closeWalkStartPopup()
+        showWalkView = true
+    }
+
+    private func startWalkWithAd() {
+        walkStartMessage = nil
+        AdMobManager.shared.prepareRewardWalkStart()
+
+        walkStartAd.show(
+            onReward: {
+                guard walkStore.startSession(isRainFreeStart: false) else {
+                    walkStartMessage = "すでにお散歩中です。"
+                    showWalkView = true
+                    return
+                }
+
+                closeWalkStartPopup()
+                showWalkView = true
+            },
+            onUnavailable: {
+                walkStartMessage = "広告の準備ができませんでした。少し時間をおいて再度お試しください。"
+                AdMobManager.shared.prepareRewardWalkStart()
+            }
+        )
+    }
+
+    private func saveRootState() {
+        do {
+            try modelContext.save()
+        } catch {
+            print("RootView save failed: \(error.localizedDescription)")
         }
     }
 }
@@ -167,7 +313,7 @@ private struct DeniedView: View {
     }
 }
 
-// MARK: - Home Banner Visibility Notifications
+// MARK: - Home Banner / Walk Notifications
 
 extension Notification.Name {
     /// HomeView上部のバナー広告を、Home配下の遷移先画面で一時的に非表示にするための通知。
@@ -175,6 +321,9 @@ extension Notification.Name {
 
     /// HomeViewへ戻ったタイミングで、HomeView上部のバナー広告を再表示するための通知。
     static let memoShowHomeBannerAd = Notification.Name("memo.showHomeBannerAd")
+
+    /// HomeView の menu_button 内 walk_button から、お散歩開始ポップアップを表示するための通知。
+    static let memoShowWalkStart = Notification.Name("memo.showWalkStart")
 }
 
 // MARK: - Navigation Depth Reader

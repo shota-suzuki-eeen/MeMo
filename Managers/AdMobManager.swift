@@ -4,6 +4,7 @@
 //
 //  Updated for AdMob production IDs.
 //  Prepared for future subscription-based passive ad hiding.
+//  お散歩機能のリワード広告IDを追加。
 //
 
 import Foundation
@@ -24,6 +25,8 @@ enum AdUnitID {
     static let bannerHomeProd: String = "ca-app-pub-1093843343402854/3010924298"
     static let bannerWorkProd: String = "ca-app-pub-1093843343402854/3745421460"
     static let rewardGachaProd: String = "ca-app-pub-1093843343402854/4440075552"
+    static let rewardWalkStartProd: String = "ca-app-pub-1093843343402854/2648339519"
+    static let rewardWalkDoubleProd: String = "ca-app-pub-1093843343402854/2456767829"
     static let interstitialCharacterSetProd: String = "ca-app-pub-1093843343402854/1430768838"
     static let interstitialGetProd: String = "ca-app-pub-1093843343402854/1732045372"
 
@@ -53,6 +56,22 @@ enum AdUnitID {
         return rewardedTest
         #else
         return rewardGachaProd
+        #endif
+    }
+
+    static var rewardWalkStart: String {
+        #if DEBUG
+        return rewardedTest
+        #else
+        return rewardWalkStartProd
+        #endif
+    }
+
+    static var rewardWalkDouble: String {
+        #if DEBUG
+        return rewardedTest
+        #else
+        return rewardWalkDoubleProd
         #endif
     }
 
@@ -110,6 +129,8 @@ final class AdMobManager: ObservableObject {
     @Published private(set) var didStart: Bool = false
 
     let rewardGacha = RewardedAdManager(adUnitID: AdUnitID.rewardGacha)
+    let rewardWalkStart = RewardedAdManager(adUnitID: AdUnitID.rewardWalkStart)
+    let rewardWalkDouble = RewardedAdManager(adUnitID: AdUnitID.rewardWalkDouble)
     let interstitialCharacterSet = InterstitialAdManager(adUnitID: AdUnitID.interstitialCharacterSet)
     let interstitialGet = InterstitialAdManager(adUnitID: AdUnitID.interstitialGet)
 
@@ -137,6 +158,8 @@ final class AdMobManager: ObservableObject {
 
         guard !DeveloperModeStore.isEnabled else {
             rewardGacha.load()
+            rewardWalkStart.load()
+            rewardWalkDouble.load()
             interstitialCharacterSet.load()
             interstitialGet.load()
             return
@@ -146,9 +169,11 @@ final class AdMobManager: ObservableObject {
         MobileAds.shared.start()
         #endif
 
-        // リワード広告は無料10回ガチャなどユーザー操作に紐づくため、
+        // リワード広告はユーザー操作に紐づくため、
         // 将来のプレミアム特典とは別に扱えるようにしておく。
         rewardGacha.load()
+        rewardWalkStart.load()
+        rewardWalkDouble.load()
 
         guard shouldUsePassiveAds else { return }
         interstitialCharacterSet.load()
@@ -157,6 +182,14 @@ final class AdMobManager: ObservableObject {
 
     func prepareRewardGacha() {
         rewardGacha.loadIfNeeded()
+    }
+
+    func prepareRewardWalkStart() {
+        rewardWalkStart.loadIfNeeded()
+    }
+
+    func prepareRewardWalkDouble() {
+        rewardWalkDouble.loadIfNeeded()
     }
 
     func prepareInterstitialCharacterSet() {
