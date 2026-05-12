@@ -38,7 +38,7 @@ struct WalkStartPopupView: View {
 
             HStack(spacing: 12) {
                 WalkPopupButton(
-                    title: "あとで",
+                    title: "もどる",
                     systemImageName: nil,
                     isPrimary: false,
                     isEnabled: true,
@@ -48,7 +48,7 @@ struct WalkStartPopupView: View {
                 if canUseRainFreeStart {
                     WalkPopupButton(
                         title: "スタート",
-                        systemImageName: nil,
+                        systemImageName: "play.rectangle.fill",
                         isPrimary: true,
                         isEnabled: true,
                         action: onStartRainFree
@@ -56,7 +56,7 @@ struct WalkStartPopupView: View {
                 } else {
                     WalkPopupButton(
                         title: isAdLoading && !isAdReady ? "準備中" : "スタート",
-                        systemImageName: "play.rectangle.fill",
+                        systemImageName: isAdLoading && !isAdReady ? nil : "play.rectangle.fill",
                         isPrimary: true,
                         isEnabled: true,
                         action: onStartWithAd
@@ -106,6 +106,12 @@ private struct WalkPopupButton: View {
     let isEnabled: Bool
     let action: () -> Void
 
+    private var buttonBackgroundColor: Color {
+        isPrimary
+        ? Color(red: 0.92, green: 0.15, blue: 0.14)
+        : Color.white.opacity(0.72)
+    }
+
     var body: some View {
         Button(action: action) {
             HStack(spacing: 6) {
@@ -123,17 +129,15 @@ private struct WalkPopupButton: View {
             .frame(maxWidth: .infinity)
             .frame(height: 50)
             .background(
-                ZStack {
-                    Image("clay_block")
-                        .resizable(capInsets: EdgeInsets(top: 18, leading: 18, bottom: 18, trailing: 18), resizingMode: .stretch)
-                    if isPrimary {
-                        RoundedRectangle(cornerRadius: 18, style: .continuous)
-                            .fill(Color.black.opacity(0.18))
-                    }
-                }
+                RoundedRectangle(cornerRadius: 18, style: .continuous)
+                    .fill(buttonBackgroundColor)
+            )
+            .overlay(
+                RoundedRectangle(cornerRadius: 18, style: .continuous)
+                    .stroke(Color.white.opacity(isPrimary ? 0.34 : 0.42), lineWidth: 1.5)
             )
             .clipShape(RoundedRectangle(cornerRadius: 18, style: .continuous))
-            .shadow(color: .black.opacity(0.18), radius: 8, x: 0, y: 5)
+            .shadow(color: .black.opacity(0.14), radius: 8, x: 0, y: 5)
         }
         .buttonStyle(.plain)
         .disabled(!isEnabled)

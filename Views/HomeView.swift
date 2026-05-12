@@ -377,6 +377,7 @@ struct HomeView: View {
         static let menuPopupHorizontalPadding: CGFloat = 18
         static let menuPopupVerticalPadding: CGFloat = 18
         static let menuPopupMaxWidth: CGFloat = 360
+        static let menuPopupVerticalOffset: CGFloat = 35
         static let menuPopupBackgroundAssetName: String = "blue_block"
         static let menuPopupButtonBackgroundAssetName: String = "clay_block"
         static let menuPopupCloseButtonAssetName: String = "close_button"
@@ -670,6 +671,11 @@ struct HomeView: View {
             }
             .onChange(of: state.lastDayKey) { _, _ in
                 updateWidgetSnapshot(forceReload: true)
+            }
+            .onReceive(NotificationCenter.default.publisher(for: Notification.Name("memo.hideHomeBannerAd"))) { _ in
+                withAnimation(.easeInOut(duration: 0.18)) {
+                    showRightMenuPopup = false
+                }
             }
     }
 
@@ -1068,9 +1074,8 @@ struct HomeView: View {
                         showToiletLockedMessage()
                         return
                     }
-                    withAnimation(.easeInOut(duration: 0.18)) {
-                        showRightMenuPopup = false
-                    }
+                    // お散歩開始確認の「もどる」で、メニュー画面へ戻れるように
+                    // ここではメニューを閉じず、RootView 側の開始確認ポップアップを前面表示する。
                     NotificationCenter.default.post(
                         name: Notification.Name("memo.showWalkStart"),
                         object: nil
@@ -1087,6 +1092,8 @@ struct HomeView: View {
             )
             .frame(maxWidth: Layout.menuPopupMaxWidth)
             .padding(.horizontal, Layout.menuPopupHorizontalPadding)
+            .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .center)
+            .offset(y: Layout.menuPopupVerticalOffset)
             .zIndex(Layout.zMenuPopup + 1)
             .transition(.scale(scale: 0.92).combined(with: .opacity))
         }
@@ -3817,6 +3824,8 @@ private struct HomeTopInfoValueBlock: View {
     }
 }
 private struct CenterMenuPopup: View {
+    @EnvironmentObject private var bgmManager: BGMManager
+
     let isToiletLocked: Bool
     let onBlocked: () -> Void
     let onCamera: () -> Void
@@ -3827,8 +3836,19 @@ private struct CenterMenuPopup: View {
 
     @State private var currentPage: Int = 0
 
+    private let pageCount: Int = 2
+    private let swipeThreshold: CGFloat = 42
+
     private var clampedPage: Int {
-        min(1, max(0, currentPage))
+        min(pageCount - 1, max(0, currentPage))
+    }
+
+    private var canMovePrevious: Bool {
+        clampedPage > 0
+    }
+
+    private var canMoveNext: Bool {
+        clampedPage < pageCount - 1
     }
 
     var body: some View {
@@ -3858,15 +3878,14 @@ private struct CenterMenuPopup: View {
                     }
                 }
                 .frame(width: HomeView.Layout.menuPopupGridWidth, alignment: .leading)
+                .transition(.opacity.combined(with: .move(edge: clampedPage == 0 ? .leading : .trailing)))
                 .animation(.easeInOut(duration: 0.18), value: clampedPage)
 
                 MenuPageControl(
                     currentPage: clampedPage,
-                    pageCount: 2,
+                    pageCount: pageCount,
                     onSelectPage: { page in
-                        withAnimation(.easeInOut(duration: 0.18)) {
-                            currentPage = page
-                        }
+                        selectPage(page)
                     }
                 )
                 .padding(.top, 2)
@@ -3878,6 +3897,7 @@ private struct CenterMenuPopup: View {
                 x: HomeView.Layout.menuPopupGridOffsetX,
                 y: HomeView.Layout.menuPopupGridOffsetY
             )
+
 
             Button(action: onDismiss) {
                 Image(HomeView.Layout.menuPopupCloseButtonAssetName)
@@ -3893,9 +3913,68 @@ private struct CenterMenuPopup: View {
             .padding(.trailing, HomeView.Layout.menuPopupCloseButtonTrailingPadding)
         }
         .frame(maxWidth: HomeView.Layout.menuPopupMaxWidth)
+        .overlay(alignment: .center) {
+            HStack {
+                MenuPageArrowButton(
+                    systemName: "chevron.left",
+                    isEnabled: canMovePrevious,
+                    action: { movePage(delta: -1) }
+                )
+                .accessibilityLabel("前のメニューページへ")
+
+                Spacer(minLength: 0)
+
+                MenuPageArrowButton(
+                    systemName: "chevron.right",
+                    isEnabled: canMoveNext,
+                    action: { movePage(delta: 1) }
+                )
+                .accessibilityLabel("次のメニューページへ")
+            }
+            .padding(.horizontal, 10)
+            .allowsHitTesting(true)
+        }
+        .contentShape(Rectangle())
+        .simultaneousGesture(
+            DragGesture(minimumDistance: 18)
+                .onEnded { value in
+                    handlePageSwipe(value)
+                }
+        )
         .shadow(color: .black.opacity(0.22), radius: 18, x: 0, y: 10)
         .onAppear {
             currentPage = 0
+        }
+    }
+
+    private func selectPage(_ page: Int) {
+        let nextPage = min(pageCount - 1, max(0, page))
+        guard nextPage != clampedPage else { return }
+
+        bgmManager.playSE(.push)
+        withAnimation(.easeInOut(duration: 0.18)) {
+            currentPage = nextPage
+        }
+    }
+
+    private func movePage(delta: Int) {
+        guard delta != 0 else { return }
+        selectPage(clampedPage + delta)
+    }
+
+    private func handlePageSwipe(_ value: DragGesture.Value) {
+        let horizontal = value.translation.width
+        let predictedHorizontal = value.predictedEndTranslation.width
+        let resolvedHorizontal = abs(predictedHorizontal) > abs(horizontal) ? predictedHorizontal : horizontal
+        let vertical = value.translation.height
+
+        guard abs(resolvedHorizontal) > swipeThreshold else { return }
+        guard abs(resolvedHorizontal) > abs(vertical) * 1.2 else { return }
+
+        if resolvedHorizontal < 0 {
+            movePage(delta: 1)
+        } else {
+            movePage(delta: -1)
         }
     }
 }
@@ -4023,6 +4102,33 @@ private struct MenuSettingsPage: View {
             .frame(maxWidth: .infinity, alignment: .leading)
         }
         .frame(width: HomeView.Layout.menuPopupGridWidth, alignment: .leading)
+    }
+}
+
+private struct MenuPageArrowButton: View {
+    let systemName: String
+    let isEnabled: Bool
+    let action: () -> Void
+
+    var body: some View {
+        Button(action: action) {
+            Image(systemName: systemName)
+                .font(.system(size: 18, weight: .black))
+                .foregroundStyle(.white)
+                .frame(width: 30, height: 64)
+                .background(
+                    Capsule(style: .continuous)
+                        .fill(Color.black.opacity(isEnabled ? 0.30 : 0.12))
+                )
+                .overlay(
+                    Capsule(style: .continuous)
+                        .stroke(Color.white.opacity(isEnabled ? 0.32 : 0.12), lineWidth: 1)
+                )
+                .contentShape(Capsule(style: .continuous))
+        }
+        .buttonStyle(.plain)
+        .disabled(!isEnabled)
+        .opacity(isEnabled ? 1.0 : 0.32)
     }
 }
 

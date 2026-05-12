@@ -148,6 +148,38 @@ final class WalkChallengeStore: ObservableObject {
     }
 
     @discardableResult
+    func finishActiveSessionNow(now: Date = Date()) -> WalkChallengeResult? {
+        loadFromDefaults()
+
+        guard let session = activeSession else {
+            refresh(now: now)
+            return pendingResult
+        }
+
+        if !session.isActive(now: now) {
+            finishExpiredSession(session, now: now)
+            return pendingResult
+        }
+
+        let result = WalkChallengeResult(
+            id: UUID(),
+            sessionID: session.id,
+            baseSteps: max(0, session.tapCount),
+            startedAt: session.startedAt,
+            endedAt: now,
+            isRainFreeStart: session.isRainFreeStart
+        )
+
+        activeSession = nil
+        pendingResult = result
+        remainingSeconds = 0
+        currentTapCount = 0
+        clearSession()
+        persistPendingResult(result)
+        return result
+    }
+
+    @discardableResult
     func claimPendingResult(multiplier: Int, state: AppState) -> Int {
         guard let result = pendingResult else { return 0 }
         let safeMultiplier = max(1, multiplier)

@@ -10,6 +10,17 @@ import SwiftUI
 struct WalkResultOverlayView: View {
     let result: WalkChallengeResult
     let onClaim: (_ multiplier: Int) -> Void
+    let onCancel: (() -> Void)?
+
+    init(
+        result: WalkChallengeResult,
+        onClaim: @escaping (_ multiplier: Int) -> Void,
+        onCancel: (() -> Void)? = nil
+    ) {
+        self.result = result
+        self.onClaim = onClaim
+        self.onCancel = onCancel
+    }
 
     @EnvironmentObject private var bgmManager: BGMManager
     @ObservedObject private var doubleRewardAd = AdMobManager.shared.rewardWalkDouble
@@ -26,29 +37,36 @@ struct WalkResultOverlayView: View {
                 .ignoresSafeArea()
 
             VStack(spacing: 18) {
-                Text("お散歩リザルト")
-                    .font(.system(size: 25, weight: .black, design: .rounded))
-                    .foregroundStyle(.primary)
+                Image("walk_button")
+                    .resizable()
+                    .scaledToFit()
+                    .frame(width: 116, height: 116)
+                    .shadow(color: .black.opacity(0.2), radius: 10, x: 0, y: 6)
 
                 VStack(spacing: 8) {
-                    Text("\(displayedSteps)")
-                        .font(.system(size: 64, weight: .black, design: .rounded))
-                        .monospacedDigit()
+                    Text("お散歩リザルト")
+                        .font(.system(size: 28, weight: .black, design: .rounded))
                         .foregroundStyle(.primary)
-                        .contentTransition(.numericText(value: Double(displayedSteps)))
 
-                    Text("歩 獲得！")
-                        .font(.system(size: 18, weight: .black, design: .rounded))
-                        .foregroundStyle(.secondary)
+                    VStack(spacing: 4) {
+                        Text("\(displayedSteps)")
+                            .font(.system(size: 56, weight: .black, design: .rounded))
+                            .monospacedDigit()
+                            .foregroundStyle(.primary)
+                            .contentTransition(.numericText(value: Double(displayedSteps)))
 
-                    if didDoubleReward {
-                        Text("（\(result.baseSteps) + \(result.baseSteps)）")
-                            .font(.system(size: 15, weight: .bold, design: .rounded))
+                        Text("歩 獲得！")
+                            .font(.system(size: 17, weight: .black, design: .rounded))
                             .foregroundStyle(.secondary)
-                            .transition(.opacity.combined(with: .move(edge: .bottom)))
+
+                        if didDoubleReward {
+                            Text("（\(result.baseSteps) + \(result.baseSteps)）")
+                                .font(.system(size: 15, weight: .bold, design: .rounded))
+                                .foregroundStyle(.secondary)
+                                .transition(.opacity.combined(with: .move(edge: .bottom)))
+                        }
                     }
                 }
-                .padding(.vertical, 6)
 
                 if let messageText {
                     Text(messageText)
@@ -68,7 +86,7 @@ struct WalkResultOverlayView: View {
 
                     WalkResultButton(
                         title: doubleRewardAd.isLoading && !doubleRewardAd.isReady ? "準備中" : "2倍獲得",
-                        systemImageName: "play.rectangle.fill",
+                        systemImageName: doubleRewardAd.isLoading && !doubleRewardAd.isReady ? nil : "play.rectangle.fill",
                         isPrimary: true,
                         isEnabled: !isClaiming && !isAnimatingDoubleCountUp,
                         action: claimDoubleWithAd
@@ -76,14 +94,33 @@ struct WalkResultOverlayView: View {
                 }
             }
             .padding(.horizontal, 22)
-            .padding(.vertical, 26)
-            .frame(maxWidth: 344)
+            .padding(.vertical, 24)
+            .frame(maxWidth: 342)
             .background(
-                Image("red_block")
+                Image("blue_block")
                     .resizable(capInsets: EdgeInsets(top: 28, leading: 28, bottom: 28, trailing: 28), resizingMode: .stretch)
             )
             .clipShape(RoundedRectangle(cornerRadius: 30, style: .continuous))
-            .shadow(color: .black.opacity(0.3), radius: 26, x: 0, y: 15)
+            .shadow(color: .black.opacity(0.28), radius: 24, x: 0, y: 14)
+            .overlay(alignment: .topLeading) {
+                if let onCancel {
+                    Button {
+                        bgmManager.playSE(.push)
+                        onCancel()
+                    } label: {
+                        Image("close_button")
+                            .resizable()
+                            .scaledToFit()
+                            .frame(width: 46, height: 46)
+                            .shadow(color: .black.opacity(0.20), radius: 8, x: 0, y: 4)
+                    }
+                    .buttonStyle(.plain)
+                    .disabled(isClaiming || isAnimatingDoubleCountUp)
+                    .opacity(isClaiming || isAnimatingDoubleCountUp ? 0.45 : 1)
+                    .offset(x: -12, y: -12)
+                    .accessibilityLabel("終了をキャンセル")
+                }
+            }
             .transition(.scale(scale: 0.94).combined(with: .opacity))
         }
         .onAppear {
@@ -156,6 +193,12 @@ private struct WalkResultButton: View {
     let isEnabled: Bool
     let action: () -> Void
 
+    private var buttonBackgroundColor: Color {
+        isPrimary
+        ? Color(red: 0.92, green: 0.15, blue: 0.14)
+        : Color.white.opacity(0.72)
+    }
+
     var body: some View {
         Button(action: action) {
             HStack(spacing: 6) {
@@ -173,17 +216,15 @@ private struct WalkResultButton: View {
             .frame(maxWidth: .infinity)
             .frame(height: 50)
             .background(
-                ZStack {
-                    Image("clay_block")
-                        .resizable(capInsets: EdgeInsets(top: 18, leading: 18, bottom: 18, trailing: 18), resizingMode: .stretch)
-                    if isPrimary {
-                        RoundedRectangle(cornerRadius: 18, style: .continuous)
-                            .fill(Color.black.opacity(0.18))
-                    }
-                }
+                RoundedRectangle(cornerRadius: 18, style: .continuous)
+                    .fill(buttonBackgroundColor)
+            )
+            .overlay(
+                RoundedRectangle(cornerRadius: 18, style: .continuous)
+                    .stroke(Color.white.opacity(isPrimary ? 0.34 : 0.42), lineWidth: 1.5)
             )
             .clipShape(RoundedRectangle(cornerRadius: 18, style: .continuous))
-            .shadow(color: .black.opacity(0.18), radius: 8, x: 0, y: 5)
+            .shadow(color: .black.opacity(0.14), radius: 8, x: 0, y: 5)
         }
         .buttonStyle(.plain)
         .disabled(!isEnabled)

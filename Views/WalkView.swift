@@ -18,6 +18,8 @@ struct WalkView: View {
     @ObservedObject private var store = WalkChallengeStore.shared
     @ObservedObject private var weatherManager = WalkWeatherManager.shared
 
+    @State private var manualEndResult: WalkChallengeResult?
+
     private var isRainyPresentation: Bool {
         store.activeSession?.isRainFreeStart == true || weatherManager.isRainyToday
     }
@@ -34,7 +36,7 @@ struct WalkView: View {
 
             VStack(spacing: 18) {
                 WalkTimerPill(text: store.formattedRemainingTime)
-                    .padding(.top, 76)
+                    .padding(.top, 104)
 
                 AnimatedWalkCounterView(value: store.currentTapCount)
                     .padding(.top, 4)
@@ -42,7 +44,7 @@ struct WalkView: View {
                 Image("walk_button")
                     .resizable()
                     .scaledToFit()
-                    .frame(width: 190, height: 190)
+                    .frame(width: 220, height: 220)
                     .shadow(color: .black.opacity(0.24), radius: 16, x: 0, y: 10)
                     .accessibilityHidden(true)
 
@@ -55,16 +57,21 @@ struct WalkView: View {
                     Image("walk_tap")
                         .resizable()
                         .scaledToFit()
-                        .frame(width: 214, height: 112)
+                        .frame(width: 336, height: 176)
                         .shadow(color: .black.opacity(0.25), radius: 12, x: 0, y: 8)
                 }
                 .buttonStyle(.plain)
-                .disabled(!store.isSessionActive)
+                .disabled(!store.isSessionActive || manualEndResult != nil)
                 .scaleEffect(store.isSessionActive ? 1.0 : 0.96)
                 .opacity(store.isSessionActive ? 1.0 : 0.62)
                 .accessibilityLabel("タップして歩数を獲得")
 
-                Spacer(minLength: 40)
+                WalkEndButton(isEnabled: store.isSessionActive && manualEndResult == nil) {
+                    showManualEndResult()
+                }
+                .padding(.top, 34)
+
+                Spacer(minLength: 24)
             }
             .frame(maxWidth: .infinity, maxHeight: .infinity)
 
@@ -86,14 +93,38 @@ struct WalkView: View {
                     Spacer()
                 }
                 .padding(.horizontal, 18)
-                .padding(.top, 20)
+                .padding(.top, 104)
 
                 Spacer()
             }
 
-            if !store.isSessionActive && store.pendingResult == nil {
+            if !store.isSessionActive && store.pendingResult == nil && manualEndResult == nil {
                 WalkInactiveMessageView(onClose: { dismiss() })
                     .padding(.horizontal, 20)
+            }
+
+            if let pendingResult = store.pendingResult, manualEndResult == nil {
+                WalkResultOverlayView(result: pendingResult) { multiplier in
+                    claimPendingResult(multiplier: multiplier)
+                }
+                .environmentObject(bgmManager)
+                .zIndex(1000)
+                .transition(.opacity.combined(with: .scale(scale: 0.96)))
+            }
+
+            if let manualEndResult {
+                WalkResultOverlayView(
+                    result: manualEndResult,
+                    onClaim: { multiplier in
+                        claimManualEndResult(multiplier: multiplier)
+                    },
+                    onCancel: {
+                        self.manualEndResult = nil
+                    }
+                )
+                .environmentObject(bgmManager)
+                .zIndex(1001)
+                .transition(.opacity.combined(with: .scale(scale: 0.96)))
             }
         }
         .onAppear {
@@ -103,6 +134,43 @@ struct WalkView: View {
         .onDisappear {
             NotificationCenter.default.post(name: .memoShowHomeBannerAd, object: nil)
         }
+    }
+
+    private func showManualEndResult() {
+        store.refresh()
+
+        guard let session = store.activeSession, session.isActive() else {
+            return
+        }
+
+        bgmManager.playSE(.push)
+        manualEndResult = WalkChallengeResult(
+            id: UUID(),
+            sessionID: session.id,
+            baseSteps: max(0, store.currentTapCount),
+            startedAt: session.startedAt,
+            endedAt: Date(),
+            isRainFreeStart: session.isRainFreeStart
+        )
+    }
+
+    private func claimManualEndResult(multiplier: Int) {
+        manualEndResult = nil
+
+        if store.pendingResult == nil {
+            _ = store.finishActiveSessionNow()
+        }
+
+        claimPendingResult(multiplier: multiplier)
+    }
+
+    private func claimPendingResult(multiplier: Int) {
+        _ = store.claimPendingResult(
+            multiplier: multiplier,
+            state: state
+        )
+        onSave()
+        dismiss()
     }
 }
 
@@ -211,6 +279,33 @@ private struct DigitReelView: View {
                 isRolling = false
             }
         }
+    }
+}
+
+private struct WalkEndButton: View {
+    let isEnabled: Bool
+    let action: () -> Void
+
+    var body: some View {
+        Button(action: action) {
+            Text("終了")
+                .font(.system(size: 17, weight: .black, design: .rounded))
+                .foregroundStyle(.white)
+                .frame(width: 132, height: 46)
+                .background(
+                    RoundedRectangle(cornerRadius: 18, style: .continuous)
+                        .fill(Color.black.opacity(0.58))
+                )
+                .overlay(
+                    RoundedRectangle(cornerRadius: 18, style: .continuous)
+                        .stroke(Color.white.opacity(0.46), lineWidth: 1.5)
+                )
+                .shadow(color: .black.opacity(0.24), radius: 8, x: 0, y: 5)
+        }
+        .buttonStyle(.plain)
+        .disabled(!isEnabled)
+        .opacity(isEnabled ? 1 : 0.55)
+        .accessibilityLabel("お散歩を終了")
     }
 }
 
