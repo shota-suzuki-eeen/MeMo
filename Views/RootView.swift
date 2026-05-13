@@ -31,6 +31,9 @@ struct RootView: View {
     @State private var showWalkStartPopup: Bool = false
     @State private var showWalkView: Bool = false
     @State private var walkStartMessage: String?
+    @State private var stepGainPopup: StepGainPopupItem?
+    @State private var stepGainPopupDismissTask: Task<Void, Never>?
+    @State private var lastObservedWalletSteps: Int?
 
     private enum HomeBannerLayout {
         static let height: CGFloat = 50
@@ -94,6 +97,8 @@ struct RootView: View {
                             .zIndex(20_000)
                             .transition(.opacity.combined(with: .scale(scale: 0.96)))
                         }
+
+                        stepGainPopupLayer
                     }
                     .fullScreenCover(isPresented: $showWalkView) {
                         WalkView(
@@ -109,6 +114,7 @@ struct RootView: View {
                     )
                     .onAppear {
                         isHomeBannerHiddenByChildScreen = false
+                        lastObservedWalletSteps = sharedState.walletSteps
                         walkStore.bootstrap()
                         walkStore.refresh()
                         AdMobManager.shared.prepareRewardWalkStart()
@@ -117,6 +123,9 @@ struct RootView: View {
                         AdMobManager.shared.prepareInterstitialGetIfNeeded(
                             isRewardClaimable: sharedState.nextClaimableHappinessRewardLevel() != nil
                         )
+                    }
+                    .onDisappear {
+                        cancelStepGainPopupDismissTask()
                     }
                     .onReceive(NotificationCenter.default.publisher(for: .memoShowWalkStart)) { _ in
                         handleWalkMenuRequest()
@@ -130,6 +139,9 @@ struct RootView: View {
                         withAnimation(.easeInOut(duration: 0.18)) {
                             isHomeBannerHiddenByChildScreen = false
                         }
+                    }
+                    .onChange(of: sharedState.walletSteps) { oldValue, newValue in
+                        handleWalletStepsChange(oldValue: oldValue, newValue: newValue)
                     }
                     .onChange(of: sharedState.happinessLevel) { _, _ in
                         AdMobManager.shared.prepareInterstitialGetIfNeeded(
@@ -189,6 +201,57 @@ struct RootView: View {
             .zIndex(15_001)
             .transition(.scale(scale: 0.94).combined(with: .opacity))
         }
+    }
+
+    @ViewBuilder
+    private var stepGainPopupLayer: some View {
+        if let stepGainPopup {
+            StepGainPopupView(amount: stepGainPopup.amount)
+                .id(stepGainPopup.id)
+                .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
+                .padding(.top, 210)
+                .allowsHitTesting(false)
+                .zIndex(30_000)
+                .transition(.scale(scale: 0.82).combined(with: .opacity))
+        }
+    }
+
+    private func handleWalletStepsChange(oldValue: Int, newValue: Int) {
+        let previousValue = lastObservedWalletSteps ?? oldValue
+        lastObservedWalletSteps = newValue
+
+        let addedSteps = newValue - previousValue
+        guard addedSteps > 0 else { return }
+
+        showStepGainPopup(amount: addedSteps)
+    }
+
+    private func showStepGainPopup(amount: Int) {
+        let safeAmount = max(0, amount)
+        guard safeAmount > 0 else { return }
+
+        cancelStepGainPopupDismissTask()
+
+        let item = StepGainPopupItem(amount: safeAmount)
+        withAnimation(.spring(response: 0.26, dampingFraction: 0.68)) {
+            stepGainPopup = item
+        }
+
+        stepGainPopupDismissTask = Task { @MainActor in
+            try? await Task.sleep(nanoseconds: 2_000_000_000)
+            guard !Task.isCancelled else { return }
+            guard stepGainPopup?.id == item.id else { return }
+
+            withAnimation(.easeOut(duration: 0.35)) {
+                stepGainPopup = nil
+            }
+            stepGainPopupDismissTask = nil
+        }
+    }
+
+    private func cancelStepGainPopupDismissTask() {
+        stepGainPopupDismissTask?.cancel()
+        stepGainPopupDismissTask = nil
     }
 
     private func handleWalkMenuRequest() {
