@@ -5,6 +5,7 @@
 //  Updated for HomeView happiness UI.
 //  円形内の波表現だけ MetalCircularLiquidLayer に差し替え、
 //  glass_heart とレベルバッジアセットの重なり順・サイズ感は既存実装に戻しています。
+//  おやすみモード中は幸せ度メーターの液体色を金色にします。
 //
 
 import SwiftUI
@@ -48,16 +49,31 @@ struct HappinessStomachGauge: View {
         return CGFloat(clampedPoint) / CGFloat(maxPoint)
     }
 
-    private var liquidMainColor: Color {
-        Color(red: 0.88, green: 0.24, blue: 0.32)
+    private static let sleepModeEndsAtKey = "memo.happiness.sleepMode.endsAt"
+
+    private static func isSleepModeActive(now: Date = Date()) -> Bool {
+        guard let endsAt = UserDefaults.standard.object(forKey: sleepModeEndsAtKey) as? Date else {
+            return false
+        }
+        return endsAt > now
     }
 
-    private var liquidDeepColor: Color {
-        Color(red: 0.72, green: 0.12, blue: 0.20)
+    private func liquidMainColor(isSleepModeActive: Bool) -> Color {
+        isSleepModeActive
+        ? Color(red: 1.0, green: 0.72, blue: 0.16)
+        : Color(red: 0.88, green: 0.24, blue: 0.32)
     }
 
-    private var liquidHighlightColor: Color {
-        Color(red: 1.0, green: 0.55, blue: 0.64)
+    private func liquidDeepColor(isSleepModeActive: Bool) -> Color {
+        isSleepModeActive
+        ? Color(red: 0.88, green: 0.52, blue: 0.04)
+        : Color(red: 0.72, green: 0.12, blue: 0.20)
+    }
+
+    private func liquidHighlightColor(isSleepModeActive: Bool) -> Color {
+        isSleepModeActive
+        ? Color(red: 1.0, green: 0.94, blue: 0.48)
+        : Color(red: 1.0, green: 0.55, blue: 0.64)
     }
 
     private var isMetalLiquidActive: Bool {
@@ -70,18 +86,19 @@ struct HappinessStomachGauge: View {
     }
 
     var body: some View {
-        TimelineView(.animation(minimumInterval: 1.0 / 30.0)) { _ in
+        TimelineView(.animation(minimumInterval: 1.0 / 30.0)) { timeline in
             let heartWidth = innerSize * 0.88
             let heartHeight = innerSize * 0.88
             let liquidDiameter = outerSize * 0.98
+            let isSleepModeActive = Self.isSleepModeActive(now: timeline.date)
 
             ZStack {
                 if fillFraction > 0.001 {
                     MetalCircularLiquidLayer(
                         fillFraction: fillFraction,
-                        mainColor: liquidMainColor,
-                        deepColor: liquidDeepColor,
-                        highlightColor: liquidHighlightColor,
+                        mainColor: liquidMainColor(isSleepModeActive: isSleepModeActive),
+                        deepColor: liquidDeepColor(isSleepModeActive: isSleepModeActive),
+                        highlightColor: liquidHighlightColor(isSleepModeActive: isSleepModeActive),
                         isActive: isMetalLiquidActive
                     )
                     .frame(width: liquidDiameter, height: liquidDiameter)

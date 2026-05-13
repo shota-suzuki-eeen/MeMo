@@ -5,6 +5,7 @@
 //  Updated for AdMob production IDs.
 //  Prepared for future subscription-based passive ad hiding.
 //  お散歩機能のリワード広告IDを追加。
+//  おやすみモード用のリワード広告管理を追加。
 //
 
 import Foundation
@@ -27,6 +28,7 @@ enum AdUnitID {
     static let rewardGachaProd: String = "ca-app-pub-1093843343402854/4440075552"
     static let rewardWalkStartProd: String = "ca-app-pub-1093843343402854/2648339519"
     static let rewardWalkDoubleProd: String = "ca-app-pub-1093843343402854/2456767829"
+    static let rewardSleepModeProd: String = "ca-app-pub-1093843343402854/7266688481"
     static let interstitialCharacterSetProd: String = "ca-app-pub-1093843343402854/1430768838"
     static let interstitialGetProd: String = "ca-app-pub-1093843343402854/1732045372"
 
@@ -72,6 +74,14 @@ enum AdUnitID {
         return rewardedTest
         #else
         return rewardWalkDoubleProd
+        #endif
+    }
+
+    static var rewardSleepMode: String {
+        #if DEBUG
+        return rewardedTest
+        #else
+        return rewardSleepModeProd
         #endif
     }
 
@@ -131,6 +141,7 @@ final class AdMobManager: ObservableObject {
     let rewardGacha = RewardedAdManager(adUnitID: AdUnitID.rewardGacha)
     let rewardWalkStart = RewardedAdManager(adUnitID: AdUnitID.rewardWalkStart)
     let rewardWalkDouble = RewardedAdManager(adUnitID: AdUnitID.rewardWalkDouble)
+    let rewardSleepMode = RewardedAdManager(adUnitID: AdUnitID.rewardSleepMode)
     let interstitialCharacterSet = InterstitialAdManager(adUnitID: AdUnitID.interstitialCharacterSet)
     let interstitialGet = InterstitialAdManager(adUnitID: AdUnitID.interstitialGet)
 
@@ -160,6 +171,7 @@ final class AdMobManager: ObservableObject {
             rewardGacha.load()
             rewardWalkStart.load()
             rewardWalkDouble.load()
+            rewardSleepMode.load()
             interstitialCharacterSet.load()
             interstitialGet.load()
             return
@@ -174,6 +186,7 @@ final class AdMobManager: ObservableObject {
         rewardGacha.load()
         rewardWalkStart.load()
         rewardWalkDouble.load()
+        rewardSleepMode.load()
 
         guard shouldUsePassiveAds else { return }
         interstitialCharacterSet.load()
@@ -190,6 +203,10 @@ final class AdMobManager: ObservableObject {
 
     func prepareRewardWalkDouble() {
         rewardWalkDouble.loadIfNeeded()
+    }
+
+    func prepareRewardSleepMode() {
+        rewardSleepMode.loadIfNeeded()
     }
 
     func prepareInterstitialCharacterSet() {

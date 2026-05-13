@@ -17,6 +17,7 @@ struct HomeView: View {
     @Environment(\.modelContext) private var modelContext
     @Environment(\.scenePhase) private var scenePhase
     @EnvironmentObject private var bgmManager: BGMManager
+    @ObservedObject private var sleepModeAd = AdMobManager.shared.rewardSleepMode
     @State private var touchTapSEPool = TouchTapSEPool()
     @AppStorage(WallpaperCatalog.selectedHomeWallpaperAssetNameKey)
     private var selectedHomeWallpaperAssetName: String = WallpaperCatalog.defaultWallpaper.assetName
@@ -50,6 +51,8 @@ struct HomeView: View {
     @State private var showWorkTimerPreparation: Bool = false
     @State private var showRightMenuPopup: Bool = false
     @State private var activeTopInfoPopup: TopInfoPopup?
+    @State private var showSleepModePopup: Bool = false
+    @State private var sleepModeMessage: String?
 
     @State private var showFoodSelector: Bool = false
     @State private var selectedFoodID: String?
@@ -402,6 +405,7 @@ struct HomeView: View {
         static let topInfoPopupCloseButtonAssetName: String = "close_button"
         static let topInfoPopupCloseButtonSize: CGFloat = 48
         static let zTopInfoPopup: Double = 1200
+        static let zSleepModePopup: Double = 1300
 
         static let rightButtonSize: CGFloat = 116
         static let rightButtonsSpacing: CGFloat = 28
@@ -528,6 +532,7 @@ struct HomeView: View {
                 syncFoodSelectorSelection()
                 syncDisplayedFullness()
                 scheduleHappinessDecayIfNeeded(now: Date())
+                AdMobManager.shared.prepareRewardSleepMode()
 
                 updateToiletWiggle()
                 syncCharacterBaseFromState(force: true)
@@ -549,6 +554,7 @@ struct HomeView: View {
                 syncDisplayedHappiness(animated: false)
                 syncDisplayedFullness(animated: false)
                 scheduleHappinessDecayIfNeeded(now: Date())
+                AdMobManager.shared.prepareRewardSleepMode()
 
                 withAnimation(.easeOut(duration: 0.25)) {
                     displayedStepProgress = calcStepProgressRaw(
@@ -574,6 +580,8 @@ struct HomeView: View {
                 isCharacterActionRunning = false
                 characterAssetName = preferredCharacterRestAssetName
                 activeTopInfoPopup = nil
+                showSleepModePopup = false
+                sleepModeMessage = nil
                 showToiletLockedPopup = false
                 showNoFoodPopup = false
                 showFoodSelector = false
@@ -773,6 +781,7 @@ struct HomeView: View {
             mainHomeContentView
             rightMenuPopupOverlay
             topInfoPopupOverlay
+            sleepModePopupOverlay
             noFoodMessagePopupOverlay
             bottomButtonsTimelineLayer
             toiletTicketButtonLayer
@@ -853,14 +862,18 @@ struct HomeView: View {
     }
 
     private var topStatusButtonsLayer: some View {
-        TopStatusButtons(
-            onCoin: { openTopInfoPopup(.wallet) },
-            onShoes: { openTopInfoPopup(.todaySteps) },
-            onPresentBox: { openTopInfoPopup(.happinessRewards) },
-            buttonSize: Layout.topStatusButtonSize,
-            iconSize: Layout.topStatusButtonIconSize,
-            spacing: Layout.topStatusButtonsSpacing
-        )
+        TimelineView(.periodic(from: Date(), by: 1)) { timeline in
+            TopStatusButtons(
+                onCoin: { openTopInfoPopup(.wallet) },
+                onShoes: { openTopInfoPopup(.todaySteps) },
+                onPresentBox: { openTopInfoPopup(.happinessRewards) },
+                onSleep: { openSleepModePopup() },
+                isSleepModeActive: state.isHappinessSleepModeActive(now: timeline.date),
+                buttonSize: Layout.topStatusButtonSize,
+                iconSize: Layout.topStatusButtonIconSize,
+                spacing: Layout.topStatusButtonsSpacing
+            )
+        }
         .padding(.top, Layout.topStatusButtonsTop)
         .padding(.trailing, Layout.topStatusButtonsTrailing)
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topTrailing)
@@ -1132,6 +1145,40 @@ struct HomeView: View {
             .ignoresSafeArea()
             .zIndex(Layout.zTopInfoPopup + 1)
             .transition(.scale(scale: 0.94).combined(with: .opacity))
+        }
+    }
+
+    @ViewBuilder
+    private var sleepModePopupOverlay: some View {
+        if showSleepModePopup {
+            ZStack {
+                Color.black.opacity(0.34)
+                    .ignoresSafeArea()
+                    .allowsHitTesting(true)
+                    .zIndex(0)
+
+                TimelineView(.periodic(from: Date(), by: 1)) { timeline in
+                    SleepModePopupView(
+                        remainingSeconds: state.happinessSleepModeRemainingSeconds(now: timeline.date),
+                        isSleepModeActive: state.isHappinessSleepModeActive(now: timeline.date),
+                        isAdReady: sleepModeAd.isReady,
+                        isAdLoading: sleepModeAd.isLoading,
+                        message: sleepModeMessage,
+                        onLater: { closeSleepModePopup() },
+                        onStartWithAd: { startSleepModeWithAd() }
+                    )
+                    .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .center)
+                    .padding(.horizontal, 18)
+                    .allowsHitTesting(true)
+                    .transition(.scale(scale: 0.94).combined(with: .opacity))
+                }
+                .ignoresSafeArea()
+                .zIndex(1)
+            }
+            .frame(maxWidth: .infinity, maxHeight: .infinity)
+            .ignoresSafeArea()
+            .zIndex(Layout.zSleepModePopup)
+            .transition(.opacity)
         }
     }
 
@@ -1461,6 +1508,13 @@ struct HomeView: View {
         let fullness = state.currentSatisfaction(now: now)
         state.refreshHappinessDecayTracking(fullnessLevel: fullness, now: now)
 
+        if state.isHappinessSleepModeActive(now: now) {
+            happinessDecayAnimationTask?.cancel()
+            happinessDecayAnimationTask = nil
+            syncDisplayedHappiness(animated: false)
+            return
+        }
+
         guard fullness == 0 else {
             happinessDecayAnimationTask?.cancel()
             happinessDecayAnimationTask = nil
@@ -1646,6 +1700,53 @@ struct HomeView: View {
         if totalDistance < 10 {
             registerCharacterPettingTouch(at: value.location, in: gestureAreaSize, triggerKind: .tap)
         }
+    }
+
+    private func openSleepModePopup() {
+        bgmManager.playSE(.push)
+        sleepModeMessage = nil
+        AdMobManager.shared.prepareRewardSleepMode()
+
+        withAnimation(.easeInOut(duration: 0.18)) {
+            showSleepModePopup = true
+        }
+    }
+
+    private func closeSleepModePopup(playSound: Bool = true) {
+        if playSound {
+            bgmManager.playSE(.push)
+        }
+
+        sleepModeMessage = nil
+        withAnimation(.easeInOut(duration: 0.18)) {
+            showSleepModePopup = false
+        }
+    }
+
+    @MainActor
+    private func startSleepModeWithAd() {
+        sleepModeMessage = nil
+        AdMobManager.shared.prepareRewardSleepMode()
+
+        sleepModeAd.show(
+            onReward: {
+                let now = Date()
+                state.activateHappinessSleepMode(now: now)
+                state.refreshHappinessDecayTracking(fullnessLevel: state.currentSatisfaction(now: now), now: now)
+                save(forceWidgetReload: true)
+                syncDisplayedHappiness(animated: false)
+                scheduleHappinessDecayIfNeeded(now: now)
+                AdMobManager.shared.prepareRewardSleepMode()
+
+                withAnimation(.easeInOut(duration: 0.18)) {
+                    sleepModeMessage = "おやすみモードを開始しました。幸せ度の低下を6時間おやすみします。"
+                }
+            },
+            onUnavailable: {
+                sleepModeMessage = "広告の準備ができませんでした。少し時間をおいて再度お試しください。"
+                AdMobManager.shared.prepareRewardSleepMode()
+            }
+        )
     }
 
     private func openTopInfoPopup(_ popup: TopInfoPopup) {
@@ -3273,6 +3374,8 @@ private struct TopStatusButtons: View {
     let onCoin: () -> Void
     let onShoes: () -> Void
     let onPresentBox: () -> Void
+    let onSleep: () -> Void
+    let isSleepModeActive: Bool
     let buttonSize: CGFloat
     let iconSize: CGFloat
     let spacing: CGFloat
@@ -3282,7 +3385,31 @@ private struct TopStatusButtons: View {
             StatusIconButton(imageName: "coin", buttonSize: buttonSize, iconSize: iconSize, action: onCoin)
             StatusIconButton(imageName: "shoes", buttonSize: buttonSize, iconSize: iconSize, action: onShoes)
             StatusIconButton(imageName: "presentBox", buttonSize: buttonSize, iconSize: iconSize, action: onPresentBox)
+            SleepStatusIconButton(
+                imageName: isSleepModeActive ? "sleep_button_on" : "sleep_button_off",
+                buttonSize: buttonSize,
+                action: onSleep
+            )
         }
+    }
+}
+
+private struct SleepStatusIconButton: View {
+    let imageName: String
+    let buttonSize: CGFloat
+    let action: () -> Void
+
+    var body: some View {
+        Button(action: action) {
+            Image(imageName)
+                .resizable()
+                .scaledToFit()
+                .frame(width: buttonSize, height: buttonSize)
+                .contentShape(RoundedRectangle(cornerRadius: 18, style: .continuous))
+        }
+        .buttonStyle(.plain)
+        .shadow(color: .black.opacity(0.16), radius: 8, x: 0, y: 4)
+        .accessibilityLabel("おやすみモード")
     }
 }
 

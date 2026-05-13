@@ -19,6 +19,7 @@ extension AppState {
     static let happinessDailyPettingPointLimit: Int = 100
     static let happinessDecayIntervalSeconds: TimeInterval = 5 * 60
     static let happinessRewardLevelStep: Int = 5
+    static let happinessSleepModeDurationSeconds: TimeInterval = 6 * 60 * 60
 
     struct HappinessRewardDefinition: Identifiable, Equatable {
         let level: Int
@@ -68,6 +69,7 @@ extension AppState {
         static let pettingPointsToday = "memo.happiness.petting.pointsToday"
         static let pettingDayKey = "memo.happiness.petting.dayKey"
         static let claimedRewardLevels = "memo.happiness.claimedRewardLevels"
+        static let sleepModeEndsAt = "memo.happiness.sleepMode.endsAt"
     }
 
     private var happinessDefaults: UserDefaults {
@@ -118,6 +120,17 @@ extension AppState {
         }
     }
 
+    var happinessSleepModeEndsAt: Date? {
+        get { happinessDefaults.object(forKey: HappinessStorageKeys.sleepModeEndsAt) as? Date }
+        set {
+            if let newValue {
+                happinessDefaults.set(newValue, forKey: HappinessStorageKeys.sleepModeEndsAt)
+            } else {
+                happinessDefaults.removeObject(forKey: HappinessStorageKeys.sleepModeEndsAt)
+            }
+        }
+    }
+
     var happinessPettingTouchCountToday: Int {
         get {
             syncHappinessPettingDayKeyIfNeeded()
@@ -163,6 +176,54 @@ extension AppState {
         let sorted = levels.sorted()
         let data = try? JSONEncoder().encode(sorted)
         happinessDefaults.set(data, forKey: HappinessStorageKeys.claimedRewardLevels)
+    }
+
+    @discardableResult
+    private func activeHappinessSleepModeEnd(now: Date = Date()) -> Date? {
+        guard let endsAt = happinessSleepModeEndsAt else { return nil }
+
+        if endsAt > now {
+            return endsAt
+        }
+
+        happinessSleepModeEndsAt = nil
+
+        if let anchor = happinessLastDecayAt {
+            if anchor < endsAt {
+                happinessLastDecayAt = endsAt
+            }
+        } else {
+            happinessLastDecayAt = endsAt
+        }
+
+        return nil
+    }
+
+    func isHappinessSleepModeActive(now: Date = Date()) -> Bool {
+        activeHappinessSleepModeEnd(now: now) != nil
+    }
+
+    func happinessSleepModeRemainingSeconds(now: Date = Date()) -> TimeInterval {
+        guard let endsAt = activeHappinessSleepModeEnd(now: now) else { return 0 }
+        return max(0, endsAt.timeIntervalSince(now))
+    }
+
+    @discardableResult
+    func activateHappinessSleepMode(
+        now: Date = Date(),
+        duration: TimeInterval = AppState.happinessSleepModeDurationSeconds
+    ) -> Date {
+        let safeDuration = max(0, duration)
+        let requestedEnd = now.addingTimeInterval(safeDuration)
+        let existingActiveEnd = activeHappinessSleepModeEnd(now: now)
+        let nextEnd = Swift.max(existingActiveEnd ?? requestedEnd, requestedEnd)
+
+        happinessSleepModeEndsAt = nextEnd
+
+        // おやすみモード中の低下分を終了後にまとめて発生させないため、
+        // 次の低下判定の基準時刻を終了時刻に進めておく。
+        happinessLastDecayAt = nextEnd
+        return nextEnd
     }
 
     func claimedHappinessRewardLevelsSnapshot() -> Set<Int> {
@@ -309,6 +370,11 @@ extension AppState {
     }
 
     func refreshHappinessDecayTracking(fullnessLevel: Int, now: Date = Date()) {
+        if let sleepModeEnd = activeHappinessSleepModeEnd(now: now) {
+            happinessLastDecayAt = sleepModeEnd
+            return
+        }
+
         if fullnessLevel > 0 {
             happinessLastDecayAt = now
             return
@@ -325,6 +391,12 @@ extension AppState {
 
     func pendingHappinessDecayCount(fullnessLevel: Int, now: Date = Date()) -> Int {
         resetHappinessPettingIfNeeded(now: now)
+
+        if let sleepModeEnd = activeHappinessSleepModeEnd(now: now) {
+            happinessLastDecayAt = sleepModeEnd
+            return 0
+        }
+
         guard fullnessLevel <= 0 else { return 0 }
         guard happinessLevel > 0 || happinessPoint > 0 else { return 0 }
         guard let anchor = happinessLastDecayAt else { return 0 }
@@ -333,6 +405,10 @@ extension AppState {
 
     @discardableResult
     func consumeOneHappinessDecayStep() -> Bool {
+        if isHappinessSleepModeActive(now: Date()) {
+            return false
+        }
+
         guard happinessLevel > 0 || happinessPoint > 0 else { return false }
         decreaseHappinessOnePoint()
 
