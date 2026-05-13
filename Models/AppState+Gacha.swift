@@ -54,6 +54,7 @@ extension AppState {
         static let freeAdDayKey = "memo.gacha.freeAd.dayKey"
         static let freeAdUsedSlots = "memo.gacha.freeAd.usedSlots"
         static let specialItemCounts = "memo.gacha.specialItemCounts"
+        static let initialIPadFreeTenDrawConsumed = "memo.gacha.initialIPadFreeTenDrawConsumed"
     }
 
     private var gachaDefaults: UserDefaults {
@@ -94,6 +95,11 @@ extension AppState {
         }
     }
 
+    private var gachaInitialIPadFreeTenDrawConsumedStorage: Bool {
+        get { gachaDefaults.bool(forKey: GachaStorageKeys.initialIPadFreeTenDrawConsumed) }
+        set { gachaDefaults.set(newValue, forKey: GachaStorageKeys.initialIPadFreeTenDrawConsumed) }
+    }
+
     func gachaResetIfNeeded(now: Date = Date()) {
         ensureDailyResetIfNeeded(now: now)
 
@@ -132,6 +138,17 @@ extension AppState {
         used.insert(slot)
         gachaFreeAdUsedSlotsStorage = used.map(\.rawValue).sorted()
         return slot
+    }
+
+    func gachaCanUseInitialIPadFreeTenDraw(isPad: Bool) -> Bool {
+        isPad && !gachaInitialIPadFreeTenDrawConsumedStorage
+    }
+
+    @discardableResult
+    func gachaConsumeInitialIPadFreeTenDraw(isPad: Bool) -> Bool {
+        guard gachaCanUseInitialIPadFreeTenDraw(isPad: isPad) else { return false }
+        gachaInitialIPadFreeTenDrawConsumedStorage = true
+        return true
     }
 
     func gachaSpecialItemCount(id: String) -> Int {

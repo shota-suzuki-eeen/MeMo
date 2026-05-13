@@ -8,6 +8,7 @@
 
 import SwiftUI
 import SwiftData
+import UIKit
 
 fileprivate enum GachaRarity: String, CaseIterable, Identifiable {
     case blue
@@ -270,6 +271,17 @@ struct GachaView: View {
         phase != .idle
     }
 
+    private var isIPadDevice: Bool {
+        UIDevice.current.userInterfaceIdiom == .pad
+    }
+
+    private var isInitialIPadFreeTenDrawAvailable: Bool {
+        guard let state else { return false }
+        return !isTutorialMode
+            && phase == .idle
+            && state.gachaCanUseInitialIPadFreeTenDraw(isPad: isIPadDevice)
+    }
+
     private var canGoldAppear: Bool {
         guard let state else { return false }
         return !GachaCatalog.remainingCharacters(state: state).isEmpty
@@ -309,6 +321,9 @@ struct GachaView: View {
         guard let state else { return "-" }
         let now = Date()
 
+        if state.gachaCanUseInitialIPadFreeTenDraw(isPad: isIPadDevice) {
+            return "iPad初回特典：広告なしで無料10回を利用できます"
+        }
         if let slot = state.gachaAvailableFreeAdSlot(now: now) {
             return "\(slot.title)の枠が利用可能（\(slot.windowText)）"
         }
@@ -338,12 +353,20 @@ struct GachaView: View {
         if isTutorialMode {
             return phase == .idle && tutorialFreeTenDrawStarted == false
         }
-        return phase == .idle && state.gachaCanUseFreeTenDraw(now: Date())
+
+        return phase == .idle
+            && (
+                state.gachaCanUseInitialIPadFreeTenDraw(isPad: isIPadDevice)
+                || state.gachaCanUseFreeTenDraw(now: Date())
+            )
     }
 
     private var freeTenDrawButtonTitle: String {
         if isTutorialMode {
             return tutorialFreeTenDrawStarted ? "無料10回（体験済み）" : "無料10回"
+        }
+        if isInitialIPadFreeTenDrawAvailable {
+            return "初回無料10回"
         }
         return canFreeTenDraw ? "広告視聴で無料10回" : "広告無料10回（時間外 / 使用済み）"
     }
@@ -352,6 +375,7 @@ struct GachaView: View {
         GeometryReader { proxy in
             let safeTop = proxy.safeAreaInsets.top
             let safeBottom = proxy.safeAreaInsets.bottom
+            let availableHeight = proxy.size.height
             let machineWidth = min(proxy.size.width * 0.72, proxy.size.height * 0.34, 320)
             let contentWidth = min(proxy.size.width - (Layout.horizontalPadding * 2), Layout.contentMaxWidth)
 
@@ -373,7 +397,8 @@ struct GachaView: View {
                         machineWidth: machineWidth,
                         contentWidth: contentWidth,
                         safeTop: safeTop,
-                        safeBottom: safeBottom
+                        safeBottom: safeBottom,
+                        availableHeight: availableHeight
                     )
                 }
 
@@ -550,6 +575,8 @@ struct GachaView: View {
         let freeTenDrawAction: () -> Void = {
             if isTutorialMode {
                 beginTutorialFreeTenDraw()
+            } else if isInitialIPadFreeTenDrawAvailable {
+                beginInitialIPadFreeTenDraw()
             } else {
                 performRewardedAdThenFreeTenDraw()
             }
@@ -664,6 +691,18 @@ struct GachaView: View {
         }
 
         beginDraw(mode: .ten, isFreeAd: true, freeSlot: slot)
+    }
+
+    private func beginInitialIPadFreeTenDraw() {
+        guard let state else { return }
+        guard phase == .idle else { return }
+
+        guard state.gachaConsumeInitialIPadFreeTenDraw(isPad: isIPadDevice) else {
+            showToast("初回無料10回は使用済みです")
+            return
+        }
+
+        beginDraw(mode: .ten, isFreeAd: true, freeSlot: nil)
     }
 
     private func beginTutorialFreeTenDraw() {
@@ -794,7 +833,8 @@ struct GachaView: View {
         machineWidth: CGFloat,
         contentWidth: CGFloat,
         safeTop: CGFloat,
-        safeBottom: CGFloat
+        safeBottom: CGFloat,
+        availableHeight: CGFloat
     ) -> some View {
         ZStack {
             Color.black
@@ -810,27 +850,27 @@ struct GachaView: View {
                 rollingMachine(machineWidth: machineWidth, safeTop: safeTop, safeBottom: safeBottom)
 
             case .waitingTap:
-                interactiveOverlayContainer(safeTop: safeTop, safeBottom: safeBottom) {
+                interactiveOverlayContainer(safeTop: safeTop, safeBottom: safeBottom, availableHeight: availableHeight) {
                     waitingTapView(proxy: proxy, contentWidth: contentWidth)
                 }
 
             case .openingSingle:
-                overlayScrollContainer(safeTop: safeTop, safeBottom: safeBottom) {
+                overlayScrollContainer(safeTop: safeTop, safeBottom: safeBottom, availableHeight: availableHeight) {
                     openingSingleView
                 }
 
             case .showingSingleResult:
-                interactiveOverlayContainer(safeTop: safeTop, safeBottom: safeBottom) {
+                interactiveOverlayContainer(safeTop: safeTop, safeBottom: safeBottom, availableHeight: availableHeight) {
                     singleResultView
                 }
 
             case .openingTen:
-                overlayScrollContainer(safeTop: safeTop, safeBottom: safeBottom) {
+                overlayScrollContainer(safeTop: safeTop, safeBottom: safeBottom, availableHeight: availableHeight) {
                     openingTenView(contentWidth: contentWidth)
                 }
 
             case .showingTenResult:
-                interactiveOverlayContainer(safeTop: safeTop, safeBottom: safeBottom) {
+                interactiveOverlayContainer(safeTop: safeTop, safeBottom: safeBottom, availableHeight: availableHeight) {
                     tenResultView(contentWidth: contentWidth)
                 }
 
@@ -845,34 +885,40 @@ struct GachaView: View {
     private func overlayScrollContainer<Content: View>(
         safeTop: CGFloat,
         safeBottom: CGFloat,
+        availableHeight: CGFloat,
         @ViewBuilder content: () -> Content
     ) -> some View {
-        ScrollView(showsIndicators: false) {
+        let minHeight = max(0, availableHeight - safeTop - safeBottom)
+
+        return ScrollView(showsIndicators: false) {
             VStack {
                 content()
             }
             .frame(maxWidth: .infinity)
+            .frame(minHeight: minHeight, alignment: .center)
             .padding(.top, safeTop + 18)
             .padding(.bottom, max(safeBottom, 16) + 20)
             .padding(.horizontal, 18)
-            .frame(minHeight: UIScreen.main.bounds.height - safeTop - safeBottom)
         }
     }
 
     private func interactiveOverlayContainer<Content: View>(
         safeTop: CGFloat,
         safeBottom: CGFloat,
+        availableHeight: CGFloat,
         @ViewBuilder content: () -> Content
     ) -> some View {
-        ScrollView(showsIndicators: false) {
+        let minHeight = max(0, availableHeight - safeTop - safeBottom)
+
+        return ScrollView(showsIndicators: false) {
             VStack {
                 content()
             }
             .frame(maxWidth: .infinity, alignment: .center)
+            .frame(minHeight: minHeight, alignment: .center)
             .padding(.top, safeTop + 18)
             .padding(.bottom, max(safeBottom, 16) + 20)
             .padding(.horizontal, 18)
-            .frame(minHeight: UIScreen.main.bounds.height - safeTop - safeBottom)
             .contentShape(Rectangle())
             .onTapGesture {
                 handleOverlayTap()
@@ -931,6 +977,10 @@ struct GachaView: View {
                         .foregroundStyle(.white.opacity(0.86))
                 } else if let slot = lastFreeAdSlot, lastDrawWasFreeAd {
                     Text("無料10回（\(slot.windowText)）")
+                        .font(.system(size: 13, weight: .semibold))
+                        .foregroundStyle(.white.opacity(0.86))
+                } else if lastDrawWasFreeAd && isIPadDevice {
+                    Text("iPad初回特典 / 広告なし")
                         .font(.system(size: 13, weight: .semibold))
                         .foregroundStyle(.white.opacity(0.86))
                 }
