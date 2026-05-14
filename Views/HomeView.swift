@@ -62,6 +62,7 @@ struct HomeView: View {
     @State private var pendingFoodFeedID: String?
     @State private var isFoodSelectorHorizontalRattling: Bool = false
     @State private var foodSelectorDragAnchorFoodID: String?
+    @State private var displayedDesiredFoodID: String?
 
     @State private var characterAssetName: String = ""
     @State private var idleLoopTask: Task<Void, Never>?
@@ -157,6 +158,11 @@ struct HomeView: View {
         let foods = currentFoodSelectorFoods
         guard let selectedFoodID else { return foods.first }
         return foods.first(where: { $0.id == selectedFoodID }) ?? foods.first
+    }
+
+    private var currentDesiredFood: FoodCatalog.FoodItem? {
+        guard let foodID = displayedDesiredFoodID ?? state.desiredFoodID else { return nil }
+        return FoodCatalog.byId(foodID)
     }
 
     private var isFoodPendingCancelDisabledForMandatoryTutorial: Bool {
@@ -527,6 +533,7 @@ struct HomeView: View {
 
                 maybeSpawnToiletFlag(state: state, persistChanges: false)
                 maybeSpawnFoodFlag(state: state, persistChanges: false)
+                syncDesiredFoodDisplay()
 
                 syncToiletPoopsIfNeeded(containerSize: homeContentSize, persistChanges: false)
                 syncFoodSelectorSelection()
@@ -565,6 +572,7 @@ struct HomeView: View {
 
                 Task { await reconcileWalletDisplayIfNeeded(state: state) }
 
+                syncDesiredFoodDisplay()
                 syncFoodSelectorSelection()
                 syncToiletPoopsIfNeeded(containerSize: homeContentSize)
                 updateToiletWiggle()
@@ -589,6 +597,7 @@ struct HomeView: View {
                 resetFoodSelectorDragState()
                 isFoodFeedingAnimationRunning = false
                 pendingFoodFeedID = nil
+                displayedDesiredFoodID = nil
                 stopFoodSelectorHorizontalRattleIfNeeded()
                 toiletPoopActivePoint.removeAll()
                 toiletTicketClearingPoopIDs.removeAll()
@@ -653,6 +662,7 @@ struct HomeView: View {
                 syncDisplayedFullness()
 
                 if currentFullnessLevel < fullnessMaxLevel {
+                    syncDesiredFoodDisplay()
                     syncFoodSelectorSelection()
                 } else {
                     closeFoodSelector()
@@ -683,6 +693,13 @@ struct HomeView: View {
             .onReceive(NotificationCenter.default.publisher(for: Notification.Name("memo.hideHomeBannerAd"))) { _ in
                 withAnimation(.easeInOut(duration: 0.18)) {
                     showRightMenuPopup = false
+                }
+            }
+            .onReceive(NotificationCenter.default.publisher(for: .memoDesiredFoodDidChange)) { notification in
+                if let foodID = notification.object as? String {
+                    displayedDesiredFoodID = foodID
+                } else {
+                    displayedDesiredFoodID = state.desiredFoodID
                 }
             }
     }
@@ -976,8 +993,8 @@ struct HomeView: View {
     @ViewBuilder
     private var foodBubbleLayer: some View {
         if canShowFoodBubble {
-            FloatingThoughtButton(
-                imageName: "food_button",
+            DesiredFoodThoughtButton(
+                desiredFood: currentDesiredFood,
                 size: Layout.floatingBubbleSize,
                 amplitude: Layout.floatingBubbleAmplitude,
                 duration: Layout.floatingBubbleDuration,
@@ -1245,6 +1262,7 @@ struct HomeView: View {
 
                 maybeSpawnToiletFlag(state: state, now: newDate, persistChanges: false)
                 maybeSpawnFoodFlag(state: state, now: newDate, persistChanges: false)
+                syncDesiredFoodDisplay(now: newDate)
                 syncToiletPoopsIfNeeded(containerSize: homeContentSize, now: newDate, persistChanges: false)
 
                 persistHomeStateIfNeeded(previousSnapshot: previousSnapshot)
@@ -1261,6 +1279,7 @@ struct HomeView: View {
 
                 maybeSpawnToiletFlag(state: state, now: now, persistChanges: false)
                 maybeSpawnFoodFlag(state: state, now: now, persistChanges: false)
+                syncDesiredFoodDisplay(now: now)
                 syncToiletPoopsIfNeeded(containerSize: homeContentSize, now: now, persistChanges: false)
 
                 persistHomeStateIfNeeded(previousSnapshot: previousSnapshot)
@@ -1426,6 +1445,7 @@ struct HomeView: View {
 
             maybeSpawnToiletFlag(state: state, persistChanges: false)
             maybeSpawnFoodFlag(state: state, persistChanges: false)
+            syncDesiredFoodDisplay()
 
             syncToiletPoopsIfNeeded(containerSize: homeContentSize, persistChanges: false)
             syncFoodSelectorSelection()
@@ -1934,6 +1954,23 @@ struct HomeView: View {
         }
     }
 
+    @MainActor
+    private func syncDesiredFoodDisplay(now: Date = Date()) {
+        let fullnessLevel = normalizedFullnessLevel(state.currentSatisfaction(now: now))
+        if fullnessLevel < fullnessMaxLevel {
+            _ = state.ensureDesiredFoodIfNeeded()
+        }
+        displayedDesiredFoodID = state.desiredFoodID
+    }
+
+    @discardableResult
+    @MainActor
+    private func refreshDesiredFoodDisplay(excluding excludedFoodID: String? = nil) -> FoodCatalog.FoodItem? {
+        let nextFood = state.refreshDesiredFood(excluding: excludedFoodID)
+        displayedDesiredFoodID = nextFood?.id
+        return nextFood
+    }
+
     private func syncFoodSelectorSelection() {
         let allOwnedFoods = ownedFoods
         let foods = currentFoodSelectorFoods
@@ -2306,7 +2343,7 @@ struct HomeView: View {
         }
 
         let selectedFoodID = selectedFood.id
-        let shouldShowRareFoodEffect = !selectedFood.isShopEligible
+        let shouldShowHeartEffect = !selectedFood.isShopEligible || state.isDesiredFood(foodID: selectedFoodID)
 
         pendingFoodFeedID = selectedFoodID
         isFoodFeedingAnimationRunning = true
@@ -2321,14 +2358,14 @@ struct HomeView: View {
         }
 
         foodFeedResolutionTask?.cancel()
-        foodFeedResolutionTask = scheduleMainActorTask(after: 0.16) { [selectedFoodID, shouldShowRareFoodEffect] in
+        foodFeedResolutionTask = scheduleMainActorTask(after: 0.16) { [selectedFoodID, shouldShowHeartEffect] in
             let didFeed = resolveFood(foodId: selectedFoodID, state: state)
             isFoodFeedingAnimationRunning = false
             foodSelectorDragOffset = .zero
             foodFeedResolutionTask = nil
 
             if didFeed {
-                if shouldShowRareFoodEffect {
+                if shouldShowHeartEffect {
                     bgmManager.playSE(.touch)
                     spawnRareFoodFloatingHearts(count: 5)
                 }
@@ -2443,9 +2480,13 @@ struct HomeView: View {
 
         let didRaise = state.raiseFoodFlagIfNeeded(now: now)
         if didRaise {
+            _ = refreshDesiredFoodDisplay()
+
             if persistChanges {
                 save()
             }
+        } else {
+            syncDesiredFoodDisplay(now: now)
         }
         return didRaise
     }
@@ -2587,6 +2628,11 @@ struct HomeView: View {
         _ = state.resolveFood(now: now)
 
         let happinessBonus = state.happinessBonusPoints(forFoodID: food.id)
+            + state.desiredFoodAdditionalHappinessBonus(forFoodID: food.id)
+
+        _ = state.registerDesiredFoodFeedingResult(foodID: food.id)
+        displayedDesiredFoodID = state.desiredFoodID
+
         if happinessBonus > 0 {
             _ = state.addHappinessPoints(happinessBonus, now: now)
         }
@@ -2720,6 +2766,7 @@ struct HomeView: View {
             return
         }
 
+        syncDesiredFoodDisplay()
         syncFoodSelectorSelection()
 
         guard !ownedFoods.isEmpty else {
