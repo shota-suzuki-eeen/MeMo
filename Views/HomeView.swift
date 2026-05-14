@@ -1182,7 +1182,8 @@ struct HomeView: View {
                         isAdLoading: sleepModeAd.isLoading,
                         message: sleepModeMessage,
                         onLater: { closeSleepModePopup() },
-                        onStartWithAd: { startSleepModeWithAd() }
+                        onStartWithAd: { startSleepModeWithAd() },
+                        onResetWithAd: { resetSleepModeWithAd() }
                     )
                     .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .center)
                     .padding(.horizontal, 18)
@@ -1745,6 +1746,20 @@ struct HomeView: View {
 
     @MainActor
     private func startSleepModeWithAd() {
+        showRewardSleepModeAd(
+            successMessage: "おやすみモードを開始しました。幸せ度の低下を6時間おやすみします。"
+        )
+    }
+
+    @MainActor
+    private func resetSleepModeWithAd() {
+        showRewardSleepModeAd(
+            successMessage: "おやすみモードの残り時間を6時間にリセットしました。"
+        )
+    }
+
+    @MainActor
+    private func showRewardSleepModeAd(successMessage: String) {
         sleepModeMessage = nil
         AdMobManager.shared.prepareRewardSleepMode()
 
@@ -1759,7 +1774,7 @@ struct HomeView: View {
                 AdMobManager.shared.prepareRewardSleepMode()
 
                 withAnimation(.easeInOut(duration: 0.18)) {
-                    sleepModeMessage = "おやすみモードを開始しました。幸せ度の低下を6時間おやすみします。"
+                    sleepModeMessage = successMessage
                 }
             },
             onUnavailable: {

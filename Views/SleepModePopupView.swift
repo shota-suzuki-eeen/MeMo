@@ -15,6 +15,7 @@ struct SleepModePopupView: View {
     let message: String?
     let onLater: () -> Void
     let onStartWithAd: () -> Void
+    let onResetWithAd: () -> Void
 
     private var safeRemainingSeconds: Int {
         max(0, Int(ceil(remainingSeconds)))
@@ -30,6 +31,18 @@ struct SleepModePopupView: View {
 
     private var seconds: Int {
         safeRemainingSeconds % 60
+    }
+
+    private var rewardedButtonTitle: String {
+        isAdLoading && !isAdReady ? "準備中" : "時間リセット"
+    }
+
+    private var startButtonTitle: String {
+        isAdLoading && !isAdReady ? "準備中" : "おやすみスタート"
+    }
+
+    private var rewardedButtonSystemImageName: String? {
+        isAdLoading && !isAdReady ? nil : "play.rectangle.fill"
     }
 
     var body: some View {
@@ -85,10 +98,18 @@ struct SleepModePopupView: View {
                     action: onLater
                 )
 
-                if !isSleepModeActive {
+                if isSleepModeActive {
                     SleepModePopupButton(
-                        title: isAdLoading && !isAdReady ? "準備中" : "おやすみスタート",
-                        systemImageName: isAdLoading && !isAdReady ? nil : "play.rectangle.fill",
+                        title: rewardedButtonTitle,
+                        systemImageName: rewardedButtonSystemImageName,
+                        isPrimary: true,
+                        isEnabled: true,
+                        action: onResetWithAd
+                    )
+                } else {
+                    SleepModePopupButton(
+                        title: startButtonTitle,
+                        systemImageName: rewardedButtonSystemImageName,
                         isPrimary: true,
                         isEnabled: true,
                         action: onStartWithAd
