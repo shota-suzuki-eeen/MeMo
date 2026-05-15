@@ -95,6 +95,30 @@ fileprivate struct GachaProbabilityRow: Identifiable {
     var id: String { rarity.id }
 }
 
+fileprivate struct GachaEmissionCharacter: Identifiable, Hashable {
+    let id: String
+    let name: String
+    let imageName: String
+}
+
+fileprivate struct GachaDefinition: Identifiable, Hashable {
+    let id: String
+    let title: String
+    let machineAssetName: String
+    let characterIDs: [String]
+
+    var emissionCharacters: [GachaEmissionCharacter] {
+        characterIDs.compactMap { petID in
+            guard let pet = PetMaster.all.first(where: { $0.id == petID }) else { return nil }
+            return GachaEmissionCharacter(
+                id: pet.id,
+                name: GachaCatalog.resolvedCharacterName(for: pet),
+                imageName: PetMaster.assetName(for: pet.id)
+            )
+        }
+    }
+}
+
 fileprivate enum GachaCatalog {
     static let normalFoodIDs: [String] = [
         "barger", "beer", "cake", "carry", "coffee", "coke", "gyuudon", "icecream", "karaage",
@@ -106,11 +130,35 @@ fileprivate enum GachaCatalog {
     ]
 
     static let toiletItemID: String = "wc"
+    static let initialDistributionPetID: String = "pet_000"
+
+    static let gachas: [GachaDefinition] = [
+        GachaDefinition(
+            id: "always",
+            title: "いつでもガチャ",
+            machineAssetName: "gatyaMachine",
+            characterIDs: PetMaster.all
+                .filter { isGachaCharacter($0) }
+                .map(\.id)
+        )
+    ]
+
+    static func isGachaCharacter(_ pet: PetMasterItem) -> Bool {
+        pet.id != initialDistributionPetID && !PetMaster.isHappinessRewardPetID(pet.id)
+    }
+
+    static func resolvedCharacterName(for pet: PetMasterItem) -> String {
+        let trimmed = pet.name.trimmingCharacters(in: .whitespacesAndNewlines)
+        if trimmed.isEmpty || trimmed == "*" {
+            return PetMaster.assetName(for: pet.id)
+        }
+        return trimmed
+    }
 
     static func remainingCharacters(state: AppState) -> [PetMasterItem] {
         let owned = Set(state.ownedPetIDs())
         return PetMaster.all.filter {
-            !owned.contains($0.id) && !PetMaster.isHappinessRewardPetID($0.id)
+            !owned.contains($0.id) && isGachaCharacter($0)
         }
     }
 
@@ -152,18 +200,10 @@ fileprivate enum GachaCatalog {
             let candidates = remainingCharacters(state: state)
             guard let pet = candidates.randomElement() else { return nil }
 
-            let resolvedName: String = {
-                let trimmed = pet.name.trimmingCharacters(in: .whitespacesAndNewlines)
-                if trimmed.isEmpty || trimmed == "*" {
-                    return PetMaster.assetName(for: pet.id)
-                }
-                return trimmed
-            }()
-
             return GachaReward(
                 rarity: .gold,
                 kind: .character(petID: pet.id),
-                title: resolvedName,
+                title: resolvedCharacterName(for: pet),
                 subtitle: "キャラクター / SR",
                 imageName: PetMaster.assetName(for: pet.id)
             )
@@ -197,6 +237,8 @@ struct GachaView: View {
     @State private var toastMessage: String?
     @State private var showToast: Bool = false
     @State private var tutorialFreeTenDrawStarted: Bool = false
+    @State private var selectedGachaIndex: Int = 0
+    @State private var showsEmissionList: Bool = false
 
     private static let pityThreshold = 100
 
@@ -265,6 +307,19 @@ struct GachaView: View {
 
     private var state: AppState? {
         states.first
+    }
+
+    private var selectedGacha: GachaDefinition {
+        let safeIndex = min(max(0, selectedGachaIndex), max(0, GachaCatalog.gachas.count - 1))
+        return GachaCatalog.gachas[safeIndex]
+    }
+
+    private var canSelectPreviousGacha: Bool {
+        selectedGachaIndex > 0
+    }
+
+    private var canSelectNextGacha: Bool {
+        selectedGachaIndex < GachaCatalog.gachas.count - 1
     }
 
     private var isOverlayVisible: Bool {
@@ -376,7 +431,7 @@ struct GachaView: View {
             let safeTop = proxy.safeAreaInsets.top
             let safeBottom = proxy.safeAreaInsets.bottom
             let availableHeight = proxy.size.height
-            let machineWidth = min(proxy.size.width * 0.72, proxy.size.height * 0.34, 320)
+            let machineWidth = min(proxy.size.width * 0.94, proxy.size.height * 0.50, 470)
             let contentWidth = min(proxy.size.width - (Layout.horizontalPadding * 2), Layout.contentMaxWidth)
 
             ZStack {
@@ -384,8 +439,8 @@ struct GachaView: View {
 
                 VStack(spacing: 0) {
                     topBar(topInset: safeTop)
+                    gachaMachineSelector(machineWidth: machineWidth, contentWidth: contentWidth)
                     idleContent(
-                        machineWidth: machineWidth,
                         contentWidth: contentWidth,
                         bottomInset: safeBottom
                     )
@@ -418,6 +473,9 @@ struct GachaView: View {
             .ignoresSafeArea()
         }
         .statusBarHidden()
+        .sheet(isPresented: $showsEmissionList) {
+            GachaEmissionListView(gacha: selectedGacha)
+        }
         .onAppear {
             bgmManager.switchBackground(to: .gacha)
             tapPromptAnimating = true
@@ -493,20 +551,98 @@ struct GachaView: View {
         }
         .padding(.horizontal, Layout.horizontalPadding)
         .padding(.top, topInset + 10)
-        .padding(.bottom, 10)
+        .padding(.bottom, 4)
     }
 
-    private func idleContent(machineWidth: CGFloat, contentWidth: CGFloat, bottomInset: CGFloat) -> some View {
+    private func gachaMachineSelector(machineWidth: CGFloat, contentWidth: CGFloat) -> some View {
+        VStack(spacing: 8) {
+            ZStack(alignment: .topTrailing) {
+                HStack(spacing: 8) {
+                    gachaArrowButton(systemName: "chevron.left", isEnabled: canSelectPreviousGacha) {
+                        selectGacha(offset: -1)
+                    }
+
+                    Image(selectedGacha.machineAssetName)
+                        .resizable()
+                        .scaledToFit()
+                        .frame(width: machineWidth)
+                        .padding(.top, 2)
+
+                    gachaArrowButton(systemName: "chevron.right", isEnabled: canSelectNextGacha) {
+                        selectGacha(offset: 1)
+                    }
+                }
+                .frame(maxWidth: contentWidth)
+
+                Button {
+                    guard phase == .idle else { return }
+                    bgmManager.playSE(.push)
+                    showsEmissionList = true
+                } label: {
+                    Text("排出リスト")
+                        .font(.system(size: 12, weight: .black))
+                        .foregroundStyle(.white)
+                        .padding(.horizontal, 12)
+                        .padding(.vertical, 8)
+                        .background(Color.black.opacity(0.54), in: Capsule())
+                        .overlay(
+                            Capsule()
+                                .stroke(Color.white.opacity(0.42), lineWidth: 1)
+                        )
+                }
+                .buttonStyle(.plain)
+                .disabled(phase != .idle)
+                .opacity(phase == .idle ? 1 : 0.5)
+                .padding(.trailing, 8)
+                .padding(.top, 8)
+            }
+
+            Text(selectedGacha.title)
+                .font(.system(size: 20, weight: .black))
+                .foregroundStyle(.white)
+                .padding(.horizontal, 18)
+                .padding(.vertical, 7)
+                .background(Color.black, in: Capsule())
+                .overlay(
+                    Capsule()
+                        .stroke(Color.white.opacity(0.28), lineWidth: 1)
+                )
+                .shadow(color: .black.opacity(0.42), radius: 3, y: 2)
+        }
+        .padding(.horizontal, Layout.horizontalPadding)
+        .padding(.bottom, 8)
+    }
+
+    private func gachaArrowButton(systemName: String, isEnabled: Bool, action: @escaping () -> Void) -> some View {
+        Button(action: action) {
+            Image(systemName: systemName)
+                .font(.system(size: 22, weight: .black))
+                .foregroundStyle(.white)
+                .frame(width: 42, height: 54)
+                .background(Color.black.opacity(0.46), in: Capsule())
+                .overlay(
+                    Capsule()
+                        .stroke(Color.white.opacity(0.28), lineWidth: 1)
+                )
+        }
+        .buttonStyle(.plain)
+        .disabled(!isEnabled || phase != .idle)
+        .opacity(isEnabled && phase == .idle ? 1 : 0.28)
+    }
+
+    private func selectGacha(offset: Int) {
+        guard phase == .idle else { return }
+        let nextIndex = selectedGachaIndex + offset
+        guard GachaCatalog.gachas.indices.contains(nextIndex) else { return }
+        bgmManager.playSE(.push)
+        withAnimation(.spring(response: 0.28, dampingFraction: 0.82)) {
+            selectedGachaIndex = nextIndex
+        }
+    }
+
+    private func idleContent(contentWidth: CGFloat, bottomInset: CGFloat) -> some View {
         ScrollView(showsIndicators: false) {
             VStack(spacing: 18) {
-                Spacer(minLength: 8)
-
-                Image(Layout.machineAssetName)
-                    .resizable()
-                    .scaledToFit()
-                    .frame(width: machineWidth)
-                    .padding(.top, 4)
-
                 if isTutorialMode {
                     TutorialGachaTeacherNote()
                         .frame(maxWidth: contentWidth)
@@ -523,6 +659,7 @@ struct GachaView: View {
             }
             .frame(maxWidth: .infinity)
             .padding(.horizontal, Layout.horizontalPadding)
+            .padding(.top, 8)
             .padding(.bottom, max(bottomInset, 16) + 24)
         }
     }
@@ -931,7 +1068,7 @@ struct GachaView: View {
             Spacer(minLength: safeTop + 24)
 
             RollingMachineView(
-                assetName: Layout.machineAssetName,
+                assetName: selectedGacha.machineAssetName,
                 width: machineWidth,
                 startDate: machineAnimationStart
             )
@@ -1483,5 +1620,82 @@ fileprivate struct ToastView: View {
             .padding(.vertical, 12)
             .background(Color.black.opacity(0.76), in: Capsule())
             .padding(.horizontal, 20)
+    }
+}
+
+fileprivate struct GachaEmissionListView: View {
+    @Environment(\.dismiss) private var dismiss
+
+    let gacha: GachaDefinition
+
+    private let columns: [GridItem] = [
+        GridItem(.flexible(), spacing: 14),
+        GridItem(.flexible(), spacing: 14)
+    ]
+
+    var body: some View {
+        NavigationStack {
+            ZStack {
+                emissionListBackground
+
+                ScrollView(showsIndicators: false) {
+                    LazyVGrid(columns: columns, spacing: 14) {
+                        ForEach(gacha.emissionCharacters) { character in
+                            VStack(spacing: 10) {
+                                Image(character.imageName)
+                                    .resizable()
+                                    .scaledToFit()
+                                    .frame(width: 104, height: 104)
+                                    .padding(12)
+                                    .frame(maxWidth: .infinity)
+                                    .background(Color.white.opacity(0.12), in: RoundedRectangle(cornerRadius: 20, style: .continuous))
+
+                                Text(character.name)
+                                    .font(.system(size: 13, weight: .black))
+                                    .foregroundStyle(.primary)
+                                    .multilineTextAlignment(.center)
+                                    .lineLimit(2)
+                                    .minimumScaleFactor(0.72)
+                            }
+                            .padding(10)
+                            .background(.ultraThinMaterial, in: RoundedRectangle(cornerRadius: 22, style: .continuous))
+                        }
+                    }
+                    .padding(.horizontal, 18)
+                    .padding(.top, 100)
+                    .padding(.bottom, 120)
+                }
+            }
+            .navigationTitle("排出リスト")
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbarBackground(.hidden, for: .navigationBar)
+            .toolbar {
+                ToolbarItem(placement: .topBarTrailing) {
+                    Button("閉じる") {
+                        dismiss()
+                    }
+                    .font(.system(size: 15, weight: .bold))
+                }
+            }
+        }
+    }
+
+    private var emissionListBackground: some View {
+        ZStack {
+            Image("gacha_background")
+                .resizable()
+                .scaledToFill()
+                .ignoresSafeArea()
+
+            LinearGradient(
+                colors: [
+                    Color.black.opacity(0.18),
+                    Color.black.opacity(0.38)
+                ],
+                startPoint: .top,
+                endPoint: .bottom
+            )
+            .ignoresSafeArea()
+        }
     }
 }
