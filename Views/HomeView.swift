@@ -237,23 +237,16 @@ struct HomeView: View {
     }
 
     private var canShowWcAsset: Bool {
-        [
-            "person","dog","cat","chicken","monkey","rabbit","frog","penguin","sheep","shark","turtle","dolphin",
-            "Sloth","baku","blackGibbon","bulldog","deer","fox","frilledLizard","giraffe","koala","okapi",
-            "platypus","raccoon","Shoebill","Triceratops","bee","amesho","barinys","blue","shiba","gorilla",
-            "lizard","meerkat","otter","owl","parakeet","peacock","pig","raccoonDog","redPanda","seal",
-            "seaOtter","skunk","swallow","tiger","whiteTiger","zebra","wolf"
-        ].contains(currentBaseAssetName)
+        hasImageAsset("\(currentBaseAssetName)_wc")
     }
 
     private var canPlayBlinkAnimation: Bool {
-        [
-            "person","dog","cat","chicken","monkey","rabbit","frog","penguin","sheep","shark","turtle","dolphin",
-            "Sloth","baku","blackGibbon","bulldog","deer","fox","frilledLizard","giraffe","koala","okapi",
-            "platypus","raccoon","Shoebill","Triceratops","bee","amesho","barinys","blue","shiba","gorilla",
-            "lizard","meerkat","otter","owl","parakeet","peacock","pig","raccoonDog","redPanda","seal",
-            "seaOtter","skunk","swallow","tiger","whiteTiger","zebra","wolf"
-        ].contains(currentBaseAssetName)
+        hasImageAsset("\(currentBaseAssetName)_idle_blink_0001")
+        && hasImageAsset("\(currentBaseAssetName)_idle_blink_0002")
+    }
+
+    private func hasImageAsset(_ assetName: String) -> Bool {
+        UIImage(named: assetName) != nil
     }
 
     private var preferredCharacterRestAssetName: String {
