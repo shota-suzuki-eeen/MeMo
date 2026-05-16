@@ -419,11 +419,7 @@ private struct WorkRewardRow: View {
     @ViewBuilder
     private var trailingStatusView: some View {
         if isClaimed {
-            statusCapsule(
-                title: "受取済み",
-                foregroundColor: .white,
-                backgroundColor: Color.white.opacity(0.14)
-            )
+            claimedCheckmarkView
         } else if canClaim {
             Button(action: onClaim) {
                 statusCapsule(
@@ -447,12 +443,28 @@ private struct WorkRewardRow: View {
         }
     }
 
+    private var claimedCheckmarkView: some View {
+        ZStack {
+            Circle()
+                .fill(Color(red: 0.20, green: 0.82, blue: 0.36))
+                .frame(width: 38, height: 38)
+                .shadow(color: Color.black.opacity(0.14), radius: 5, x: 0, y: 3)
+
+            Image(systemName: "checkmark")
+                .font(.system(size: 18, weight: .black))
+                .foregroundStyle(.white)
+        }
+        .accessibilityLabel("受け取り済み")
+    }
+
     private func statusCapsule(title: String, foregroundColor: Color, backgroundColor: Color) -> some View {
         Text(title)
             .font(.system(size: 13, weight: .bold))
             .foregroundStyle(foregroundColor)
-            .padding(.horizontal, 14)
-            .padding(.vertical, 10)
+            .lineLimit(1)
+            .minimumScaleFactor(0.72)
+            .allowsTightening(true)
+            .frame(width: 78, height: 38)
             .background(
                 RoundedRectangle(cornerRadius: 16, style: .continuous)
                     .fill(backgroundColor)

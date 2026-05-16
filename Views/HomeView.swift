@@ -3782,11 +3782,6 @@ private struct HomeHappinessRewardRow: View {
                     .frame(minWidth: 64, alignment: .leading)
                     .layoutPriority(3)
 
-                Text("キャラクター報酬")
-                    .font(.system(size: 13, weight: .semibold))
-                    .foregroundStyle(.white.opacity(0.72))
-                    .lineLimit(2)
-                    .minimumScaleFactor(0.82)
 
                 Text(reward.characterName)
                     .font(.system(size: 14, weight: .bold))
@@ -3798,7 +3793,7 @@ private struct HomeHappinessRewardRow: View {
             .layoutPriority(2)
 
             trailingStatusView
-                .frame(minWidth: 58, alignment: .trailing)
+                .frame(minWidth: 84, alignment: .trailing)
                 .layoutPriority(1)
         }
         .padding(.horizontal, 12)
@@ -3817,11 +3812,7 @@ private struct HomeHappinessRewardRow: View {
     @ViewBuilder
     private var trailingStatusView: some View {
         if isClaimed {
-            statusCapsule(
-                title: "受取済み",
-                foregroundColor: .white,
-                backgroundColor: Color.white.opacity(0.14)
-            )
+            claimedCheckmarkView
         } else if canClaim {
             Button(action: onClaim) {
                 statusCapsule(
@@ -3848,6 +3839,20 @@ private struct HomeHappinessRewardRow: View {
         }
     }
 
+    private var claimedCheckmarkView: some View {
+        ZStack {
+            Circle()
+                .fill(Color(red: 0.20, green: 0.82, blue: 0.36))
+                .frame(width: 38, height: 38)
+                .shadow(color: Color.black.opacity(0.14), radius: 5, x: 0, y: 3)
+
+            Image(systemName: "checkmark")
+                .font(.system(size: 18, weight: .black))
+                .foregroundStyle(.white)
+        }
+        .accessibilityLabel("受け取り済み")
+    }
+
     private func statusCapsule(
         title: String,
         foregroundColor: Color,
@@ -3857,9 +3862,9 @@ private struct HomeHappinessRewardRow: View {
             .font(.system(size: 13, weight: .bold))
             .foregroundStyle(foregroundColor)
             .lineLimit(1)
-            .minimumScaleFactor(0.8)
-            .padding(.horizontal, 12)
-            .padding(.vertical, 10)
+            .minimumScaleFactor(0.72)
+            .allowsTightening(true)
+            .frame(width: 74, height: 38)
             .background(
                 RoundedRectangle(cornerRadius: 16, style: .continuous)
                     .fill(backgroundColor)

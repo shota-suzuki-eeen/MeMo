@@ -78,10 +78,10 @@ enum PetMaster {
         .init(id: "pet_046", name: "チーター"),
         .init(id: "pet_047", name: "シマウマ"),
         .init(id: "pet_048", name: "オオカミ"),
-        .init(id: "reward_000", name: "ヘヤギ"),
-        .init(id: "reward_001", name: "スクール"),
-        .init(id: "reward_002", name: "シェフ"),
-        .init(id: "reward_003", name: "プライベート"),
+        .init(id: "reward_000", name: "ガール（A）"),
+        .init(id: "reward_001", name: "ボーイ（A）"),
+        .init(id: "reward_002", name: "ガール（B）"),
+        .init(id: "reward_003", name: "ボーイ（B）"),
     ]
 
     // ✅ ペットID → アセット名（修正版）
@@ -135,10 +135,10 @@ enum PetMaster {
         case "pet_046": return "cheetah"
         case "pet_047": return "zebra"
         case "pet_048": return "wolf"
-        case "reward_000": return "person_room"
-        case "reward_001": return "girl_school"
-        case "reward_002": return "person_chef"
-        case "reward_003": return "girl_private"
+        case "reward_000": return "girl_A"
+        case "reward_001": return "boy_A"
+        case "reward_002": return "girl_B"
+        case "reward_003": return "boy_B"
         default:
             return "purson" // 安全フォールバック
         }

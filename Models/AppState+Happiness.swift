@@ -31,10 +31,10 @@ extension AppState {
     }
 
     static let happinessRewardDefinitions: [HappinessRewardDefinition] = [
-        .init(level: 5, petID: "reward_000", assetName: "person_room", characterName: "部屋着"),
-        .init(level: 10, petID: "reward_001", assetName: "girl_school", characterName: "制服"),
-        .init(level: 15, petID: "reward_002", assetName: "person_chef", characterName: "シェフ"),
-        .init(level: 20, petID: "reward_003", assetName: "girl_private", characterName: "プライベート")
+        .init(level: 5, petID: "reward_000", assetName: "girl_A", characterName: "ガール（A）"),
+        .init(level: 10, petID: "reward_001", assetName: "boy_A", characterName: "ボーイ（A）"),
+        .init(level: 15, petID: "reward_002", assetName: "girl_B", characterName: "ガール（B）"),
+        .init(level: 20, petID: "reward_003", assetName: "boy_B", characterName: "ボーイ（B）")
     ]
 
     struct HappinessGainResult: Equatable {
