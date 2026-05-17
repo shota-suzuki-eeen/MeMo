@@ -236,6 +236,10 @@ struct HomeView: View {
         currentFullnessLevel < fullnessMaxLevel
     }
 
+    private var isHomeAnimationActive: Bool {
+        isHomeVisible && scenePhase == .active
+    }
+
     private var canShowWcAsset: Bool {
         hasImageAsset("\(currentBaseAssetName)_wc")
     }
@@ -976,7 +980,7 @@ struct HomeView: View {
             maxLevel: fullnessMaxLevel,
             outerSize: Layout.fullnessGaugeOuterSize,
             innerSize: Layout.fullnessGaugeInnerSize,
-            isActive: isHomeVisible
+            isActive: isHomeAnimationActive
         )
         .padding(.top, Layout.fullnessGaugeTop)
         .padding(.leading, Layout.fullnessGaugeLeading)
@@ -2012,6 +2016,20 @@ struct HomeView: View {
         pendingFoodFeedID = nil
     }
 
+    @discardableResult
+    private func selectDesiredFoodInSelectorIfOwned() -> Bool {
+        guard let desiredFoodID = displayedDesiredFoodID ?? state.desiredFoodID,
+              let desiredFood = FoodCatalog.byId(desiredFoodID),
+              state.foodCount(foodId: desiredFoodID) > 0 else {
+            return false
+        }
+
+        selectedFoodRarityTab = desiredFood.isShopEligible ? .normal : .rare
+        selectedFoodID = desiredFoodID
+        pendingFoodFeedID = nil
+        return true
+    }
+
     private func resetFoodSelectorDragState() {
         foodSelectorDragOffset = .zero
         foodSelectorDragAnchorFoodID = nil
@@ -2042,12 +2060,15 @@ struct HomeView: View {
 
         guard !ownedFoods.isEmpty else { return }
 
-        selectedFoodRarityTab = .normal
-        syncFoodSelectorSelection()
         resetFoodSelectorDragState()
         isFoodFeedingAnimationRunning = false
         pendingFoodFeedID = nil
         stopFoodSelectorHorizontalRattleIfNeeded()
+
+        if !selectDesiredFoodInSelectorIfOwned() {
+            selectedFoodRarityTab = .normal
+            syncFoodSelectorSelection()
+        }
 
         withAnimation(.spring(response: 0.32, dampingFraction: 0.85)) {
             showFoodSelector = true

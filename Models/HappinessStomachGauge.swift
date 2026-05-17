@@ -17,6 +17,7 @@ struct HappinessStomachGauge: View {
     let level: Int
     let outerSize: CGFloat
     let innerSize: CGFloat
+    let isActive: Bool
 
     @Environment(\.scenePhase) private var scenePhase
 
@@ -29,7 +30,8 @@ struct HappinessStomachGauge: View {
         maxPoint: Int,
         level: Int,
         outerSize: CGFloat,
-        innerSize: CGFloat
+        innerSize: CGFloat,
+        isActive: Bool = true
     ) {
         self.point = point
         self.displayPoint = displayPoint
@@ -37,6 +39,7 @@ struct HappinessStomachGauge: View {
         self.level = level
         self.outerSize = outerSize
         self.innerSize = innerSize
+        self.isActive = isActive
         _displayedLevelAssetName = State(initialValue: HappinessStomachGauge.levelAssetName(for: level))
     }
 
@@ -77,7 +80,7 @@ struct HappinessStomachGauge: View {
     }
 
     private var isMetalLiquidActive: Bool {
-        scenePhase == .active
+        isActive && scenePhase == .active
     }
 
     private static func levelAssetName(for level: Int) -> String {

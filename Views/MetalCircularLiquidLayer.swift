@@ -9,6 +9,10 @@
 //  メーター値の増減時に液面が瞬間移動しないよう、Renderer内部で
 //  targetFillFraction に向かって renderedFillFraction を補間します。
 //
+//  2026/05 update:
+//  バックグラウンド中は波の描画時間を進めず、復帰時に一気に波が進んだように
+//  見える挙動を防ぎます。
+//
 
 import SwiftUI
 import Foundation
@@ -188,6 +192,7 @@ private final class MetalCircularLiquidRenderer: NSObject, MTKViewDelegate {
         var renderedDeepColor: SIMD4<Float> = SIMD4<Float>(0.03, 0.16, 0.05, 1.0)
         var renderedHighlightColor: SIMD4<Float> = SIMD4<Float>(0.55, 0.92, 0.58, 1.0)
 
+        var renderedTime: Float = 0.0
         var allowsSmoothing: Bool = true
         var hasReceivedFirstState: Bool = false
     }
@@ -205,7 +210,6 @@ private final class MetalCircularLiquidRenderer: NSObject, MTKViewDelegate {
 
     private let commandQueue: MTLCommandQueue?
     private let pipelineState: MTLRenderPipelineState?
-    private let startTime = CACurrentMediaTime()
     private let lock = NSLock()
     private var state = RenderState()
     private var lastFrameTimestamp: CFTimeInterval?
@@ -266,8 +270,8 @@ private final class MetalCircularLiquidRenderer: NSObject, MTKViewDelegate {
         state.targetMotionScale = safeMotionScale
         state.allowsSmoothing = allowsSmoothing
 
-        // 初回表示、Home非表示中、reduce motion中は、遅延なく現在値に同期します。
-        // これにより、画面復帰時に0から再アニメーションする違和感を避けます。
+        // 初回表示、Home非表示中、バックグラウンド中、reduce motion中は即座に現在値へ同期します。
+        // さらに lastFrameTimestamp を捨てることで、復帰時に停止中の経過時間をまとめて消化しません。
         if !state.hasReceivedFirstState || !allowsSmoothing {
             state.renderedFillFraction = safeTargetFill
             state.renderedMainColor = targetMainColor
@@ -297,10 +301,9 @@ private final class MetalCircularLiquidRenderer: NSObject, MTKViewDelegate {
         let current = advanceState(now: now)
         let drawableSize = view.drawableSize
         let aspectRatio = drawableSize.height > 0 ? Float(drawableSize.width / drawableSize.height) : 1.0
-        let elapsed = Float(now - startTime)
 
         var uniforms = CircularLiquidUniforms(
-            time: elapsed,
+            time: current.renderedTime,
             fillFraction: current.renderedFillFraction,
             aspectRatio: aspectRatio,
             motionScale: current.renderedMotionScale,
@@ -333,20 +336,23 @@ private final class MetalCircularLiquidRenderer: NSObject, MTKViewDelegate {
         lock.lock()
         defer { lock.unlock() }
 
-        let previousTimestamp = lastFrameTimestamp
-        lastFrameTimestamp = now
-
         guard state.allowsSmoothing else {
+            lastFrameTimestamp = nil
+            state.renderedMotionScale = 0
             return state
         }
 
+        let previousTimestamp = lastFrameTimestamp
         let rawDeltaTime: Float
         if let previousTimestamp {
             rawDeltaTime = Float(max(0, now - previousTimestamp))
         } else {
             rawDeltaTime = 1.0 / 30.0
         }
+
+        // 復帰直後や一時的なメインスレッド停止で大きい delta が来ても、一気に波を進めません。
         let deltaTime = min(rawDeltaTime, 1.0 / 12.0)
+        lastFrameTimestamp = now
 
         let isIncreasing = state.targetFillFraction >= state.renderedFillFraction
         let fillResponse: Float = isIncreasing ? 3.2 : 4.0
@@ -392,6 +398,8 @@ private final class MetalCircularLiquidRenderer: NSObject, MTKViewDelegate {
             response: colorResponse,
             snapThreshold: colorSnapThreshold
         )
+
+        state.renderedTime += deltaTime * max(0, state.renderedMotionScale)
 
         return state
     }
@@ -464,6 +472,8 @@ private struct SwiftUICircularLiquidFallback: View {
     let isActive: Bool
 
     @State private var displayedFillFraction: CGFloat = 0
+    @State private var waveTime: CGFloat = 0
+    @State private var lastTimelineDate: Date?
 
     private var clampedFillFraction: CGFloat {
         max(0, min(1, fillFraction))
@@ -471,8 +481,6 @@ private struct SwiftUICircularLiquidFallback: View {
 
     var body: some View {
         TimelineView(.animation(minimumInterval: isActive ? 1.0 / 20.0 : 1.0)) { timeline in
-            let time = isActive ? CGFloat(timeline.date.timeIntervalSinceReferenceDate) : 0
-
             Canvas { context, size in
                 let fraction = max(0, min(1, displayedFillFraction))
                 guard fraction > 0 else { return }
@@ -487,8 +495,8 @@ private struct SwiftUICircularLiquidFallback: View {
 
                 for x in stride(from: CGFloat.zero, through: width, by: 2) {
                     let progress = x / width
-                    let wave1 = sin(progress * .pi * 2.3 + time * 1.45) * 5.0
-                    let wave2 = sin(progress * .pi * 4.7 - time * 0.95) * 2.4
+                    let wave1 = sin(progress * .pi * 2.3 + waveTime * 1.45) * 5.0
+                    let wave2 = sin(progress * .pi * 4.7 - waveTime * 0.95) * 2.4
                     path.addLine(to: CGPoint(x: x, y: baseY + wave1 + wave2))
                 }
 
@@ -508,9 +516,18 @@ private struct SwiftUICircularLiquidFallback: View {
                     )
                 )
             }
+            .onChange(of: timeline.date) { _, newDate in
+                advanceWaveTimeIfNeeded(now: newDate)
+            }
         }
         .onAppear {
             displayedFillFraction = clampedFillFraction
+            lastTimelineDate = nil
+        }
+        .onChange(of: isActive) { _, newValue in
+            if !newValue {
+                lastTimelineDate = nil
+            }
         }
         .onChange(of: clampedFillFraction) { _, newValue in
             guard isActive else {
@@ -522,6 +539,24 @@ private struct SwiftUICircularLiquidFallback: View {
                 displayedFillFraction = newValue
             }
         }
+    }
+
+    private func advanceWaveTimeIfNeeded(now: Date) {
+        guard isActive else {
+            lastTimelineDate = nil
+            return
+        }
+
+        let rawDeltaTime: TimeInterval
+        if let lastTimelineDate {
+            rawDeltaTime = max(0, now.timeIntervalSince(lastTimelineDate))
+        } else {
+            rawDeltaTime = 1.0 / 20.0
+        }
+
+        lastTimelineDate = now
+        let deltaTime = min(rawDeltaTime, 1.0 / 12.0)
+        waveTime += CGFloat(deltaTime)
     }
 }
 
