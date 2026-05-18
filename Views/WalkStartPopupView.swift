@@ -16,6 +16,10 @@ struct WalkStartPopupView: View {
     let onStartWithAd: () -> Void
     let onStartRainFree: () -> Void
 
+    private var shouldDisableAdStartButton: Bool {
+        !isAdReady
+    }
+
     var body: some View {
         VStack(spacing: 18) {
             Image("walk_button")
@@ -40,6 +44,7 @@ struct WalkStartPopupView: View {
                 WalkPopupButton(
                     title: "もどる",
                     systemImageName: nil,
+                    showsLoadingIndicator: false,
                     isPrimary: false,
                     isEnabled: true,
                     action: onLater
@@ -49,16 +54,18 @@ struct WalkStartPopupView: View {
                     WalkPopupButton(
                         title: "スタート",
                         systemImageName: "play.rectangle.fill",
+                        showsLoadingIndicator: false,
                         isPrimary: true,
                         isEnabled: true,
                         action: onStartRainFree
                     )
                 } else {
                     WalkPopupButton(
-                        title: isAdLoading && !isAdReady ? "準備中" : "スタート",
-                        systemImageName: isAdLoading && !isAdReady ? nil : "play.rectangle.fill",
+                        title: isAdReady ? "広告でスタート" : "広告準備中...",
+                        systemImageName: isAdReady ? "play.rectangle.fill" : nil,
+                        showsLoadingIndicator: !isAdReady,
                         isPrimary: true,
-                        isEnabled: true,
+                        isEnabled: !shouldDisableAdStartButton,
                         action: onStartWithAd
                     )
                 }
@@ -102,12 +109,19 @@ struct WalkStartPopupView: View {
 private struct WalkPopupButton: View {
     let title: String
     let systemImageName: String?
+    let showsLoadingIndicator: Bool
     let isPrimary: Bool
     let isEnabled: Bool
     let action: () -> Void
 
     private var buttonBackgroundColor: Color {
-        isPrimary
+        if !isEnabled {
+            return isPrimary
+            ? Color(red: 0.92, green: 0.15, blue: 0.14).opacity(0.58)
+            : Color.white.opacity(0.48)
+        }
+
+        return isPrimary
         ? Color(red: 0.92, green: 0.15, blue: 0.14)
         : Color.white.opacity(0.72)
     }
@@ -115,7 +129,13 @@ private struct WalkPopupButton: View {
     var body: some View {
         Button(action: action) {
             HStack(spacing: 6) {
-                if let systemImageName {
+                if showsLoadingIndicator {
+                    ProgressView()
+                        .progressViewStyle(.circular)
+                        .tint(isPrimary ? .white : .primary)
+                        .scaleEffect(0.76)
+                        .frame(width: 16, height: 16)
+                } else if let systemImageName {
                     Image(systemName: systemImageName)
                         .font(.system(size: 15, weight: .black))
                 }
@@ -123,7 +143,8 @@ private struct WalkPopupButton: View {
                 Text(title)
                     .font(.system(size: 15, weight: .black, design: .rounded))
                     .lineLimit(1)
-                    .minimumScaleFactor(0.78)
+                    .minimumScaleFactor(0.72)
+                    .allowsTightening(true)
             }
             .foregroundStyle(isPrimary ? .white : .primary)
             .frame(maxWidth: .infinity)
@@ -137,10 +158,11 @@ private struct WalkPopupButton: View {
                     .stroke(Color.white.opacity(isPrimary ? 0.34 : 0.42), lineWidth: 1.5)
             )
             .clipShape(RoundedRectangle(cornerRadius: 18, style: .continuous))
-            .shadow(color: .black.opacity(0.14), radius: 8, x: 0, y: 5)
+            .shadow(color: .black.opacity(isEnabled ? 0.14 : 0.08), radius: 8, x: 0, y: 5)
         }
         .buttonStyle(.plain)
         .disabled(!isEnabled)
-        .opacity(isEnabled ? 1 : 0.55)
+        .opacity(isEnabled ? 1 : 0.68)
+        .accessibilityHint(isEnabled ? "" : "広告の準備が完了すると開始できます")
     }
 }
