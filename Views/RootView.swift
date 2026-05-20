@@ -40,6 +40,10 @@ struct RootView: View {
         static let maxWidth: CGFloat = 320
     }
 
+    private var isIPadWalkAdFallbackAvailable: Bool {
+        UIDevice.current.userInterfaceIdiom == .pad && !walkStartAd.isReady
+    }
+
     var body: some View {
         Group {
             switch hk.authState {
@@ -293,6 +297,12 @@ struct RootView: View {
 
     private func startWalkWithAd() {
         walkStartMessage = nil
+
+        if isIPadWalkAdFallbackAvailable {
+            startWalkWithoutAdForIPadFallback()
+            return
+        }
+
         AdMobManager.shared.prepareRewardWalkStart()
 
         walkStartAd.show(
@@ -311,6 +321,17 @@ struct RootView: View {
                 AdMobManager.shared.prepareRewardWalkStart()
             }
         )
+    }
+
+    private func startWalkWithoutAdForIPadFallback() {
+        guard walkStore.startSession(isRainFreeStart: false) else {
+            walkStartMessage = "すでにお散歩中です。"
+            showWalkView = true
+            return
+        }
+
+        closeWalkStartPopup()
+        showWalkView = true
     }
 
     private func saveRootState() {

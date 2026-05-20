@@ -6,6 +6,7 @@
 //
 
 import SwiftUI
+import UIKit
 
 struct WalkStartPopupView: View {
     let isRainy: Bool
@@ -16,8 +17,32 @@ struct WalkStartPopupView: View {
     let onStartWithAd: () -> Void
     let onStartRainFree: () -> Void
 
+    private var isIPadAdFallbackStartAvailable: Bool {
+        UIDevice.current.userInterfaceIdiom == .pad && !isAdReady
+    }
+
     private var shouldDisableAdStartButton: Bool {
-        !isAdReady
+        !isAdReady && !isIPadAdFallbackStartAvailable
+    }
+
+    private var adStartButtonTitle: String {
+        if isAdReady {
+            return "広告でスタート"
+        }
+
+        if isIPadAdFallbackStartAvailable {
+            return "スタート"
+        }
+
+        return "広告準備中..."
+    }
+
+    private var adStartButtonSystemImageName: String? {
+        isAdReady || isIPadAdFallbackStartAvailable ? "play.rectangle.fill" : nil
+    }
+
+    private var shouldShowAdStartLoadingIndicator: Bool {
+        !isAdReady && !isIPadAdFallbackStartAvailable
     }
 
     var body: some View {
@@ -61,9 +86,9 @@ struct WalkStartPopupView: View {
                     )
                 } else {
                     WalkPopupButton(
-                        title: isAdReady ? "広告でスタート" : "広告準備中...",
-                        systemImageName: isAdReady ? "play.rectangle.fill" : nil,
-                        showsLoadingIndicator: !isAdReady,
+                        title: adStartButtonTitle,
+                        systemImageName: adStartButtonSystemImageName,
+                        showsLoadingIndicator: shouldShowAdStartLoadingIndicator,
                         isPrimary: true,
                         isEnabled: !shouldDisableAdStartButton,
                         action: onStartWithAd
@@ -96,6 +121,10 @@ struct WalkStartPopupView: View {
     private var descriptionText: String {
         if canUseRainFreeStart {
             return "広告なしで1回チャレンジできます。\n5分間、タップするたびに歩数通貨を獲得できます。"
+        }
+
+        if isIPadAdFallbackStartAvailable {
+            return "スタートすると5分間チャレンジできます。\nタップするたびに歩数通貨を獲得できます。"
         }
 
         if isRainy {
