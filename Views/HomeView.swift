@@ -625,6 +625,8 @@ struct HomeView: View {
             }
             .onChange(of: state.currentPetID) { _, _ in
                 syncCharacterBaseFromState(force: true)
+                syncDisplayedHappiness(animated: false)
+                scheduleHappinessDecayIfNeeded(now: Date())
                 updateWidgetSnapshot(forceReload: true)
             }
             .onChange(of: state.toiletFlagAt) { _, _ in
@@ -1145,7 +1147,7 @@ struct HomeView: View {
                 happinessMaxPoints: happinessMaxPoints,
                 claimableLevel: currentClaimableHappinessRewardLevel,
                 nextRewardLevel: nextHappinessRewardLevel,
-                rewardDefinitions: AppState.happinessRewardDefinitions,
+                rewardDefinitions: state.currentHappinessRewardDefinitions(),
                 claimedRewardLevels: currentClaimedHappinessRewardLevels,
                 onClose: { closeTopInfoPopup() },
                 onClaim: { level in

@@ -30,11 +30,32 @@ extension AppState {
         var id: Int { level }
     }
 
-    static let happinessRewardDefinitions: [HappinessRewardDefinition] = [
+    /// 通常キャラクター用の幸せ報酬ラインナップ。
+    /// 既存参照互換のため `happinessRewardDefinitions` も同じ値を返す。
+    static let standardHappinessRewardDefinitions: [HappinessRewardDefinition] = [
         .init(level: 5, petID: "reward_000", assetName: "girl_A", characterName: "ガール（A）"),
         .init(level: 10, petID: "reward_001", assetName: "boy_A", characterName: "ボーイ（A）"),
         .init(level: 15, petID: "reward_002", assetName: "girl_B", characterName: "ガール（B）"),
         .init(level: 20, petID: "reward_003", assetName: "boy_B", characterName: "ボーイ（B）")
+    ]
+
+    static let happinessRewardDefinitions: [HappinessRewardDefinition] = standardHappinessRewardDefinitions
+
+    /// 報酬キャラクターお世話中だけ表示する、そのキャラクター専用の幸せ報酬ラインナップ。
+    /// キーは「現在お世話中の報酬キャラクターID」。
+    private static let happinessRewardDefinitionsByCarePetID: [String: [HappinessRewardDefinition]] = [
+        "reward_000": [
+            .init(level: 10, petID: "reward_000_casual", assetName: "girl_A_casual", characterName: "カジュアル（A）")
+        ],
+        "reward_001": [
+            .init(level: 10, petID: "reward_001_casual", assetName: "boy_A_casual", characterName: "カジュアル（A）")
+        ],
+        "reward_002": [
+            .init(level: 10, petID: "reward_002_casual", assetName: "girl_B_casual", characterName: "カジュアル（B）")
+        ],
+        "reward_003": [
+            .init(level: 10, petID: "reward_003_casual", assetName: "boy_B_casual", characterName: "カジュアル（B）")
+        ]
     ]
 
     struct HappinessGainResult: Equatable {
@@ -76,57 +97,90 @@ extension AppState {
         .standard
     }
 
+    private var happinessStorageContextKey: String {
+        let petID = normalizedCurrentPetID
+        if PetMaster.isHappinessRewardPetID(petID) {
+            return petID
+        }
+        return "standard"
+    }
+
+    private func happinessStorageKey(_ key: String) -> String {
+        let context = happinessStorageContextKey
+        if context == "standard" {
+            return key
+        }
+        return "\(key).\(context)"
+    }
+
+    func currentHappinessRewardDefinitions() -> [HappinessRewardDefinition] {
+        let petID = normalizedCurrentPetID
+        if PetMaster.isHappinessRewardPetID(petID),
+           let rewards = AppState.happinessRewardDefinitionsByCarePetID[petID] {
+            return rewards
+        }
+        return AppState.standardHappinessRewardDefinitions
+    }
+
     private func syncHappinessPettingDayKeyIfNeeded(now: Date = Date()) {
         let todayKey = AppState.makeDayKey(now)
         guard happinessPettingDayKey != todayKey else { return }
 
         happinessPettingDayKey = todayKey
-        happinessDefaults.set(0, forKey: HappinessStorageKeys.pettingTouchCountToday)
-        happinessDefaults.set(0, forKey: HappinessStorageKeys.pettingPointsToday)
+        happinessDefaults.set(0, forKey: happinessStorageKey(HappinessStorageKeys.pettingTouchCountToday))
+        happinessDefaults.set(0, forKey: happinessStorageKey(HappinessStorageKeys.pettingPointsToday))
     }
 
     var happinessPoint: Int {
         get {
-            min(AppState.happinessMaxPointsPerLevel - 1, max(0, happinessDefaults.integer(forKey: HappinessStorageKeys.point)))
+            min(
+                AppState.happinessMaxPointsPerLevel - 1,
+                max(0, happinessDefaults.integer(forKey: happinessStorageKey(HappinessStorageKeys.point)))
+            )
         }
         set {
             happinessDefaults.set(
                 min(AppState.happinessMaxPointsPerLevel - 1, max(0, newValue)),
-                forKey: HappinessStorageKeys.point
+                forKey: happinessStorageKey(HappinessStorageKeys.point)
             )
         }
     }
 
     var happinessLevel: Int {
         get {
-            min(AppState.happinessMaxLevel, max(0, happinessDefaults.integer(forKey: HappinessStorageKeys.level)))
+            min(
+                AppState.happinessMaxLevel,
+                max(0, happinessDefaults.integer(forKey: happinessStorageKey(HappinessStorageKeys.level)))
+            )
         }
         set {
             happinessDefaults.set(
                 min(AppState.happinessMaxLevel, max(0, newValue)),
-                forKey: HappinessStorageKeys.level
+                forKey: happinessStorageKey(HappinessStorageKeys.level)
             )
         }
     }
 
     var happinessLastDecayAt: Date? {
-        get { happinessDefaults.object(forKey: HappinessStorageKeys.lastDecayAt) as? Date }
+        get { happinessDefaults.object(forKey: happinessStorageKey(HappinessStorageKeys.lastDecayAt)) as? Date }
         set {
+            let key = happinessStorageKey(HappinessStorageKeys.lastDecayAt)
             if let newValue {
-                happinessDefaults.set(newValue, forKey: HappinessStorageKeys.lastDecayAt)
+                happinessDefaults.set(newValue, forKey: key)
             } else {
-                happinessDefaults.removeObject(forKey: HappinessStorageKeys.lastDecayAt)
+                happinessDefaults.removeObject(forKey: key)
             }
         }
     }
 
     var happinessSleepModeEndsAt: Date? {
-        get { happinessDefaults.object(forKey: HappinessStorageKeys.sleepModeEndsAt) as? Date }
+        get { happinessDefaults.object(forKey: happinessStorageKey(HappinessStorageKeys.sleepModeEndsAt)) as? Date }
         set {
+            let key = happinessStorageKey(HappinessStorageKeys.sleepModeEndsAt)
             if let newValue {
-                happinessDefaults.set(newValue, forKey: HappinessStorageKeys.sleepModeEndsAt)
+                happinessDefaults.set(newValue, forKey: key)
             } else {
-                happinessDefaults.removeObject(forKey: HappinessStorageKeys.sleepModeEndsAt)
+                happinessDefaults.removeObject(forKey: key)
             }
         }
     }
@@ -134,9 +188,17 @@ extension AppState {
     var happinessPettingTouchCountToday: Int {
         get {
             syncHappinessPettingDayKeyIfNeeded()
-            return max(0, happinessDefaults.integer(forKey: HappinessStorageKeys.pettingTouchCountToday))
+            return max(
+                0,
+                happinessDefaults.integer(forKey: happinessStorageKey(HappinessStorageKeys.pettingTouchCountToday))
+            )
         }
-        set { happinessDefaults.set(max(0, newValue), forKey: HappinessStorageKeys.pettingTouchCountToday) }
+        set {
+            happinessDefaults.set(
+                max(0, newValue),
+                forKey: happinessStorageKey(HappinessStorageKeys.pettingTouchCountToday)
+            )
+        }
     }
 
     var happinessPettingPointsToday: Int {
@@ -144,20 +206,20 @@ extension AppState {
             syncHappinessPettingDayKeyIfNeeded()
             return min(
                 AppState.happinessDailyPettingPointLimit,
-                max(0, happinessDefaults.integer(forKey: HappinessStorageKeys.pettingPointsToday))
+                max(0, happinessDefaults.integer(forKey: happinessStorageKey(HappinessStorageKeys.pettingPointsToday)))
             )
         }
         set {
             happinessDefaults.set(
                 min(AppState.happinessDailyPettingPointLimit, max(0, newValue)),
-                forKey: HappinessStorageKeys.pettingPointsToday
+                forKey: happinessStorageKey(HappinessStorageKeys.pettingPointsToday)
             )
         }
     }
 
     private var happinessPettingDayKey: String {
-        get { happinessDefaults.string(forKey: HappinessStorageKeys.pettingDayKey) ?? "" }
-        set { happinessDefaults.set(newValue, forKey: HappinessStorageKeys.pettingDayKey) }
+        get { happinessDefaults.string(forKey: happinessStorageKey(HappinessStorageKeys.pettingDayKey)) ?? "" }
+        set { happinessDefaults.set(newValue, forKey: happinessStorageKey(HappinessStorageKeys.pettingDayKey)) }
     }
 
     func resetHappinessPettingIfNeeded(now: Date = Date()) {
@@ -165,7 +227,7 @@ extension AppState {
     }
 
     private func claimedHappinessRewardLevels() -> Set<Int> {
-        guard let data = happinessDefaults.data(forKey: HappinessStorageKeys.claimedRewardLevels),
+        guard let data = happinessDefaults.data(forKey: happinessStorageKey(HappinessStorageKeys.claimedRewardLevels)),
               let values = try? JSONDecoder().decode([Int].self, from: data) else {
             return []
         }
@@ -175,7 +237,7 @@ extension AppState {
     private func setClaimedHappinessRewardLevels(_ levels: Set<Int>) {
         let sorted = levels.sorted()
         let data = try? JSONEncoder().encode(sorted)
-        happinessDefaults.set(data, forKey: HappinessStorageKeys.claimedRewardLevels)
+        happinessDefaults.set(data, forKey: happinessStorageKey(HappinessStorageKeys.claimedRewardLevels))
     }
 
     @discardableResult
@@ -235,7 +297,7 @@ extension AppState {
     }
 
     func happinessRewardDefinition(for level: Int) -> HappinessRewardDefinition? {
-        AppState.happinessRewardDefinitions.first(where: { $0.level == level })
+        currentHappinessRewardDefinitions().first(where: { $0.level == level })
     }
 
     private func happinessTotalUnits(level: Int, point: Int) -> Int {
@@ -423,7 +485,7 @@ extension AppState {
     func nextClaimableHappinessRewardLevel() -> Int? {
         let claimed = claimedHappinessRewardLevels()
 
-        for reward in AppState.happinessRewardDefinitions {
+        for reward in currentHappinessRewardDefinitions() {
             if happinessLevel >= reward.level, !claimed.contains(reward.level) {
                 return reward.level
             }
@@ -434,7 +496,7 @@ extension AppState {
     func nextUpcomingHappinessRewardLevel() -> Int? {
         let claimed = claimedHappinessRewardLevels()
 
-        for reward in AppState.happinessRewardDefinitions {
+        for reward in currentHappinessRewardDefinitions() {
             if !claimed.contains(reward.level), happinessLevel < reward.level {
                 return reward.level
             }
@@ -464,7 +526,6 @@ extension AppState {
 
         guard let reward = happinessRewardDefinition(for: level),
               level > 0,
-              level % AppState.happinessRewardLevelStep == 0,
               happinessLevel >= level else {
             return nil
         }

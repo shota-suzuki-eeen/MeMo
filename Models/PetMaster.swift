@@ -82,6 +82,10 @@ enum PetMaster {
         .init(id: "reward_001", name: "ボーイ（A）"),
         .init(id: "reward_002", name: "ガール（B）"),
         .init(id: "reward_003", name: "ボーイ（B）"),
+        .init(id: "reward_000_casual", name: "カジュアル（A）"),
+        .init(id: "reward_001_casual", name: "カジュアル（A）"),
+        .init(id: "reward_002_casual", name: "カジュアル（B）"),
+        .init(id: "reward_003_casual", name: "カジュアル（B）"),
         .init(id: "food_taiyaki", name: "たい焼き"),
         .init(id: "food_soft_cream", name: "ソフトクリーム"),
         .init(id: "food_hotdog", name: "ホットドッグ"),
@@ -158,6 +162,10 @@ enum PetMaster {
         case "reward_001": return "boy_A"
         case "reward_002": return "girl_B"
         case "reward_003": return "boy_B"
+        case "reward_000_casual": return "girl_A_casual"
+        case "reward_001_casual": return "boy_A_casual"
+        case "reward_002_casual": return "girl_B_casual"
+        case "reward_003_casual": return "boy_B_casual"
         case "food_taiyaki": return "taiyaki"
         case "food_soft_cream": return "soft_cream"
         case "food_hotdog": return "hotdog"
@@ -187,6 +195,8 @@ enum PetMaster {
         switch petID {
         case let id where id.hasPrefix("food_"):
             return "\(base)_wc"
+        case let id where id.hasPrefix("reward_"):
+            return "\(base)_wc"
         default:
             return base
         }
@@ -196,6 +206,8 @@ enum PetMaster {
         let base = assetName(for: petID)
         switch petID {
         case let id where id.hasPrefix("food_"):
+            return ["\(base)_idle_blink_0001", "\(base)_idle_blink_0002"]
+        case let id where id.hasPrefix("reward_"):
             return ["\(base)_idle_blink_0001", "\(base)_idle_blink_0002"]
         default:
             return []
@@ -256,6 +268,10 @@ enum PetMaster {
         case "reward_001": return "幸せLv.10の報酬で仲間になる特別なキャラクター。"
         case "reward_002": return "幸せLv.15の報酬で仲間になる特別なキャラクター。"
         case "reward_003": return "幸せLv.20の報酬で仲間になる特別なキャラクター。"
+        case "reward_000_casual": return "ガール（A）のお世話報酬で仲間になるカジュアル衣装。"
+        case "reward_001_casual": return "ボーイ（A）のお世話報酬で仲間になるカジュアル衣装。"
+        case "reward_002_casual": return "ガール（B）のお世話報酬で仲間になるカジュアル衣装。"
+        case "reward_003_casual": return "ボーイ（B）のお世話報酬で仲間になるカジュアル衣装。"
         case let id where id.hasPrefix("food_"):
             let name = all.first(where: { $0.id == id })?.name ?? "フードキャラクター"
             return "フードガチャで仲間になる「\(name)」のキャラクター。"
