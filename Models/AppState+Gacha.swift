@@ -2,7 +2,7 @@
 //  AppState+Gacha.swift
 //  MeMo
 //
-//  Created by shota suzuki on 2026/04/10.
+//  Updated for per-gacha pity counters.
 //
 
 import Foundation
@@ -49,8 +49,16 @@ enum GachaFreeAdSlot: String, CaseIterable, Codable, Identifiable {
 
 extension AppState {
     private enum GachaStorageKeys {
-        static let pityCounter = "memo.gacha.pityCounter"
-        static let guaranteedGoldNext = "memo.gacha.guaranteedGoldNext"
+        static let defaultGachaID = "always"
+
+        // Legacy single-machine pity storage. Kept so existing users keep the old いつでもガチャ progress.
+        static let legacyPityCounter = "memo.gacha.pityCounter"
+        static let legacyGuaranteedGoldNext = "memo.gacha.guaranteedGoldNext"
+
+        // New per-machine pity storage. Keyed by GachaDefinition.id, for example "always" and "food".
+        static let pityCountersByGacha = "memo.gacha.pityCountersByGacha"
+        static let guaranteedGoldNextByGacha = "memo.gacha.guaranteedGoldNextByGacha"
+
         static let freeAdDayKey = "memo.gacha.freeAd.dayKey"
         static let freeAdUsedSlots = "memo.gacha.freeAd.usedSlots"
         static let specialItemCounts = "memo.gacha.specialItemCounts"
@@ -61,14 +69,82 @@ extension AppState {
         .standard
     }
 
+    private static func normalizedGachaID(_ gachaID: String) -> String {
+        let trimmed = gachaID.trimmingCharacters(in: .whitespacesAndNewlines)
+        return trimmed.isEmpty ? GachaStorageKeys.defaultGachaID : trimmed
+    }
+
+    private var gachaPityCountersStorage: [String: Int] {
+        get {
+            guard let data = gachaDefaults.data(forKey: GachaStorageKeys.pityCountersByGacha),
+                  let dict = try? JSONDecoder().decode([String: Int].self, from: data) else {
+                let legacyValue = max(0, gachaDefaults.integer(forKey: GachaStorageKeys.legacyPityCounter))
+                return legacyValue > 0 ? [GachaStorageKeys.defaultGachaID: legacyValue] : [:]
+            }
+            return dict.mapValues { max(0, $0) }
+        }
+        set {
+            let sanitized = newValue.mapValues { max(0, $0) }
+            let encoded = try? JSONEncoder().encode(sanitized)
+            gachaDefaults.set(encoded, forKey: GachaStorageKeys.pityCountersByGacha)
+        }
+    }
+
+    private var gachaGuaranteedGoldNextStorage: [String: Bool] {
+        get {
+            guard let data = gachaDefaults.data(forKey: GachaStorageKeys.guaranteedGoldNextByGacha),
+                  let dict = try? JSONDecoder().decode([String: Bool].self, from: data) else {
+                let legacyValue = gachaDefaults.bool(forKey: GachaStorageKeys.legacyGuaranteedGoldNext)
+                return legacyValue ? [GachaStorageKeys.defaultGachaID: true] : [:]
+            }
+            return dict
+        }
+        set {
+            let encoded = try? JSONEncoder().encode(newValue)
+            gachaDefaults.set(encoded, forKey: GachaStorageKeys.guaranteedGoldNextByGacha)
+        }
+    }
+
     var gachaPityCounter: Int {
-        get { max(0, gachaDefaults.integer(forKey: GachaStorageKeys.pityCounter)) }
-        set { gachaDefaults.set(max(0, newValue), forKey: GachaStorageKeys.pityCounter) }
+        get { gachaPityCounter(for: GachaStorageKeys.defaultGachaID) }
+        set { setGachaPityCounter(newValue, for: GachaStorageKeys.defaultGachaID) }
     }
 
     var gachaGuaranteedGoldNext: Bool {
-        get { gachaDefaults.bool(forKey: GachaStorageKeys.guaranteedGoldNext) }
-        set { gachaDefaults.set(newValue, forKey: GachaStorageKeys.guaranteedGoldNext) }
+        get { gachaGuaranteedGoldNext(for: GachaStorageKeys.defaultGachaID) }
+        set { setGachaGuaranteedGoldNext(newValue, for: GachaStorageKeys.defaultGachaID) }
+    }
+
+    func gachaPityCounter(for gachaID: String) -> Int {
+        let key = Self.normalizedGachaID(gachaID)
+        return max(0, gachaPityCountersStorage[key] ?? 0)
+    }
+
+    func gachaGuaranteedGoldNext(for gachaID: String) -> Bool {
+        let key = Self.normalizedGachaID(gachaID)
+        return gachaGuaranteedGoldNextStorage[key] ?? false
+    }
+
+    private func setGachaPityCounter(_ value: Int, for gachaID: String) {
+        let key = Self.normalizedGachaID(gachaID)
+        var dict = gachaPityCountersStorage
+        dict[key] = max(0, value)
+        gachaPityCountersStorage = dict
+
+        if key == GachaStorageKeys.defaultGachaID {
+            gachaDefaults.set(max(0, value), forKey: GachaStorageKeys.legacyPityCounter)
+        }
+    }
+
+    private func setGachaGuaranteedGoldNext(_ value: Bool, for gachaID: String) {
+        let key = Self.normalizedGachaID(gachaID)
+        var dict = gachaGuaranteedGoldNextStorage
+        dict[key] = value
+        gachaGuaranteedGoldNextStorage = dict
+
+        if key == GachaStorageKeys.defaultGachaID {
+            gachaDefaults.set(value, forKey: GachaStorageKeys.legacyGuaranteedGoldNext)
+        }
     }
 
     private var gachaFreeAdDayKeyStorage: String {
@@ -191,13 +267,21 @@ extension AppState {
     }
 
     func gachaResetPity() {
-        gachaPityCounter = 0
-        gachaGuaranteedGoldNext = false
+        gachaResetPity(for: GachaStorageKeys.defaultGachaID)
+    }
+
+    func gachaResetPity(for gachaID: String) {
+        setGachaPityCounter(0, for: gachaID)
+        setGachaGuaranteedGoldNext(false, for: gachaID)
     }
 
     func gachaAdvancePityAfterNonGold(threshold: Int = 100) {
-        let next = max(0, gachaPityCounter) + 1
-        gachaPityCounter = next
-        gachaGuaranteedGoldNext = next >= max(1, threshold)
+        gachaAdvancePityAfterNonGold(for: GachaStorageKeys.defaultGachaID, threshold: threshold)
+    }
+
+    func gachaAdvancePityAfterNonGold(for gachaID: String, threshold: Int = 100) {
+        let next = max(0, gachaPityCounter(for: gachaID)) + 1
+        setGachaPityCounter(next, for: gachaID)
+        setGachaGuaranteedGoldNext(next >= max(1, threshold), for: gachaID)
     }
 }
