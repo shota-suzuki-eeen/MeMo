@@ -45,16 +45,16 @@ extension AppState {
     /// キーは「現在お世話中の報酬キャラクターID」。
     private static let happinessRewardDefinitionsByCarePetID: [String: [HappinessRewardDefinition]] = [
         "reward_000": [
-            .init(level: 10, petID: "reward_000_casual", assetName: "girl_A_casual", characterName: "カジュアル（A）")
+            .init(level: 10, petID: "reward_000_casual", assetName: "girl_A_casual", characterName: "ガール / カジュアル（A）")
         ],
         "reward_001": [
-            .init(level: 10, petID: "reward_001_casual", assetName: "boy_A_casual", characterName: "カジュアル（A）")
+            .init(level: 10, petID: "reward_001_casual", assetName: "boy_A_casual", characterName: "ボーイ / カジュアル（A）")
         ],
         "reward_002": [
-            .init(level: 10, petID: "reward_002_casual", assetName: "girl_B_casual", characterName: "カジュアル（B）")
+            .init(level: 10, petID: "reward_002_casual", assetName: "girl_B_casual", characterName: "ガール / カジュアル（B）")
         ],
         "reward_003": [
-            .init(level: 10, petID: "reward_003_casual", assetName: "boy_B_casual", characterName: "カジュアル（B）")
+            .init(level: 10, petID: "reward_003_casual", assetName: "boy_B_casual", characterName: "ボーイ / カジュアル（B）")
         ]
     ]
 
@@ -99,8 +99,8 @@ extension AppState {
 
     private var happinessStorageContextKey: String {
         let petID = normalizedCurrentPetID
-        if PetMaster.isHappinessRewardPetID(petID) {
-            return petID
+        if let meterOwnerPetID = PetMaster.happinessMeterOwnerPetID(for: petID) {
+            return meterOwnerPetID
         }
         return "standard"
     }
@@ -115,8 +115,8 @@ extension AppState {
 
     func currentHappinessRewardDefinitions() -> [HappinessRewardDefinition] {
         let petID = normalizedCurrentPetID
-        if PetMaster.isHappinessRewardPetID(petID),
-           let rewards = AppState.happinessRewardDefinitionsByCarePetID[petID] {
+        if let meterOwnerPetID = PetMaster.happinessMeterOwnerPetID(for: petID),
+           let rewards = AppState.happinessRewardDefinitionsByCarePetID[meterOwnerPetID] {
             return rewards
         }
         return AppState.standardHappinessRewardDefinitions

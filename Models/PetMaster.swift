@@ -25,8 +25,52 @@ enum PetMaster {
         "reward_003"
     ]
 
-    static func isHappinessRewardPetID(_ petID: String) -> Bool {
+    static let happinessRewardCasualPetIDs: [String] = [
+        "reward_000_casual",
+        "reward_001_casual",
+        "reward_002_casual",
+        "reward_003_casual"
+    ]
+
+    /// 幸せ報酬でのみ獲得できるキャラクターID。
+    /// 通常報酬キャラに加えて、各報酬キャラの幸せLv.10で解放されるカジュアル版も含める。
+    /// いつでもガチャの抽選候補・排出リストから除外する判定にも使う。
+    static var happinessRewardExclusivePetIDs: [String] {
+        happinessRewardPetIDs + happinessRewardCasualPetIDs
+    }
+
+    /// ベースの幸せ報酬キャラかどうか。
+    static func isBaseHappinessRewardPetID(_ petID: String) -> Bool {
         happinessRewardPetIDs.contains(petID)
+    }
+
+    /// 幸せ報酬限定キャラかどうか。
+    /// 注意: カジュアル版も「報酬限定」のため true を返す。
+    /// これにより `PetMaster.all` に存在していても、いつでもガチャのラインナップには入らない。
+    static func isHappinessRewardPetID(_ petID: String) -> Bool {
+        happinessRewardExclusivePetIDs.contains(petID)
+    }
+
+    static func isHappinessRewardExclusivePetID(_ petID: String) -> Bool {
+        happinessRewardExclusivePetIDs.contains(petID)
+    }
+
+    static func isHappinessRewardCasualPetID(_ petID: String) -> Bool {
+        happinessRewardCasualPetIDs.contains(petID)
+    }
+
+    static func happinessMeterOwnerPetID(for petID: String) -> String? {
+        switch petID {
+        case "reward_000", "reward_000_casual": return "reward_000"
+        case "reward_001", "reward_001_casual": return "reward_001"
+        case "reward_002", "reward_002_casual": return "reward_002"
+        case "reward_003", "reward_003_casual": return "reward_003"
+        default: return nil
+        }
+    }
+
+    static func sharesHappinessMeterWithRewardPet(_ petID: String) -> Bool {
+        happinessMeterOwnerPetID(for: petID) != nil
     }
 
     static let all: [PetMasterItem] = [
@@ -82,10 +126,10 @@ enum PetMaster {
         .init(id: "reward_001", name: "ボーイ（A）"),
         .init(id: "reward_002", name: "ガール（B）"),
         .init(id: "reward_003", name: "ボーイ（B）"),
-        .init(id: "reward_000_casual", name: "カジュアル（A）"),
-        .init(id: "reward_001_casual", name: "カジュアル（A）"),
-        .init(id: "reward_002_casual", name: "カジュアル（B）"),
-        .init(id: "reward_003_casual", name: "カジュアル（B）"),
+        .init(id: "reward_000_casual", name: "ガール / カジュアル（A）"),
+        .init(id: "reward_001_casual", name: "ボーイ / カジュアル（A）"),
+        .init(id: "reward_002_casual", name: "ガール / カジュアル（B）"),
+        .init(id: "reward_003_casual", name: "ボーイ / カジュアル（B）"),
         .init(id: "food_taiyaki", name: "たい焼き"),
         .init(id: "food_soft_cream", name: "ソフトクリーム"),
         .init(id: "food_hotdog", name: "ホットドッグ"),
@@ -268,10 +312,10 @@ enum PetMaster {
         case "reward_001": return "幸せLv.10の報酬で仲間になる特別なキャラクター。"
         case "reward_002": return "幸せLv.15の報酬で仲間になる特別なキャラクター。"
         case "reward_003": return "幸せLv.20の報酬で仲間になる特別なキャラクター。"
-        case "reward_000_casual": return "ガール（A）のお世話報酬で仲間になるカジュアル衣装。"
-        case "reward_001_casual": return "ボーイ（A）のお世話報酬で仲間になるカジュアル衣装。"
-        case "reward_002_casual": return "ガール（B）のお世話報酬で仲間になるカジュアル衣装。"
-        case "reward_003_casual": return "ボーイ（B）のお世話報酬で仲間になるカジュアル衣装。"
+        case "reward_000_casual": return "ガール（A）の幸せLv.10到達報酬でのみ獲得できる特別なカジュアル衣装。幸せ度メーターはガール（A）と共通。"
+        case "reward_001_casual": return "ボーイ（A）の幸せLv.10到達報酬でのみ獲得できる特別なカジュアル衣装。幸せ度メーターはボーイ（A）と共通。"
+        case "reward_002_casual": return "ガール（B）の幸せLv.10到達報酬でのみ獲得できる特別なカジュアル衣装。幸せ度メーターはガール（B）と共通。"
+        case "reward_003_casual": return "ボーイ（B）の幸せLv.10到達報酬でのみ獲得できる特別なカジュアル衣装。幸せ度メーターはボーイ（B）と共通。"
         case let id where id.hasPrefix("food_"):
             let name = all.first(where: { $0.id == id })?.name ?? "フードキャラクター"
             return "フードガチャで仲間になる「\(name)」のキャラクター。"
