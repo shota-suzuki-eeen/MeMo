@@ -193,6 +193,15 @@ private struct MemoOnboardingSpotlightOverlay: View {
         screen.spotlightTarget ?? .foodButton
     }
 
+    private var usesHomeFoodScopeBridge: Bool {
+        switch screen {
+        case .foodButton, .foodButtonForRare, .foodRareTab, .foodGiveNormal, .foodGiveRare:
+            return true
+        default:
+            return false
+        }
+    }
+
     var body: some View {
         GeometryReader { proxy in
             let targetFrame = target.frame(in: proxy.size, foodInteractionPhase: foodInteractionPhase)
@@ -212,7 +221,25 @@ private struct MemoOnboardingSpotlightOverlay: View {
                     .allowsHitTesting(false)
                     .position(x: targetFrame.midX, y: targetFrame.midY)
 
-                if screen.spotlightAllowsPassThroughToRealControl {
+                if usesHomeFoodScopeBridge {
+                    MemoOnboardingTouchGate(passThroughFrame: nil, onPassThroughHit: nil)
+                        .frame(width: proxy.size.width, height: proxy.size.height)
+                        .ignoresSafeArea()
+
+                    instructionBubble(width: bubbleWidth, showsPrimaryButton: false)
+                        .allowsHitTesting(false)
+                        .position(x: proxy.size.width / 2, y: bubbleY)
+
+                    MemoOnboardingHomeFoodScopeBridgeLayer(
+                        screen: screen,
+                        targetFrame: targetFrame,
+                        cornerRadius: target.cornerRadius,
+                        foodInteractionPhase: foodInteractionPhase,
+                        onTargetActivated: onTargetActivated
+                    )
+                    .frame(width: proxy.size.width, height: proxy.size.height)
+                    .ignoresSafeArea()
+                } else if screen.spotlightAllowsPassThroughToRealControl {
                     instructionBubble(width: bubbleWidth, showsPrimaryButton: false)
                         .allowsHitTesting(false)
                         .position(x: proxy.size.width / 2, y: bubbleY)
@@ -333,6 +360,106 @@ private struct MemoOnboardingSpotlightOverlay: View {
                 .stroke(Color.white.opacity(0.45), lineWidth: 1)
         )
         .shadow(color: .black.opacity(0.22), radius: 18, x: 0, y: 10)
+    }
+}
+
+private struct MemoOnboardingHomeFoodScopeBridgeLayer: View {
+    let screen: MemoOnboardingScreen
+    let targetFrame: CGRect
+    let cornerRadius: CGFloat
+    let foodInteractionPhase: MemoOnboardingFoodInteractionPhase
+    let onTargetActivated: () -> Void
+
+    var body: some View {
+        Color.clear
+            .contentShape(Rectangle())
+            .overlay(alignment: .topLeading) {
+                RoundedRectangle(cornerRadius: cornerRadius, style: .continuous)
+                    .fill(Color.white.opacity(0.001))
+                    .contentShape(RoundedRectangle(cornerRadius: cornerRadius, style: .continuous))
+                    .frame(width: targetFrame.width, height: targetFrame.height)
+                    .offset(x: targetFrame.minX, y: targetFrame.minY)
+                    .highPriorityGesture(scopeGesture)
+                    .accessibilityAddTraits(.isButton)
+                    .accessibilityLabel(accessibilityLabel)
+                    .accessibilityAction {
+                        if foodInteractionPhase == .pendingSwipe {
+                            MemoOnboardingNotifier.notifyTutorialFoodScopeSwipe(screen: screen)
+                        } else {
+                            activateTapScope()
+                        }
+                    }
+            }
+            .allowsHitTesting(true)
+    }
+
+    private var accessibilityLabel: String {
+        if foodInteractionPhase == .pendingSwipe {
+            return "上にスワイプしてごはんをあげる"
+        }
+
+        switch screen {
+        case .foodButton, .foodButtonForRare:
+            return "ごはんボタンを開く"
+        case .foodRareTab:
+            return "Rのごはんに切り替える"
+        case .foodGiveNormal, .foodGiveRare:
+            return "ごはんを準備する"
+        default:
+            return "チュートリアル操作"
+        }
+    }
+
+    private var scopeGesture: some Gesture {
+        DragGesture(minimumDistance: 0)
+            .onChanged { value in
+                guard foodInteractionPhase == .pendingSwipe else { return }
+                MemoOnboardingNotifier.notifyTutorialFoodScopeDragChanged(
+                    screen: screen,
+                    translationHeight: Double(value.translation.height),
+                    predictedEndTranslationHeight: Double(value.predictedEndTranslation.height)
+                )
+            }
+            .onEnded { value in
+                if foodInteractionPhase == .pendingSwipe {
+                    if isUpwardSwipe(value) {
+                        MemoOnboardingNotifier.notifyTutorialFoodScopeSwipe(screen: screen)
+                    } else {
+                        MemoOnboardingNotifier.notifyTutorialFoodScopeDragReset(screen: screen)
+                    }
+                    return
+                }
+
+                guard isTapLike(value) else { return }
+                activateTapScope()
+            }
+    }
+
+    private func activateTapScope() {
+        onTargetActivated()
+        MemoOnboardingNotifier.notifyTutorialFoodScopeTap(screen: screen)
+    }
+
+    private func isTapLike(_ value: DragGesture.Value) -> Bool {
+        let horizontal = abs(value.translation.width)
+        let vertical = abs(value.translation.height)
+        return horizontal <= 36 && vertical <= 36
+    }
+
+    private func isUpwardSwipe(_ value: DragGesture.Value) -> Bool {
+        let vertical = value.translation.height
+        let predictedVertical = value.predictedEndTranslation.height
+        let horizontal = abs(value.translation.width)
+        let predictedHorizontal = abs(value.predictedEndTranslation.width)
+
+        let hasEnoughUpwardMotion =
+            predictedVertical < -110 ||
+            vertical < -100 ||
+            predictedVertical < -72 ||
+            vertical < -54
+
+        let isMostlyVertical = horizontal < 96 && predictedHorizontal < 120
+        return hasEnoughUpwardMotion && isMostlyVertical
     }
 }
 

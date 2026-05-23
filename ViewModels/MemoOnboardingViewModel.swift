@@ -229,12 +229,36 @@ final class MemoOnboardingViewModel {
             return .saveOnly
 
         case .foodGiveNormal:
+            if foodInteractionPhase == .pendingSwipe {
+                let didApply = state.memoApplyTutorialNormalFood()
+                guard didApply || state.memoFoodTutorialNormalFed else {
+                    foodInteractionPhase = .choosing
+                    return .saveOnly
+                }
+                foodInteractionPhase = .choosing
+                _ = state.memoMarkTutorialFoodFed(foodID: state.memoTutorialNormalFoodID)
+                moveMandatory(to: .foodNormalResult, state: state)
+                return .saveOnly
+            }
+
             foodInteractionPhase = .pendingSwipe
-            return .none
+            return .saveOnly
 
         case .foodGiveRare:
+            if foodInteractionPhase == .pendingSwipe {
+                let didApply = state.memoApplyTutorialRareFood()
+                guard didApply || state.memoFoodTutorialRareFed else {
+                    foodInteractionPhase = .choosing
+                    return .saveOnly
+                }
+                foodInteractionPhase = .choosing
+                _ = state.memoMarkTutorialFoodFed(foodID: state.memoTutorialRareFoodID)
+                moveMandatory(to: .foodRareResult, state: state)
+                return .saveOnly
+            }
+
             foodInteractionPhase = .pendingSwipe
-            return .none
+            return .saveOnly
 
         case .gachaButton:
             foodInteractionPhase = .choosing

@@ -14,6 +14,10 @@ extension Notification.Name {
     static let memoOnboardingRequestToiletTutorial = Notification.Name("memo.onboarding.requestToiletTutorial")
     static let memoOnboardingFoodDidFeed = Notification.Name("memo.onboarding.foodDidFeed")
     static let memoOnboardingTutorialFoodSelectionStarted = Notification.Name("memo.onboarding.tutorialFoodSelectionStarted")
+    static let memoOnboardingTutorialFoodScopeTap = Notification.Name("memo.onboarding.tutorialFoodScopeTap")
+    static let memoOnboardingTutorialFoodScopeSwipe = Notification.Name("memo.onboarding.tutorialFoodScopeSwipe")
+    static let memoOnboardingTutorialFoodScopeDragChanged = Notification.Name("memo.onboarding.tutorialFoodScopeDragChanged")
+    static let memoOnboardingTutorialFoodScopeDragReset = Notification.Name("memo.onboarding.tutorialFoodScopeDragReset")
     static let memoOnboardingToiletScratchStarted = Notification.Name("memo.onboarding.toiletScratchStarted")
     static let memoOnboardingToiletDidBecomeClean = Notification.Name("memo.onboarding.toiletDidBecomeClean")
     static let memoOnboardingStartFirstFreeGachaRequested = Notification.Name("memo.onboarding.startFirstFreeGachaRequested")
@@ -24,6 +28,9 @@ extension Notification.Name {
 enum MemoOnboardingNotificationUserInfoKey {
     static let foodID = "foodID"
     static let force = "force"
+    static let screen = "screen"
+    static let translationHeight = "translationHeight"
+    static let predictedEndTranslationHeight = "predictedEndTranslationHeight"
 }
 
 enum MemoOnboardingNotifier {
@@ -61,6 +68,46 @@ enum MemoOnboardingNotifier {
             name: .memoOnboardingTutorialFoodSelectionStarted,
             object: nil,
             userInfo: userInfo
+        )
+    }
+
+    static func notifyTutorialFoodScopeTap(screen: MemoOnboardingScreen) {
+        NotificationCenter.default.post(
+            name: .memoOnboardingTutorialFoodScopeTap,
+            object: nil,
+            userInfo: [MemoOnboardingNotificationUserInfoKey.screen: screen.rawValue]
+        )
+    }
+
+    static func notifyTutorialFoodScopeSwipe(screen: MemoOnboardingScreen) {
+        NotificationCenter.default.post(
+            name: .memoOnboardingTutorialFoodScopeSwipe,
+            object: nil,
+            userInfo: [MemoOnboardingNotificationUserInfoKey.screen: screen.rawValue]
+        )
+    }
+
+    static func notifyTutorialFoodScopeDragChanged(
+        screen: MemoOnboardingScreen,
+        translationHeight: Double,
+        predictedEndTranslationHeight: Double
+    ) {
+        NotificationCenter.default.post(
+            name: .memoOnboardingTutorialFoodScopeDragChanged,
+            object: nil,
+            userInfo: [
+                MemoOnboardingNotificationUserInfoKey.screen: screen.rawValue,
+                MemoOnboardingNotificationUserInfoKey.translationHeight: translationHeight,
+                MemoOnboardingNotificationUserInfoKey.predictedEndTranslationHeight: predictedEndTranslationHeight
+            ]
+        )
+    }
+
+    static func notifyTutorialFoodScopeDragReset(screen: MemoOnboardingScreen) {
+        NotificationCenter.default.post(
+            name: .memoOnboardingTutorialFoodScopeDragReset,
+            object: nil,
+            userInfo: [MemoOnboardingNotificationUserInfoKey.screen: screen.rawValue]
         )
     }
 

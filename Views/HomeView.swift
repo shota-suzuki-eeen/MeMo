@@ -701,6 +701,28 @@ struct HomeView: View {
                     displayedDesiredFoodID = state.desiredFoodID
                 }
             }
+            .onReceive(NotificationCenter.default.publisher(for: .memoOnboardingTutorialFoodScopeTap)) { notification in
+                let screen = memoOnboardingScreen(from: notification)
+                handleTutorialFoodScopeTap(screen: screen)
+            }
+            .onReceive(NotificationCenter.default.publisher(for: .memoOnboardingTutorialFoodScopeSwipe)) { notification in
+                let screen = memoOnboardingScreen(from: notification)
+                handleTutorialFoodScopeSwipe(screen: screen)
+            }
+            .onReceive(NotificationCenter.default.publisher(for: .memoOnboardingTutorialFoodScopeDragChanged)) { notification in
+                let screen = memoOnboardingScreen(from: notification)
+                let translationHeight = notification.userInfo?[MemoOnboardingNotificationUserInfoKey.translationHeight] as? Double ?? 0
+                let predictedEndTranslationHeight = notification.userInfo?[MemoOnboardingNotificationUserInfoKey.predictedEndTranslationHeight] as? Double ?? translationHeight
+                handleTutorialFoodScopeDragChanged(
+                    screen: screen,
+                    translationHeight: CGFloat(translationHeight),
+                    predictedEndTranslationHeight: CGFloat(predictedEndTranslationHeight)
+                )
+            }
+            .onReceive(NotificationCenter.default.publisher(for: .memoOnboardingTutorialFoodScopeDragReset)) { notification in
+                let screen = memoOnboardingScreen(from: notification)
+                handleTutorialFoodScopeDragReset(screen: screen)
+            }
     }
 
     private var modalConfiguredHomeView: some View {
@@ -2782,6 +2804,206 @@ struct HomeView: View {
             }
         } catch {
             print("❌ saveTodayPhoto failed:", error)
+        }
+    }
+
+
+    private func memoOnboardingScreen(from notification: Notification) -> MemoOnboardingScreen? {
+        guard let rawValue = notification.userInfo?[MemoOnboardingNotificationUserInfoKey.screen] as? String else {
+            return nil
+        }
+        return MemoOnboardingScreen(rawValue: rawValue)
+    }
+
+    @MainActor
+    private func handleTutorialFoodScopeTap(screen requestedScreen: MemoOnboardingScreen?) {
+        guard state.memoShouldRunMandatoryOnboarding else { return }
+
+        let screen = requestedScreen ?? state.memoMandatoryOnboardingCurrentStep
+        guard let screen else { return }
+
+        switch screen {
+        case .foodButton:
+            openTutorialFoodSelectorIfNeeded()
+            MemoOnboardingHomeHooks.foodBubbleTapped(state: state)
+
+        case .foodButtonForRare:
+            openTutorialFoodSelectorIfNeeded()
+            MemoOnboardingHomeHooks.foodBubbleTapped(state: state)
+
+        case .foodRareTab:
+            openTutorialFoodSelectorIfNeeded()
+            if selectedFoodRarityTab != .rare {
+                toggleFoodSelectorRarity()
+            } else {
+                MemoOnboardingHomeHooks.rareFoodTabTappedDuringTutorial(state: state)
+            }
+
+        case .foodGiveNormal:
+            prepareTutorialFoodSelection(foodID: state.memoTutorialNormalFoodID, rarityTab: .normal)
+
+        case .foodGiveRare:
+            prepareTutorialFoodSelection(foodID: state.memoTutorialRareFoodID, rarityTab: .rare)
+
+        default:
+            break
+        }
+    }
+
+    @MainActor
+    private func handleTutorialFoodScopeSwipe(screen requestedScreen: MemoOnboardingScreen?) {
+        guard state.memoShouldRunMandatoryOnboarding else { return }
+
+        let screen = requestedScreen ?? state.memoMandatoryOnboardingCurrentStep
+        guard let screen else { return }
+
+        let foodID: String
+        let rarityTab: FoodSelectorRarityTab
+
+        switch screen {
+        case .foodGiveNormal:
+            foodID = state.memoTutorialNormalFoodID
+            rarityTab = .normal
+        case .foodGiveRare:
+            foodID = state.memoTutorialRareFoodID
+            rarityTab = .rare
+        default:
+            return
+        }
+
+        prepareTutorialFoodSelection(foodID: foodID, rarityTab: rarityTab)
+
+        withAnimation(.spring(response: 0.24, dampingFraction: 0.78)) {
+            foodSelectorDragOffset = CGSize(width: 0, height: -120)
+        }
+
+        feedSelectedFood(state: state)
+    }
+
+    @MainActor
+    private func handleTutorialFoodScopeDragChanged(
+        screen requestedScreen: MemoOnboardingScreen?,
+        translationHeight: CGFloat,
+        predictedEndTranslationHeight: CGFloat
+    ) {
+        guard state.memoShouldRunMandatoryOnboarding else { return }
+
+        let screen = requestedScreen ?? state.memoMandatoryOnboardingCurrentStep
+        guard let screen else { return }
+
+        let foodID: String
+        let rarityTab: FoodSelectorRarityTab
+
+        switch screen {
+        case .foodGiveNormal:
+            foodID = state.memoTutorialNormalFoodID
+            rarityTab = .normal
+        case .foodGiveRare:
+            foodID = state.memoTutorialRareFoodID
+            rarityTab = .rare
+        default:
+            return
+        }
+
+        prepareTutorialFoodSelection(foodID: foodID, rarityTab: rarityTab)
+
+        guard pendingFoodFeedID == foodID else { return }
+
+        let resolvedHeight = min(18, translationHeight)
+        foodSelectorDragOffset = CGSize(width: 0, height: resolvedHeight)
+
+        if predictedEndTranslationHeight < -110 || translationHeight < -100 {
+            // The gesture is likely to complete as a feed swipe. Keep following the finger;
+            // completion itself is handled by the scope swipe notification onEnded.
+        }
+    }
+
+    @MainActor
+    private func handleTutorialFoodScopeDragReset(screen requestedScreen: MemoOnboardingScreen?) {
+        guard state.memoShouldRunMandatoryOnboarding else { return }
+
+        let screen = requestedScreen ?? state.memoMandatoryOnboardingCurrentStep
+        guard screen == .foodGiveNormal || screen == .foodGiveRare else { return }
+
+        withAnimation(.spring(response: 0.28, dampingFraction: 0.9)) {
+            foodSelectorDragOffset = .zero
+        }
+    }
+
+    @MainActor
+    private func openTutorialFoodSelectorIfNeeded() {
+        guard !isToiletLocked else {
+            showToiletLockedMessage()
+            return
+        }
+
+        state.memoPrepareFoodTutorialItemsIfNeeded()
+
+        let feedState = state.canFeedNow(now: Date())
+        guard feedState.can else {
+            return
+        }
+
+        syncDesiredFoodDisplay()
+        syncFoodSelectorSelection()
+
+        guard !ownedFoods.isEmpty else {
+            bgmManager.playSE(.push)
+            showNoFoodMessage()
+            Task { @MainActor in
+                Haptics.rattle(duration: 0.12, style: .light)
+            }
+            return
+        }
+
+        bgmManager.playSE(.push)
+
+        if showFoodSelector == false {
+            openFoodSelector()
+        }
+
+        updateWidgetSnapshot(forceReload: true)
+    }
+
+    @MainActor
+    private func prepareTutorialFoodSelection(
+        foodID: String,
+        rarityTab: FoodSelectorRarityTab
+    ) {
+        guard !isToiletLocked else {
+            showToiletLockedMessage()
+            return
+        }
+
+        state.memoPrepareFoodTutorialItemsIfNeeded()
+        openTutorialFoodSelectorIfNeeded()
+
+        guard showFoodSelector else { return }
+
+        if selectedFoodRarityTab != rarityTab {
+            withAnimation(.spring(response: 0.28, dampingFraction: 0.88)) {
+                selectedFoodRarityTab = rarityTab
+                pendingFoodFeedID = nil
+                resetFoodSelectorDragState()
+            }
+            syncFoodSelectorSelection()
+        }
+
+        guard currentFoodSelectorFoods.contains(where: { $0.id == foodID }) else {
+            syncFoodSelectorSelection()
+            return
+        }
+
+        if selectedFoodID != foodID {
+            withAnimation(.spring(response: 0.26, dampingFraction: 0.86)) {
+                selectedFoodID = foodID
+                resetFoodSelectorDragState()
+                pendingFoodFeedID = nil
+            }
+        }
+
+        if pendingFoodFeedID != foodID {
+            handleFoodSelectorTap(foodID)
         }
     }
 
