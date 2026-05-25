@@ -251,6 +251,20 @@ fileprivate enum GachaCatalog {
         }
     }
 
+    static func makeAlwaysGachaGuaranteedGoldReward(state: AppState) -> GachaReward? {
+        let remaining = remainingNormalCharacters(state: state)
+        let allCandidates = PetMaster.all.filter { isGachaCharacter($0) }
+        let pool = remaining.isEmpty ? allCandidates : remaining
+        guard let pet = pool.randomElement() else { return nil }
+        return GachaReward(
+            rarity: .gold,
+            kind: .character(petID: pet.id),
+            title: resolvedCharacterName(for: pet),
+            subtitle: "キャラクター / SR",
+            imageName: PetMaster.assetName(for: pet.id)
+        )
+    }
+
     private static func makeFoodGachaReward(for rarity: GachaRarity, state: AppState) -> GachaReward? {
         switch rarity {
         case .blue, .red:
@@ -335,19 +349,42 @@ struct GachaView: View {
 
     private var state: AppState? { states.first }
 
-    private var selectedGacha: GachaDefinition {
-        let safeIndex = min(max(0, selectedGachaIndex), max(0, GachaCatalog.gachas.count - 1))
-        return GachaCatalog.gachas[safeIndex]
+    /// ガチャ選択を「いつでもガチャ」に固定する必要がある状態。
+    /// - チュートリアル中: SR確定無料10回は「いつでもガチャ」限定。
+    /// - iPad初回無料10回の未消費中: iPadにはチュートリアルがないため、初回無料10回を引くまでは通常画面側で「いつでもガチャ」のみに制限する。
+    private var isAlwaysGachaOnlyMode: Bool {
+        isTutorialMode || isInitialIPadFreeTenDrawPending
     }
 
-    private var canSelectPreviousGacha: Bool { selectedGachaIndex > 0 }
-    private var canSelectNextGacha: Bool { selectedGachaIndex < GachaCatalog.gachas.count - 1 }
+    private var alwaysGacha: GachaDefinition {
+        GachaCatalog.gachas.first(where: { $0.id == "always" }) ?? GachaCatalog.gachas[0]
+    }
+
+    private var availableGachas: [GachaDefinition] {
+        isAlwaysGachaOnlyMode ? [alwaysGacha] : GachaCatalog.gachas
+    }
+
+    private var selectedGacha: GachaDefinition {
+        let gachas = availableGachas
+        let safeIndex = min(max(0, selectedGachaIndex), max(0, gachas.count - 1))
+        return gachas[safeIndex]
+    }
+
+    private var canSelectPreviousGacha: Bool { availableGachas.indices.contains(selectedGachaIndex - 1) }
+    private var canSelectNextGacha: Bool { availableGachas.indices.contains(selectedGachaIndex + 1) }
     private var isOverlayVisible: Bool { phase != .idle }
     private var isIPadDevice: Bool { UIDevice.current.userInterfaceIdiom == .pad }
 
+    /// iPad初回無料10回が未消費かどうか。
+    /// phase には依存させず、初回無料10回を消費するまではガチャ選択UIを固定する。
+    private var isInitialIPadFreeTenDrawPending: Bool {
+        guard !isTutorialMode, isIPadDevice else { return false }
+        guard let state else { return true }
+        return state.gachaCanUseInitialIPadFreeTenDraw(isPad: true)
+    }
+
     private var isInitialIPadFreeTenDrawAvailable: Bool {
-        guard let state else { return false }
-        return !isTutorialMode && phase == .idle && state.gachaCanUseInitialIPadFreeTenDraw(isPad: isIPadDevice)
+        phase == .idle && isInitialIPadFreeTenDrawPending
     }
 
     private var canGoldAppear: Bool {
@@ -373,7 +410,7 @@ struct GachaView: View {
         if isTutorialMode { return "チュートリアル限定：広告なしで無料10回を体験できます" }
         guard let state else { return "-" }
         let now = Date()
-        if state.gachaCanUseInitialIPadFreeTenDraw(isPad: isIPadDevice) { return "iPad初回特典：広告なしで無料10回を利用できます" }
+        if state.gachaCanUseInitialIPadFreeTenDraw(isPad: isIPadDevice) { return "iPad初回特典：いつでもガチャ限定 / SR1体確定" }
         if let slot = state.gachaAvailableFreeAdSlot(now: now) { return "\(slot.title)の枠が利用可能（\(slot.windowText)）" }
         if let current = GachaFreeAdSlot.current(at: now) { return "\(current.title)の枠は使用済み（\(current.windowText)）" }
         return "無料枠外です（5:00-10:00 / 10:00-15:00 / 15:00-23:00）"
@@ -391,7 +428,7 @@ struct GachaView: View {
 
     private var freeTenDrawButtonTitle: String {
         if isTutorialMode { return tutorialFreeTenDrawStarted ? "無料10回（体験済み）" : "無料10回" }
-        if isInitialIPadFreeTenDrawAvailable { return "初回無料10回" }
+        if isInitialIPadFreeTenDrawAvailable { return "初回無料10回（SR確定）" }
         return canFreeTenDraw ? "広告視聴で無料10回" : "広告無料10回（時間外 / 使用済み）"
     }
 
@@ -438,7 +475,11 @@ struct GachaView: View {
             tapPromptAnimating = true
             state?.ensureInitialPetsIfNeeded()
             state?.gachaResetIfNeeded(now: Date())
+            if isAlwaysGachaOnlyMode { selectedGachaIndex = 0 }
             if isTutorialMode == false { rewardedAdManager.loadIfNeeded() } else { state?.memoMarkFirstVisitFreeTenDrawOffered() }
+        }
+        .onChange(of: isAlwaysGachaOnlyMode) { _, newValue in
+            if newValue { selectedGachaIndex = 0 }
         }
         .onDisappear {
             rollTask?.cancel(); rollTask = nil
@@ -498,14 +539,16 @@ struct GachaView: View {
                     .padding(.top, 2)
                     .frame(maxWidth: contentWidth)
 
-                HStack {
-                    gachaArrowButton(systemName: "chevron.left", isEnabled: canSelectPreviousGacha) { selectGacha(offset: -1) }
-                    Spacer()
-                    gachaArrowButton(systemName: "chevron.right", isEnabled: canSelectNextGacha) { selectGacha(offset: 1) }
+                if availableGachas.count > 1 {
+                    HStack {
+                        gachaArrowButton(systemName: "chevron.left", isEnabled: canSelectPreviousGacha) { selectGacha(offset: -1) }
+                        Spacer()
+                        gachaArrowButton(systemName: "chevron.right", isEnabled: canSelectNextGacha) { selectGacha(offset: 1) }
+                    }
+                    .frame(maxWidth: contentWidth)
+                    .padding(.horizontal, 2)
+                    .padding(.top, max(18, machineWidth * 0.30))
                 }
-                .frame(maxWidth: contentWidth)
-                .padding(.horizontal, 2)
-                .padding(.top, max(18, machineWidth * 0.30))
 
                 Button {
                     guard phase == .idle else { return }
@@ -557,7 +600,7 @@ struct GachaView: View {
     private func selectGacha(offset: Int) {
         guard phase == .idle else { return }
         let nextIndex = selectedGachaIndex + offset
-        guard GachaCatalog.gachas.indices.contains(nextIndex) else { return }
+        guard availableGachas.indices.contains(nextIndex) else { return }
         bgmManager.playSE(.push)
         withAnimation(.spring(response: 0.28, dampingFraction: 0.82)) { selectedGachaIndex = nextIndex }
     }
@@ -655,6 +698,7 @@ struct GachaView: View {
         guard let state else { return }
         guard phase == .idle, isTutorialMode == false else { return }
         guard state.walletSteps >= mode.cost else { showToast("歩数が足りません"); return }
+        if isAlwaysGachaOnlyMode { selectedGachaIndex = 0 }
         bgmManager.playSE(.gacha)
         state.gachaResetIfNeeded(now: Date())
         state.walletSteps -= mode.cost
@@ -681,8 +725,10 @@ struct GachaView: View {
 
     private func beginInitialIPadFreeTenDraw() {
         guard let state, phase == .idle else { return }
+        // iPad初回無料10回はチュートリアルの代替導線として扱い、必ず「いつでもガチャ」で実行する。
+        selectedGachaIndex = 0
         guard state.gachaConsumeInitialIPadFreeTenDraw(isPad: isIPadDevice) else { showToast("初回無料10回は使用済みです"); return }
-        beginDraw(mode: .ten, isFreeAd: true, freeSlot: nil)
+        beginDraw(mode: .ten, isFreeAd: true, freeSlot: nil, usesInitialIPadGuaranteedSR: true)
     }
 
     private func beginTutorialFreeTenDraw() {
@@ -691,7 +737,7 @@ struct GachaView: View {
         beginDraw(mode: .ten, isFreeAd: true, freeSlot: nil)
     }
 
-    private func beginDraw(mode: DrawMode, isFreeAd: Bool, freeSlot: GachaFreeAdSlot?) {
+    private func beginDraw(mode: DrawMode, isFreeAd: Bool, freeSlot: GachaFreeAdSlot?, usesInitialIPadGuaranteedSR: Bool = false) {
         guard let state else { return }
         rollTask?.cancel(); rollTask = nil
         openingTask?.cancel(); openingTask = nil
@@ -699,7 +745,13 @@ struct GachaView: View {
         lastDrawWasFreeAd = isFreeAd
         lastFreeAdSlot = freeSlot
         phase = .rolling
-        rewards = (isTutorialMode && isFreeAd) ? makeTutorialRewards(state: state) : makeRewards(count: mode.count, state: state)
+        if isTutorialMode && isFreeAd {
+            rewards = makeTutorialRewards(state: state)
+        } else if usesInitialIPadGuaranteedSR {
+            rewards = makeInitialIPadFreeTenDrawRewards(state: state)
+        } else {
+            rewards = makeRewards(count: mode.count, state: state)
+        }
         revealOverlayReward = nil
         machineAnimationStart = Date()
         tapPromptAnimating = true
@@ -722,6 +774,26 @@ struct GachaView: View {
         }
     }
 
+    private func makeInitialIPadFreeTenDrawRewards(state: AppState) -> [GachaReward] {
+        var generatedRewards: [GachaReward] = []
+
+        if let guaranteedSR = GachaCatalog.makeAlwaysGachaGuaranteedGoldReward(state: state) {
+            applyReward(guaranteedSR, state: state, gachaID: alwaysGacha.id)
+            generatedRewards.append(guaranteedSR)
+        }
+
+        let remainingCount = max(0, DrawMode.ten.count - generatedRewards.count)
+        for _ in 0..<remainingCount {
+            let rarity = rollNonGoldRarity()
+            guard let reward = GachaCatalog.makeReward(for: rarity, gacha: alwaysGacha, state: state) else { continue }
+            applyReward(reward, state: state, gachaID: alwaysGacha.id)
+            generatedRewards.append(reward)
+        }
+
+        state.gachaResetPity(for: alwaysGacha.id)
+        return generatedRewards.shuffled()
+    }
+
     private func makeTutorialRewards(state: AppState) -> [GachaReward] {
         _ = state.memoMarkFirstVisitFreeTenDrawOffered()
         _ = state.memoConsumeFirstVisitFreeTenDraw()
@@ -738,6 +810,18 @@ struct GachaView: View {
         return ([characterReward] + foodRewards).shuffled()
     }
 
+    private func rollNonGoldRarity() -> GachaRarity {
+        let eligible: [GachaRarity] = [.blue, .red]
+        let totalWeight = eligible.map(\.baseWeight).reduce(0, +)
+        let roll = Double.random(in: 0..<totalWeight)
+        var cumulative: Double = 0
+        for rarity in eligible {
+            cumulative += rarity.baseWeight
+            if roll < cumulative { return rarity }
+        }
+        return .blue
+    }
+
     private func rollRarity(state: AppState) -> GachaRarity {
         let hasGold = GachaCatalog.canGoldAppear(in: selectedGacha, state: state)
         if hasGold, state.gachaGuaranteedGoldNext(for: selectedGacha.id) { return .gold }
@@ -752,18 +836,19 @@ struct GachaView: View {
         return eligible.last ?? .blue
     }
 
-    private func applyReward(_ reward: GachaReward, state: AppState) {
+    private func applyReward(_ reward: GachaReward, state: AppState, gachaID: String? = nil) {
+        let targetGachaID = gachaID ?? selectedGacha.id
         switch reward.kind {
         case .food(let foodID):
             _ = state.addFood(foodId: foodID, count: 1)
-            state.gachaAdvancePityAfterNonGold(for: selectedGacha.id, threshold: Self.pityThreshold)
+            state.gachaAdvancePityAfterNonGold(for: targetGachaID, threshold: Self.pityThreshold)
         case .specialItem(let id):
             _ = state.gachaAddSpecialItem(id: id, count: 1)
-            state.gachaAdvancePityAfterNonGold(for: selectedGacha.id, threshold: Self.pityThreshold)
+            state.gachaAdvancePityAfterNonGold(for: targetGachaID, threshold: Self.pityThreshold)
         case .character(let petID):
             var owned = state.ownedPetIDs()
             if !owned.contains(petID) { owned.append(petID); state.setOwnedPetIDs(owned) }
-            if reward.rarity == .gold { state.gachaResetPity(for: selectedGacha.id) } else { state.gachaAdvancePityAfterNonGold(for: selectedGacha.id, threshold: Self.pityThreshold) }
+            if reward.rarity == .gold { state.gachaResetPity(for: targetGachaID) } else { state.gachaAdvancePityAfterNonGold(for: targetGachaID, threshold: Self.pityThreshold) }
         }
     }
 
