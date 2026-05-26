@@ -370,6 +370,10 @@ private struct MemoOnboardingHomeFoodScopeBridgeLayer: View {
     let foodInteractionPhase: MemoOnboardingFoodInteractionPhase
     let onTargetActivated: () -> Void
 
+    @State private var didCompletePendingSwipe: Bool = false
+
+    private let pendingSwipeFeedDistance: CGFloat = 44
+
     var body: some View {
         Color.clear
             .contentShape(Rectangle())
@@ -391,6 +395,9 @@ private struct MemoOnboardingHomeFoodScopeBridgeLayer: View {
                     }
             }
             .allowsHitTesting(true)
+            .onChange(of: foodInteractionPhase) { _, _ in
+                didCompletePendingSwipe = false
+            }
     }
 
     private var accessibilityLabel: String {
@@ -410,18 +417,40 @@ private struct MemoOnboardingHomeFoodScopeBridgeLayer: View {
         }
     }
 
+    private var scopeMinimumDistance: CGFloat {
+        foodInteractionPhase == .pendingSwipe ? 12 : 0
+    }
+
     private var scopeGesture: some Gesture {
-        DragGesture(minimumDistance: 0)
+        DragGesture(minimumDistance: scopeMinimumDistance)
             .onChanged { value in
                 guard foodInteractionPhase == .pendingSwipe else { return }
+                guard !didCompletePendingSwipe else { return }
+
                 MemoOnboardingNotifier.notifyTutorialFoodScopeDragChanged(
                     screen: screen,
                     translationHeight: Double(value.translation.height),
                     predictedEndTranslationHeight: Double(value.predictedEndTranslation.height)
                 )
+
+                // Some devices/OS combinations can produce a visual pending state but
+                // fail to satisfy the former stricter onEnded condition. Complete once
+                // as soon as the same threshold used by the visible "あげる" state is reached.
+                if isUpwardSwipe(value) {
+                    didCompletePendingSwipe = true
+                    MemoOnboardingNotifier.notifyTutorialFoodScopeSwipe(screen: screen)
+                }
             }
             .onEnded { value in
+                defer {
+                    didCompletePendingSwipe = false
+                }
+
                 if foodInteractionPhase == .pendingSwipe {
+                    if didCompletePendingSwipe {
+                        return
+                    }
+
                     if isUpwardSwipe(value) {
                         MemoOnboardingNotifier.notifyTutorialFoodScopeSwipe(screen: screen)
                     } else {
@@ -453,15 +482,17 @@ private struct MemoOnboardingHomeFoodScopeBridgeLayer: View {
         let predictedHorizontal = abs(value.predictedEndTranslation.width)
 
         let hasEnoughUpwardMotion =
-            predictedVertical < -110 ||
-            vertical < -100 ||
-            predictedVertical < -72 ||
-            vertical < -54
+            vertical <= -pendingSwipeFeedDistance ||
+            predictedVertical <= -pendingSwipeFeedDistance
 
-        let isMostlyVertical = horizontal < 96 && predictedHorizontal < 120
+        let isMostlyVertical =
+            horizontal < 96 &&
+            predictedHorizontal < 120
+
         return hasEnoughUpwardMotion && isMostlyVertical
     }
 }
+
 
 private struct MemoOnboardingTouchGate: UIViewRepresentable {
     let passThroughFrame: CGRect?

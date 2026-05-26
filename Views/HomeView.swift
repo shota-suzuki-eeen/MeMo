@@ -2227,6 +2227,16 @@ struct HomeView: View {
         updateFoodSelectionWhileDragging(value)
     }
 
+    private func isFoodPendingFeedSwipe(vertical: CGFloat, predictedVertical: CGFloat) -> Bool {
+        let threshold = Layout.foodSelectorPendingDecisionThreshold
+        return vertical <= -threshold || predictedVertical <= -threshold
+    }
+
+    private func isFoodPendingCancelSwipe(vertical: CGFloat, predictedVertical: CGFloat) -> Bool {
+        let threshold = Layout.foodSelectorPendingDecisionThreshold
+        return vertical >= threshold || predictedVertical >= threshold
+    }
+
     private func handleFoodSelectorDragEnded(_ value: DragGesture.Value, state: AppState) {
         stopFoodSelectorHorizontalRattleIfNeeded()
 
@@ -2240,13 +2250,15 @@ struct HomeView: View {
         }
 
         if pendingFoodFeedID != nil {
-            let isFeedSwipe =
-                predictedVertical < -110 ||
-                vertical < -100
+            let isFeedSwipe = isFoodPendingFeedSwipe(
+                vertical: vertical,
+                predictedVertical: predictedVertical
+            )
 
-            let isCancelSwipe =
-                predictedVertical > 110 ||
-                vertical > 100
+            let isCancelSwipe = isFoodPendingCancelSwipe(
+                vertical: vertical,
+                predictedVertical: predictedVertical
+            )
 
             if isFeedSwipe {
                 feedSelectedFood(state: state)
@@ -2871,7 +2883,13 @@ struct HomeView: View {
             return
         }
 
-        prepareTutorialFoodSelection(foodID: foodID, rarityTab: rarityTab)
+        // This path is driven by the tutorial scope gesture, not by a real tap.
+        // Avoid playing the selector-open push SE here; the feed resolution will play its own SE.
+        prepareTutorialFoodSelection(
+            foodID: foodID,
+            rarityTab: rarityTab,
+            playSound: false
+        )
 
         withAnimation(.spring(response: 0.24, dampingFraction: 0.78)) {
             foodSelectorDragOffset = CGSize(width: 0, height: -120)
@@ -2905,16 +2923,26 @@ struct HomeView: View {
             return
         }
 
-        prepareTutorialFoodSelection(foodID: foodID, rarityTab: rarityTab)
+        // Called continuously while dragging.
+        // Do not play the selector-open SE from this path.
+        prepareTutorialFoodSelection(
+            foodID: foodID,
+            rarityTab: rarityTab,
+            playSound: false
+        )
 
         guard pendingFoodFeedID == foodID else { return }
 
         let resolvedHeight = min(18, translationHeight)
         foodSelectorDragOffset = CGSize(width: 0, height: resolvedHeight)
 
-        if predictedEndTranslationHeight < -110 || translationHeight < -100 {
-            // The gesture is likely to complete as a feed swipe. Keep following the finger;
-            // completion itself is handled by the scope swipe notification onEnded.
+        if isFoodPendingFeedSwipe(
+            vertical: translationHeight,
+            predictedVertical: predictedEndTranslationHeight
+        ) {
+            // The visual "あげる" state and the actual feed-confirm condition now share
+            // Layout.foodSelectorPendingDecisionThreshold.
+            // Completion is handled by the tutorial scope swipe notification.
         }
     }
 
@@ -2931,7 +2959,7 @@ struct HomeView: View {
     }
 
     @MainActor
-    private func openTutorialFoodSelectorIfNeeded() {
+    private func openTutorialFoodSelectorIfNeeded(playSound: Bool = true) {
         guard !isToiletLocked else {
             showToiletLockedMessage()
             return
@@ -2948,7 +2976,9 @@ struct HomeView: View {
         syncFoodSelectorSelection()
 
         guard !ownedFoods.isEmpty else {
-            bgmManager.playSE(.push)
+            if playSound {
+                bgmManager.playSE(.push)
+            }
             showNoFoodMessage()
             Task { @MainActor in
                 Haptics.rattle(duration: 0.12, style: .light)
@@ -2956,9 +2986,10 @@ struct HomeView: View {
             return
         }
 
-        bgmManager.playSE(.push)
-
         if showFoodSelector == false {
+            if playSound {
+                bgmManager.playSE(.push)
+            }
             openFoodSelector()
         }
 
@@ -2968,7 +2999,8 @@ struct HomeView: View {
     @MainActor
     private func prepareTutorialFoodSelection(
         foodID: String,
-        rarityTab: FoodSelectorRarityTab
+        rarityTab: FoodSelectorRarityTab,
+        playSound: Bool = true
     ) {
         guard !isToiletLocked else {
             showToiletLockedMessage()
@@ -2976,7 +3008,7 @@ struct HomeView: View {
         }
 
         state.memoPrepareFoodTutorialItemsIfNeeded()
-        openTutorialFoodSelectorIfNeeded()
+        openTutorialFoodSelectorIfNeeded(playSound: playSound)
 
         guard showFoodSelector else { return }
 
