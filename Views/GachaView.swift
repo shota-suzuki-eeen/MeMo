@@ -200,9 +200,16 @@ fileprivate enum GachaCatalog {
         return trimmed
     }
 
+    /// 「いつでもガチャ」のSR排出対象キャラクター。
+    /// 初期配布、なつき度報酬、フードガチャ専用キャラクターを除外し、
+    /// 初回限定SR確定枠に「いつでもガチャ」以外のキャラクターが混入しないようにする。
+    static func alwaysGachaCharacterCandidates() -> [PetMasterItem] {
+        PetMaster.all.filter { isGachaCharacter($0) }
+    }
+
     static func remainingNormalCharacters(state: AppState) -> [PetMasterItem] {
         let owned = Set(state.ownedPetIDs())
-        return PetMaster.all.filter { !owned.contains($0.id) && isGachaCharacter($0) }
+        return alwaysGachaCharacterCandidates().filter { !owned.contains($0.id) }
     }
 
     static func remainingFoodCharacters(state: AppState, rarity: GachaRarity? = nil) -> [FoodGachaCharacter] {
@@ -252,9 +259,11 @@ fileprivate enum GachaCatalog {
     }
 
     static func makeAlwaysGachaGuaranteedGoldReward(state: AppState) -> GachaReward? {
+        // 初回限定のSR確定枠は「いつでもガチャ」のラインナップだけから抽選する。
+        // すでに全員所持済みの場合のみ、重複排出として同じ「いつでもガチャ」ラインナップ全体から抽選する。
         let remaining = remainingNormalCharacters(state: state)
-        let allCandidates = PetMaster.all.filter { isGachaCharacter($0) }
-        let pool = remaining.isEmpty ? allCandidates : remaining
+        let alwaysOnlyCandidates = alwaysGachaCharacterCandidates()
+        let pool = remaining.isEmpty ? alwaysOnlyCandidates : remaining
         guard let pet = pool.randomElement() else { return nil }
         return GachaReward(
             rarity: .gold,
@@ -777,6 +786,7 @@ struct GachaView: View {
     private func makeInitialIPadFreeTenDrawRewards(state: AppState) -> [GachaReward] {
         var generatedRewards: [GachaReward] = []
 
+        // iPad初回限定のSR確定枠は、「いつでもガチャ」のSRキャラクターラインナップから1体ランダム確定。
         if let guaranteedSR = GachaCatalog.makeAlwaysGachaGuaranteedGoldReward(state: state) {
             applyReward(guaranteedSR, state: state, gachaID: alwaysGacha.id)
             generatedRewards.append(guaranteedSR)
