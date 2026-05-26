@@ -3,7 +3,8 @@
 //  MeMo
 //
 //  Updated for character / wallpaper switching UI, AdMob interstitial display,
-//  and tutorial-mode character switching through the real Zukan screen.
+//  tutorial-mode character switching through the real Zukan screen,
+//  and limited happiness-reward character cell highlighting.
 //
 
 import SwiftUI
@@ -629,6 +630,18 @@ private struct ZukanCharacterCell: View {
         PetMaster.assetName(for: petID)
     }
 
+    private var backgroundColor: Color {
+        if isCurrent {
+            return Color.blue.opacity(0.22)
+        }
+
+        if PetMaster.isHappinessRewardExclusivePetID(petID) {
+            return Color(red: 1.0, green: 0.93, blue: 0.58).opacity(0.92)
+        }
+
+        return Color.white.opacity(0.72)
+    }
+
     var body: some View {
         Button(action: onTap) {
             Image(imageName)
@@ -639,7 +652,7 @@ private struct ZukanCharacterCell: View {
                 .frame(maxWidth: .infinity, minHeight: 94)
                 .background(
                     RoundedRectangle(cornerRadius: 16)
-                        .fill(isCurrent ? Color.blue.opacity(0.22) : Color.white.opacity(0.72))
+                        .fill(backgroundColor)
                 )
                 .overlay(
                     RoundedRectangle(cornerRadius: 16)
