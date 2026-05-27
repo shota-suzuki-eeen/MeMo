@@ -230,6 +230,18 @@ extension AppState {
     static let toiletPoopInitialCount: Int = 1
     static let toiletPoopMaxCount: Int = 15
     static let toiletPoopSpawnIntervalSeconds: TimeInterval = 15 * 60
+    // 2026/05 update:
+    // poopがほぼ透明な状態で残り続けると掃除完了に見えてしまうため、
+    // 表示透明度が90%以下の状態が5秒続いたら自動的に掃除完了扱いにします。
+    static let toiletPoopAutoClearOpacityThreshold: Double = 0.90
+    static let toiletPoopAutoClearOpacityRetentionSeconds: TimeInterval = 5
+    static let toiletPoopVisibleOpacityFloor: Double = 0.02
+    static let toiletPoopOpacityFadeRange: Double = 0.98
+
+    static var toiletPoopAutoClearProgressThreshold: Double {
+        let raw = (1 - toiletPoopAutoClearOpacityThreshold) / toiletPoopOpacityFadeRange
+        return max(0, min(1, raw))
+    }
 
     /// 歩数通貨を増やす。
     /// 増加分だけ HomeView の「総歩数」に表示する累計獲得歩数にも反映する。
@@ -447,6 +459,7 @@ extension AppState {
         var isFlippedHorizontally: Bool
         var cleanedProgress: Double
         var isCleared: Bool
+        var autoClearOpacityThresholdReachedAt: Date?
 
         private enum CodingKeys: String, CodingKey {
             case id
@@ -456,6 +469,7 @@ extension AppState {
             case isFlippedHorizontally
             case cleanedProgress
             case isCleared
+            case autoClearOpacityThresholdReachedAt
         }
 
         init(
@@ -465,7 +479,8 @@ extension AppState {
             rotationDegrees: Double,
             isFlippedHorizontally: Bool,
             cleanedProgress: Double = 0,
-            isCleared: Bool = false
+            isCleared: Bool = false,
+            autoClearOpacityThresholdReachedAt: Date? = nil
         ) {
             self.id = id
             self.centerXRatio = centerXRatio
@@ -474,6 +489,7 @@ extension AppState {
             self.isFlippedHorizontally = isFlippedHorizontally
             self.cleanedProgress = max(0, min(1, cleanedProgress))
             self.isCleared = isCleared
+            self.autoClearOpacityThresholdReachedAt = autoClearOpacityThresholdReachedAt
         }
 
         init(from decoder: Decoder) throws {
@@ -485,6 +501,7 @@ extension AppState {
             isFlippedHorizontally = try container.decode(Bool.self, forKey: .isFlippedHorizontally)
             cleanedProgress = max(0, min(1, try container.decodeIfPresent(Double.self, forKey: .cleanedProgress) ?? 0))
             isCleared = try container.decodeIfPresent(Bool.self, forKey: .isCleared) ?? false
+            autoClearOpacityThresholdReachedAt = try container.decodeIfPresent(Date.self, forKey: .autoClearOpacityThresholdReachedAt)
         }
 
         func encode(to encoder: Encoder) throws {
@@ -496,6 +513,7 @@ extension AppState {
             try container.encode(isFlippedHorizontally, forKey: .isFlippedHorizontally)
             try container.encode(cleanedProgress, forKey: .cleanedProgress)
             try container.encode(isCleared, forKey: .isCleared)
+            try container.encodeIfPresent(autoClearOpacityThresholdReachedAt, forKey: .autoClearOpacityThresholdReachedAt)
         }
     }
 
@@ -523,6 +541,18 @@ extension AppState {
         toiletPoops().contains(where: { !$0.isCleared })
     }
 
+    private func toiletPoopRenderedOpacity(progress: Double) -> Double {
+        let clamped = max(0, min(1, progress))
+        return max(
+            AppState.toiletPoopVisibleOpacityFloor,
+            1 - (clamped * AppState.toiletPoopOpacityFadeRange)
+        )
+    }
+
+    private func isToiletPoopAutoClearTarget(progress: Double) -> Bool {
+        toiletPoopRenderedOpacity(progress: progress) <= AppState.toiletPoopAutoClearOpacityThreshold
+    }
+
     @discardableResult
     func updateToiletPoopProgress(id: String, progress: Double) -> Bool {
         var items = toiletPoops()
@@ -533,6 +563,14 @@ extension AppState {
         guard abs(items[index].cleanedProgress - clamped) > 0.0001 else { return false }
 
         items[index].cleanedProgress = clamped
+        if isToiletPoopAutoClearTarget(progress: clamped) {
+            if items[index].autoClearOpacityThresholdReachedAt == nil {
+                items[index].autoClearOpacityThresholdReachedAt = Date()
+            }
+        } else {
+            items[index].autoClearOpacityThresholdReachedAt = nil
+        }
+
         setToiletPoops(items)
         return true
     }
@@ -545,6 +583,7 @@ extension AppState {
 
         items[index].cleanedProgress = 1
         items[index].isCleared = true
+        items[index].autoClearOpacityThresholdReachedAt = nil
         setToiletPoops(items)
         return true
     }
@@ -612,9 +651,48 @@ extension AppState {
         let maxCount = AppState.toiletPoopMaxCount
 
         var items = toiletPoops()
+        var didChange = false
+        var didAutoClearAnyPoop = false
+
+        for index in items.indices where !items[index].isCleared {
+            let progress = max(0, min(1, items[index].cleanedProgress))
+
+            guard isToiletPoopAutoClearTarget(progress: progress) else {
+                if items[index].autoClearOpacityThresholdReachedAt != nil {
+                    items[index].autoClearOpacityThresholdReachedAt = nil
+                    didChange = true
+                }
+                continue
+            }
+
+            if let reachedAt = items[index].autoClearOpacityThresholdReachedAt {
+                if now.timeIntervalSince(reachedAt) >= AppState.toiletPoopAutoClearOpacityRetentionSeconds {
+                    items[index].cleanedProgress = 1
+                    items[index].isCleared = true
+                    items[index].autoClearOpacityThresholdReachedAt = nil
+                    didChange = true
+                    didAutoClearAnyPoop = true
+                }
+            } else {
+                items[index].autoClearOpacityThresholdReachedAt = now
+                didChange = true
+            }
+        }
+
+        if didChange {
+            setToiletPoops(items)
+        }
+
         let activeItems = items.filter { !$0.isCleared }
         let activeCount = activeItems.count
-        var didChange = false
+
+        if didAutoClearAnyPoop, activeCount == 0 {
+            let resolveResult = resolveToilet(now: now)
+            if resolveResult.didResolve {
+                _ = addHappinessPoints(10, now: now)
+            }
+            return true
+        }
 
         if activeCount == 0 {
             let elapsedSinceFlag = max(0, now.timeIntervalSince(flagAt))
