@@ -1826,6 +1826,7 @@ struct HomeView: View {
             return
         }
 
+        closeTopInfoPopup(playSound: false)
         save()
         syncDisplayedHappiness(animated: false)
     }
@@ -4106,7 +4107,7 @@ private struct HomeHappinessRewardRow: View {
                     .foregroundStyle(.white.opacity(0.76))
                     .lineLimit(1)
 
-                Text("あと\(remainingLevels)Lv")
+                Text("あとLv\(remainingLevels)")
                     .font(.system(size: 12, weight: .semibold))
                     .foregroundStyle(.white.opacity(0.90))
                     .lineLimit(2)
