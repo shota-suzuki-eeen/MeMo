@@ -3,6 +3,7 @@
 //  MeMo
 //
 //  HomeView の menu_button 内 walk_button から呼び出す開始確認ポップアップ。
+//  2026/06 update: 広告停止中のため、開始ボタン文言を広告なしの表記に調整。
 //
 
 import SwiftUI
@@ -17,32 +18,20 @@ struct WalkStartPopupView: View {
     let onStartWithAd: () -> Void
     let onStartRainFree: () -> Void
 
-    private var isIPadAdFallbackStartAvailable: Bool {
-        UIDevice.current.userInterfaceIdiom == .pad && !isAdReady
-    }
-
     private var shouldDisableAdStartButton: Bool {
-        !isAdReady && !isIPadAdFallbackStartAvailable
+        false
     }
 
     private var adStartButtonTitle: String {
-        if isAdReady {
-            return "広告でスタート"
-        }
-
-        if isIPadAdFallbackStartAvailable {
-            return "スタート"
-        }
-
-        return "広告準備中..."
+        "スタート"
     }
 
     private var adStartButtonSystemImageName: String? {
-        isAdReady || isIPadAdFallbackStartAvailable ? "play.rectangle.fill" : nil
+        "play.rectangle.fill"
     }
 
     private var shouldShowAdStartLoadingIndicator: Bool {
-        !isAdReady && !isIPadAdFallbackStartAvailable
+        false
     }
 
     var body: some View {
@@ -120,18 +109,14 @@ struct WalkStartPopupView: View {
 
     private var descriptionText: String {
         if canUseRainFreeStart {
-            return "広告なしで1回チャレンジできます。\n5分間、タップするたびに歩数通貨を獲得できます。"
-        }
-
-        if isIPadAdFallbackStartAvailable {
-            return "スタートすると5分間チャレンジできます。\nタップするたびに歩数通貨を獲得できます。"
+            return "1回チャレンジできます。\n5分間、タップするたびに歩数通貨を獲得できます。"
         }
 
         if isRainy {
-            return "広告を視聴すると5分間チャレンジできます。\n雨の日の無料チャレンジは今日は使用済みです。"
+            return "5分間チャレンジできます。\n雨の日の無料チャレンジは今日は使用済みです。"
         }
 
-        return "広告を視聴すると5分間チャレンジできます。\nタップするたびに歩数通貨を獲得できます。\n雨の日は1日1回だけ広告なしで遊べます。"
+        return "5分間チャレンジできます。\nタップするたびに歩数通貨を獲得できます。"
     }
 }
 
@@ -192,6 +177,6 @@ private struct WalkPopupButton: View {
         .buttonStyle(.plain)
         .disabled(!isEnabled)
         .opacity(isEnabled ? 1 : 0.68)
-        .accessibilityHint(isEnabled ? "" : "広告の準備が完了すると開始できます")
+        .accessibilityHint("")
     }
 }

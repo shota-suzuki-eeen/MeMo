@@ -3,6 +3,7 @@
 //  MeMo
 //
 //  Centralized feature policy for future subscription support.
+//  2026/06 update: 広告配信を一時停止。既存の広告方針はコメントとして残す。
 //
 
 import Foundation
@@ -23,6 +24,10 @@ enum PremiumFeature: String, CaseIterable, Identifiable {
 // MARK: - Monetization Policy
 
 enum MonetizationPolicy {
+    /// 全広告を停止するための一元スイッチ。
+    /// 再開時は `false` に戻し、下記コメントアウト済みの既存条件を復帰させる。
+    static let isAdvertisingPaused: Bool = true
+
     /// バナー広告・インタースティシャル広告など、ユーザーが能動的に報酬獲得を選ばない広告を表示するか。
     ///
     /// - Developer Mode: 既存挙動通り広告は表示しない
@@ -32,7 +37,11 @@ enum MonetizationPolicy {
         isDeveloperMode: Bool,
         hasPremiumAccess: Bool
     ) -> Bool {
-        !isDeveloperMode && !hasPremiumAccess
+        guard !isAdvertisingPaused else { return false }
+
+        // 広告再開時は以下の既存条件を使用する。
+        // return !isDeveloperMode && !hasPremiumAccess
+        return false
     }
 
     /// リワード広告は、無料10回ガチャなどユーザーが報酬獲得のために明示的に選ぶ広告。
@@ -41,7 +50,11 @@ enum MonetizationPolicy {
         isDeveloperMode: Bool,
         hasPremiumAccess: Bool
     ) -> Bool {
-        !isDeveloperMode
+        guard !isAdvertisingPaused else { return false }
+
+        // 広告再開時は以下の既存条件を使用する。
+        // return !isDeveloperMode
+        return false
     }
 
     static func isPremiumFeatureEnabled(

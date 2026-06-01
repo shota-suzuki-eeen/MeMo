@@ -5,6 +5,9 @@
 //  Updated for the multi-gacha specification.
 //  Adds フードガチャ using gatyaMachine_food and keeps いつでもガチャ as the initial machine.
 //  Pity counter is tracked independently for each gacha definition.
+//  2026/06 update:
+//  広告停止中のため、無料10回ガチャは広告表示を行わず即時実行します。
+//  広告関連の呼び出しは今後再開できるようコメントアウトして残します。
 //
 
 import SwiftUI
@@ -302,7 +305,8 @@ struct GachaView: View {
     @EnvironmentObject private var bgmManager: BGMManager
     @Query private var states: [AppState]
 
-    @ObservedObject private var rewardedAdManager = AdMobManager.shared.rewardGacha
+    // 広告停止中: 今後再開できるよう、リワード広告マネージャの参照はコメントアウトで残します。
+    // @ObservedObject private var rewardedAdManager = AdMobManager.shared.rewardGacha
 
     private let isTutorialMode: Bool
     private let onTutorialFinished: (() -> Void)?
@@ -416,7 +420,7 @@ struct GachaView: View {
     }
 
     private var freeSlotStatusText: String {
-        if isTutorialMode { return "チュートリアル限定：広告なしで無料10回を体験できます" }
+        if isTutorialMode { return "チュートリアル限定：無料10回を体験できます" }
         guard let state else { return "-" }
         let now = Date()
         if state.gachaCanUseInitialIPadFreeTenDraw(isPad: isIPadDevice) { return "iPad初回特典：いつでもガチャ限定 / SR1体確定" }
@@ -438,7 +442,7 @@ struct GachaView: View {
     private var freeTenDrawButtonTitle: String {
         if isTutorialMode { return tutorialFreeTenDrawStarted ? "無料10回（体験済み）" : "無料10回" }
         if isInitialIPadFreeTenDrawAvailable { return "初回無料10回（SR確定）" }
-        return canFreeTenDraw ? "広告視聴で無料10回" : "広告無料10回（時間外 / 使用済み）"
+        return canFreeTenDraw ? "無料10回ガチャ" : "無料10回（時間外 / 使用済み）"
     }
 
     var body: some View {
@@ -485,7 +489,12 @@ struct GachaView: View {
             state?.ensureInitialPetsIfNeeded()
             state?.gachaResetIfNeeded(now: Date())
             if isAlwaysGachaOnlyMode { selectedGachaIndex = 0 }
-            if isTutorialMode == false { rewardedAdManager.loadIfNeeded() } else { state?.memoMarkFirstVisitFreeTenDrawOffered() }
+            if isTutorialMode == false {
+                // 広告停止中: 今後再開できるよう、無料10回ガチャ用リワード広告の事前ロード処理はコメントアウトで残します。
+                // rewardedAdManager.loadIfNeeded()
+            } else {
+                state?.memoMarkFirstVisitFreeTenDrawOffered()
+            }
         }
         .onChange(of: isAlwaysGachaOnlyMode) { _, newValue in
             if newValue { selectedGachaIndex = 0 }
@@ -716,13 +725,17 @@ struct GachaView: View {
 
     private func performRewardedAdThenFreeTenDraw() {
         guard canFreeTenDraw else { showToast("現在利用できる無料10回はありません"); return }
-        rewardedAdManager.show(
-            onReward: { beginFreeTenDraw() },
-            onUnavailable: {
-                rewardedAdManager.loadIfNeeded()
-                showToast("広告を読み込み中です。少し待ってからもう一度お試しください")
-            }
-        )
+
+        // 広告停止中: 今後再開できるよう、リワード広告表示処理はコメントアウトで残します。
+        // rewardedAdManager.show(
+        //     onReward: { beginFreeTenDraw() },
+        //     onUnavailable: {
+        //         rewardedAdManager.loadIfNeeded()
+        //         showToast("広告を読み込み中です。少し待ってからもう一度お試しください")
+        //     }
+        // )
+
+        beginFreeTenDraw()
     }
 
     private func beginFreeTenDraw() {
@@ -944,9 +957,9 @@ struct GachaView: View {
             }
             VStack(spacing: 10) {
                 TapPromptView(isAnimating: tapPromptAnimating, count: 1)
-                if isTutorialMode { Text("チュートリアル限定 / 広告なし").font(.system(size: 13, weight: .semibold)).foregroundStyle(.white.opacity(0.86)) }
+                if isTutorialMode { Text("チュートリアル限定 / 無料").font(.system(size: 13, weight: .semibold)).foregroundStyle(.white.opacity(0.86)) }
                 else if let slot = lastFreeAdSlot, lastDrawWasFreeAd { Text("無料10回（\(slot.windowText)）").font(.system(size: 13, weight: .semibold)).foregroundStyle(.white.opacity(0.86)) }
-                else if lastDrawWasFreeAd && isIPadDevice { Text("iPad初回特典 / 広告なし").font(.system(size: 13, weight: .semibold)).foregroundStyle(.white.opacity(0.86)) }
+                else if lastDrawWasFreeAd && isIPadDevice { Text("iPad初回特典 / 無料").font(.system(size: 13, weight: .semibold)).foregroundStyle(.white.opacity(0.86)) }
             }
         }
         .frame(maxWidth: .infinity, minHeight: 0, alignment: .center)
@@ -1088,7 +1101,12 @@ struct GachaView: View {
         rewards = []
         lastFreeAdSlot = nil
         lastDrawWasFreeAd = false
-        if isTutorialMode { onTutorialFinished?() } else { rewardedAdManager.loadIfNeeded() }
+        if isTutorialMode {
+            onTutorialFinished?()
+        } else {
+            // 広告停止中: 今後再開できるよう、次回無料10回ガチャ用リワード広告の再ロード処理はコメントアウトで残します。
+            // rewardedAdManager.loadIfNeeded()
+        }
     }
 
     private func persistState() {

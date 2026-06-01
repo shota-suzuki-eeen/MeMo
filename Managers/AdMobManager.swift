@@ -6,6 +6,7 @@
 //  Prepared for future subscription-based passive ad hiding.
 //  お散歩機能のリワード広告IDを追加。
 //  おやすみモード用のリワード広告管理を追加。
+//  2026/06 update: 全広告を停止。広告ID・既存広告処理は再開できるように残す。
 //
 
 import Foundation
@@ -112,6 +113,14 @@ enum DeveloperModeStore {
     }
 }
 
+// MARK: - Ad pause switch
+
+private enum AdRuntimePolicy {
+    static var isAdvertisingPaused: Bool {
+        MonetizationPolicy.isAdvertisingPaused
+    }
+}
+
 // MARK: - Full-screen ad BGM mute bridge
 
 private enum AdPlaybackAudioMuteController {
@@ -159,6 +168,13 @@ final class AdMobManager: ObservableObject {
         )
     }
 
+    private var shouldUseRewardedAds: Bool {
+        MonetizationPolicy.shouldUseRewardedAdvertising(
+            isDeveloperMode: DeveloperModeStore.isEnabled,
+            hasPremiumAccess: SubscriptionAccessManager.shared.hasPremiumAccess
+        )
+    }
+
     func start() {
         guard !didStart else { return }
         didStart = true
@@ -166,6 +182,14 @@ final class AdMobManager: ObservableObject {
         lastClaimedWorkRewardIDs = currentClaimedWorkRewardIDs()
         lastClaimedHappinessRewardLevels = currentClaimedHappinessRewardLevels()
         observeRewardDefaultChanges()
+
+        guard !AdRuntimePolicy.isAdvertisingPaused else {
+            rewardGacha.markAvailableWithoutAd()
+            rewardWalkStart.markAvailableWithoutAd()
+            rewardWalkDouble.markAvailableWithoutAd()
+            rewardSleepMode.markAvailableWithoutAd()
+            return
+        }
 
         guard !DeveloperModeStore.isEnabled else {
             rewardGacha.load()
@@ -183,10 +207,17 @@ final class AdMobManager: ObservableObject {
 
         // リワード広告はユーザー操作に紐づくため、
         // 将来のプレミアム特典とは別に扱えるようにしておく。
-        rewardGacha.load()
-        rewardWalkStart.load()
-        rewardWalkDouble.load()
-        rewardSleepMode.load()
+        if shouldUseRewardedAds {
+            rewardGacha.load()
+            rewardWalkStart.load()
+            rewardWalkDouble.load()
+            rewardSleepMode.load()
+        } else {
+            rewardGacha.markAvailableWithoutAd()
+            rewardWalkStart.markAvailableWithoutAd()
+            rewardWalkDouble.markAvailableWithoutAd()
+            rewardSleepMode.markAvailableWithoutAd()
+        }
 
         guard shouldUsePassiveAds else { return }
         interstitialCharacterSet.load()
@@ -194,18 +225,34 @@ final class AdMobManager: ObservableObject {
     }
 
     func prepareRewardGacha() {
+        guard shouldUseRewardedAds else {
+            rewardGacha.markAvailableWithoutAd()
+            return
+        }
         rewardGacha.loadIfNeeded()
     }
 
     func prepareRewardWalkStart() {
+        guard shouldUseRewardedAds else {
+            rewardWalkStart.markAvailableWithoutAd()
+            return
+        }
         rewardWalkStart.loadIfNeeded()
     }
 
     func prepareRewardWalkDouble() {
+        guard shouldUseRewardedAds else {
+            rewardWalkDouble.markAvailableWithoutAd()
+            return
+        }
         rewardWalkDouble.loadIfNeeded()
     }
 
     func prepareRewardSleepMode() {
+        guard shouldUseRewardedAds else {
+            rewardSleepMode.markAvailableWithoutAd()
+            return
+        }
         rewardSleepMode.loadIfNeeded()
     }
 
@@ -500,24 +547,37 @@ final class RewardedAdManager: NSObject, ObservableObject {
         self.adUnitID = adUnitID
         super.init()
 
-        if DeveloperModeStore.isEnabled {
+        if DeveloperModeStore.isEnabled || AdRuntimePolicy.isAdvertisingPaused {
             self.isReady = true
         }
     }
 
+    func markAvailableWithoutAd() {
+        isReady = true
+        isLoading = false
+        lastErrorMessage = nil
+        #if canImport(GoogleMobileAds)
+        rewardedAd = nil
+        #endif
+    }
+
     func loadIfNeeded() {
+        guard !AdRuntimePolicy.isAdvertisingPaused else {
+            markAvailableWithoutAd()
+            return
+        }
         guard !isReady, !isLoading else { return }
         load()
     }
 
     func load() {
+        guard !AdRuntimePolicy.isAdvertisingPaused else {
+            markAvailableWithoutAd()
+            return
+        }
+
         if DeveloperModeStore.isEnabled {
-            isReady = true
-            isLoading = false
-            lastErrorMessage = nil
-            #if canImport(GoogleMobileAds)
-            rewardedAd = nil
-            #endif
+            markAvailableWithoutAd()
             return
         }
 
@@ -557,11 +617,15 @@ final class RewardedAdManager: NSObject, ObservableObject {
         onReward: @escaping () -> Void,
         onUnavailable: (() -> Void)? = nil
     ) {
+        guard !AdRuntimePolicy.isAdvertisingPaused else {
+            markAvailableWithoutAd()
+            onReward()
+            return
+        }
+
         if DeveloperModeStore.isEnabled {
             onReward()
-            isReady = true
-            isLoading = false
-            lastErrorMessage = nil
+            markAvailableWithoutAd()
             return
         }
 
@@ -660,11 +724,22 @@ final class InterstitialAdManager: NSObject, ObservableObject {
     }
 
     func loadIfNeeded() {
+        guard !AdRuntimePolicy.isAdvertisingPaused else { return }
         guard !isReady, !isLoading else { return }
         load()
     }
 
     func load() {
+        guard !AdRuntimePolicy.isAdvertisingPaused else {
+            isReady = false
+            isLoading = false
+            lastErrorMessage = nil
+            #if canImport(GoogleMobileAds)
+            interstitialAd = nil
+            #endif
+            return
+        }
+
         if DeveloperModeStore.isEnabled {
             isReady = true
             isLoading = false
@@ -708,6 +783,11 @@ final class InterstitialAdManager: NSObject, ObservableObject {
     }
 
     func show(onDismiss: @escaping () -> Void) {
+        guard !AdRuntimePolicy.isAdvertisingPaused else {
+            onDismiss()
+            return
+        }
+
         if DeveloperModeStore.isEnabled {
             onDismiss()
             isReady = true

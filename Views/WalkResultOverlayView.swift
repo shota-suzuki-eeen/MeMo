@@ -3,6 +3,7 @@
 //  MeMo
 //
 //  お散歩終了時に中央表示するリザルトオーバーレイ。
+//  2026/06 update: 広告停止中のため、2倍獲得を広告なしで実行する表記に調整。
 //
 
 import SwiftUI
@@ -85,8 +86,8 @@ struct WalkResultOverlayView: View {
                     )
 
                     WalkResultButton(
-                        title: doubleRewardAd.isLoading && !doubleRewardAd.isReady ? "準備中" : "2倍獲得",
-                        systemImageName: doubleRewardAd.isLoading && !doubleRewardAd.isReady ? nil : "play.rectangle.fill",
+                        title: "2倍獲得",
+                        systemImageName: "play.rectangle.fill",
                         isPrimary: true,
                         isEnabled: !isClaiming && !isAnimatingDoubleCountUp,
                         action: claimDoubleWithAd
@@ -149,7 +150,7 @@ struct WalkResultOverlayView: View {
         } onUnavailable: {
             Task { @MainActor in
                 isClaiming = false
-                messageText = "広告の準備ができていません。少し待ってからもう一度お試しください。"
+                messageText = "現在利用できません。少し待ってからもう一度お試しください。"
                 AdMobManager.shared.prepareRewardWalkDouble()
             }
         }

@@ -3,6 +3,7 @@
 //  MeMo
 //
 //  おやすみモード開始確認・残り時間表示用ポップアップ。
+//  2026/06 update: 広告停止中のため、開始・リセット文言を広告なしの表記に調整。
 //
 
 import SwiftUI
@@ -34,15 +35,15 @@ struct SleepModePopupView: View {
     }
 
     private var rewardedButtonTitle: String {
-        isAdLoading && !isAdReady ? "準備中" : "時間リセット"
+        "時間リセット"
     }
 
     private var startButtonTitle: String {
-        isAdLoading && !isAdReady ? "準備中" : "おやすみスタート"
+        "おやすみスタート"
     }
 
     private var rewardedButtonSystemImageName: String? {
-        isAdLoading && !isAdReady ? nil : "play.rectangle.fill"
+        "play.rectangle.fill"
     }
 
     var body: some View {
@@ -65,7 +66,7 @@ struct SleepModePopupView: View {
                         .multilineTextAlignment(.center)
                         .foregroundStyle(.secondary)
                 } else {
-                    Text("広告を視聴すると、6時間幸せ度が下がらなくなります。\n満腹度はいつも通り変化します。")
+                    Text("6時間幸せ度が下がらなくなります。\n満腹度はいつも通り変化します。")
                         .font(.system(size: 15, weight: .bold))
                         .lineSpacing(4)
                         .multilineTextAlignment(.center)
