@@ -37,7 +37,7 @@ struct MeMoWatchSnapshot: Codable, Equatable {
         happinessMaxPoint: 100,
         fullnessLevel: 0,
         fullnessMaxLevel: 5,
-        characterAssetName: "pet_000",
+        characterAssetName: "person",
         backgroundAssetName: "Home_background",
         updatedAt: Date()
     )
@@ -47,7 +47,7 @@ struct MeMoWatchSnapshot: Codable, Equatable {
 final class MeMoWatchConnectivityBridge: NSObject, ObservableObject {
     static let shared = MeMoWatchConnectivityBridge()
 
-    private nonisolated static let userDefaultsKey = "memo.watch.latestSnapshot"
+    private static let userDefaultsKey = "memo.watch.latestSnapshot"
 
     @Published private(set) var latestSnapshot: MeMoWatchSnapshot = MeMoWatchConnectivityBridge.initialSnapshot()
 
@@ -160,16 +160,31 @@ final class MeMoWatchConnectivityBridge: NSObject, ObservableObject {
         #endif
     }
 
-    private nonisolated static func initialSnapshot() -> MeMoWatchSnapshot {
+    private func handleIncomingOnMainActor(dictionary: [String: Any]) {
+        if let snapshot = Self.snapshot(from: dictionary) {
+            apply(snapshot)
+            return
+        }
+
+        #if os(iOS)
+        if dictionary["event"] as? String == "pettingTouch" {
+            guard let appState else { return }
+            _ = appState.registerHappinessPettingTouch(count: 1, now: Date())
+            publishCurrentSnapshot()
+        }
+        #endif
+    }
+
+    private static func initialSnapshot() -> MeMoWatchSnapshot {
         loadStoredSnapshot(key: userDefaultsKey) ?? .placeholder
     }
 
-    private nonisolated static func payload(from snapshot: MeMoWatchSnapshot) -> [String: Any]? {
+    private static func payload(from snapshot: MeMoWatchSnapshot) -> [String: Any]? {
         guard let data = try? JSONEncoder().encode(snapshot) else { return nil }
         return ["snapshotData": data]
     }
 
-    private nonisolated static func snapshot(from dictionary: [String: Any]) -> MeMoWatchSnapshot? {
+    private static func snapshot(from dictionary: [String: Any]) -> MeMoWatchSnapshot? {
         if let data = dictionary["snapshotData"] as? Data {
             return try? JSONDecoder().decode(MeMoWatchSnapshot.self, from: data)
         }
@@ -177,12 +192,12 @@ final class MeMoWatchConnectivityBridge: NSObject, ObservableObject {
         return nil
     }
 
-    private nonisolated static func store(_ snapshot: MeMoWatchSnapshot, key: String) {
+    private static func store(_ snapshot: MeMoWatchSnapshot, key: String) {
         guard let data = try? JSONEncoder().encode(snapshot) else { return }
         UserDefaults.standard.set(data, forKey: key)
     }
 
-    private nonisolated static func loadStoredSnapshot(key: String) -> MeMoWatchSnapshot? {
+    private static func loadStoredSnapshot(key: String) -> MeMoWatchSnapshot? {
         guard let data = UserDefaults.standard.data(forKey: key) else { return nil }
         return try? JSONDecoder().decode(MeMoWatchSnapshot.self, from: data)
     }
@@ -214,9 +229,8 @@ extension MeMoWatchConnectivityBridge: WCSessionDelegate {
         _ session: WCSession,
         didReceiveApplicationContext applicationContext: [String : Any]
     ) {
-        guard let snapshot = Self.snapshot(from: applicationContext) else { return }
         Task { @MainActor in
-            self.apply(snapshot)
+            self.handleIncomingOnMainActor(dictionary: applicationContext)
         }
     }
 
@@ -224,33 +238,18 @@ extension MeMoWatchConnectivityBridge: WCSessionDelegate {
         _ session: WCSession,
         didReceiveUserInfo userInfo: [String : Any] = [:]
     ) {
-        handleIncoming(dictionary: userInfo)
+        Task { @MainActor in
+            self.handleIncomingOnMainActor(dictionary: userInfo)
+        }
     }
 
     nonisolated func session(
         _ session: WCSession,
         didReceiveMessage message: [String : Any]
     ) {
-        handleIncoming(dictionary: message)
-    }
-
-    private nonisolated func handleIncoming(dictionary: [String: Any]) {
-        if let snapshot = Self.snapshot(from: dictionary) {
-            Task { @MainActor in
-                self.apply(snapshot)
-            }
-            return
+        Task { @MainActor in
+            self.handleIncomingOnMainActor(dictionary: message)
         }
-
-        #if os(iOS)
-        if dictionary["event"] as? String == "pettingTouch" {
-            Task { @MainActor in
-                guard let appState = self.appState else { return }
-                _ = appState.registerHappinessPettingTouch(count: 1, now: Date())
-                self.publishCurrentSnapshot()
-            }
-        }
-        #endif
     }
 }
 #endif

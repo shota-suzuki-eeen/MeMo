@@ -27,7 +27,7 @@ final class MeMoWatchHomeViewModel: ObservableObject {
 
     var currentCharacterAssetName: String {
         let base = snapshot.characterAssetName.trimmingCharacters(in: .whitespacesAndNewlines)
-        return base.isEmpty ? "pet_000" : base
+        return base.isEmpty ? "person" : base
     }
 
     var backgroundAssetName: String {

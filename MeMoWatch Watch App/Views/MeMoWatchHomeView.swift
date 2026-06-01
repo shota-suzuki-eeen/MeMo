@@ -17,40 +17,52 @@ import SwiftUI
 struct MeMoWatchHomeView: View {
     @StateObject private var viewModel = MeMoWatchHomeViewModel()
 
+    private let referenceSize = CGSize(width: 368, height: 448)
+
     var body: some View {
         GeometryReader { geometry in
             let width = geometry.size.width
-            let height = geometry.size.height
-            let scale = min(width / 368.0, height / 448.0)
+            let safeHeight = geometry.size.height
+            let scale = width / referenceSize.width
+            let layoutHeight = max(safeHeight, referenceSize.height * scale)
+            let layoutWidth = referenceSize.width * scale
 
-            ZStack {
-                backgroundLayer(width: width, height: height)
+            ZStack(alignment: .topLeading) {
+                Color.black
+                    .ignoresSafeArea()
 
-                stepMeter(scale: scale)
-                    .position(x: width * 0.50, y: 72 * scale)
+                ZStack {
+                    backgroundLayer(width: layoutWidth, height: layoutHeight)
 
-                characterLayer(scale: scale)
-                    .position(x: width * 0.50, y: 248 * scale)
+                    stepMeter(scale: scale)
+                        .position(x: layoutWidth * 0.50, y: 72 * scale)
 
-                iPhoneAssetHappinessGauge(
-                    scale: scale,
-                    point: viewModel.happinessPoint,
-                    maxPoint: viewModel.happinessMaxPoint,
-                    level: viewModel.happinessLevel
-                )
-                .position(x: 75 * scale, y: 356 * scale)
+                    characterLayer(scale: scale)
+                        .position(x: layoutWidth * 0.50, y: 248 * scale)
 
-                iPhoneAssetFullnessGauge(
-                    scale: scale,
-                    level: viewModel.fullnessLevel,
-                    maxLevel: viewModel.fullnessMaxLevel
-                )
-                .position(x: width - (75 * scale), y: 356 * scale)
+                    iPhoneAssetHappinessGauge(
+                        scale: scale,
+                        point: viewModel.happinessPoint,
+                        maxPoint: viewModel.happinessMaxPoint,
+                        level: viewModel.happinessLevel
+                    )
+                    .position(x: 75 * scale, y: 356 * scale)
+
+                    iPhoneAssetFullnessGauge(
+                        scale: scale,
+                        level: viewModel.fullnessLevel,
+                        maxLevel: viewModel.fullnessMaxLevel
+                    )
+                    .position(x: layoutWidth - (75 * scale), y: 356 * scale)
+                }
+                .frame(width: layoutWidth, height: layoutHeight)
+                .position(x: width * 0.5, y: layoutHeight * 0.5)
             }
-            .frame(width: width, height: height)
-            .clipped()
+            .frame(width: width, height: layoutHeight)
+            .contentShape(Rectangle())
             .ignoresSafeArea()
         }
+        .ignoresSafeArea()
         .watchSystemOverlayHiddenIfAvailable()
         .task {
             await viewModel.start()
@@ -63,6 +75,7 @@ struct MeMoWatchHomeView: View {
             .scaledToFill()
             .frame(width: width, height: height)
             .clipped()
+            .background(Color(red: 0.95, green: 0.88, blue: 0.78))
     }
 
     private func stepMeter(scale: CGFloat) -> some View {
