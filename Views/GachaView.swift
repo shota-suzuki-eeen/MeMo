@@ -6,8 +6,8 @@
 //  Adds フードガチャ using gatyaMachine_food and keeps いつでもガチャ as the initial machine.
 //  Pity counter is tracked independently for each gacha definition.
 //  2026/06 update:
-//  広告停止中のため、無料10回ガチャは広告表示を行わず即時実行します。
-//  広告関連の呼び出しは今後再開できるようコメントアウトして残します。
+//  広告停止中の状態は維持しつつ、ガチャ画面表示時に rewardGacha の画面単位プリロードを行います。
+//  広告再開時は、広告準備中の無料10回ボタンに「↻ 広告を準備中」を表示します。
 //
 
 import SwiftUI
@@ -305,8 +305,7 @@ struct GachaView: View {
     @EnvironmentObject private var bgmManager: BGMManager
     @Query private var states: [AppState]
 
-    // 広告停止中: 今後再開できるよう、リワード広告マネージャの参照はコメントアウトで残します。
-    // @ObservedObject private var rewardedAdManager = AdMobManager.shared.rewardGacha
+    @ObservedObject private var rewardedAdManager = AdMobManager.shared.rewardGacha
 
     private let isTutorialMode: Bool
     private let onTutorialFinished: (() -> Void)?
@@ -433,16 +432,27 @@ struct GachaView: View {
     private var canSingleDraw: Bool { state.map { !isTutorialMode && phase == .idle && $0.walletSteps >= DrawMode.single.cost } ?? false }
     private var canTenDraw: Bool { state.map { !isTutorialMode && phase == .idle && $0.walletSteps >= DrawMode.ten.cost } ?? false }
 
-    private var canFreeTenDraw: Bool {
+    private var isFreeTenDrawSlotAvailable: Bool {
         guard let state else { return false }
         if isTutorialMode { return phase == .idle && tutorialFreeTenDrawStarted == false }
         return phase == .idle && (state.gachaCanUseInitialIPadFreeTenDraw(isPad: isIPadDevice) || state.gachaCanUseFreeTenDraw(now: Date()))
     }
 
+    private var shouldRequireRewardGachaReadyForFreeTenDraw: Bool {
+        !isTutorialMode && !isInitialIPadFreeTenDrawAvailable && isFreeTenDrawSlotAvailable
+    }
+
+    private var canFreeTenDraw: Bool {
+        guard isFreeTenDrawSlotAvailable else { return false }
+        guard shouldRequireRewardGachaReadyForFreeTenDraw else { return true }
+        return rewardedAdManager.isReady
+    }
+
     private var freeTenDrawButtonTitle: String {
         if isTutorialMode { return tutorialFreeTenDrawStarted ? "無料10回（体験済み）" : "無料10回" }
         if isInitialIPadFreeTenDrawAvailable { return "初回無料10回（SR確定）" }
-        return canFreeTenDraw ? "無料10回ガチャ" : "無料10回（時間外 / 使用済み）"
+        guard isFreeTenDrawSlotAvailable else { return "無料10回（時間外 / 使用済み）" }
+        return rewardedAdManager.isReady ? "無料10回ガチャ" : "↻ 広告を準備中"
     }
 
     var body: some View {
@@ -490,8 +500,7 @@ struct GachaView: View {
             state?.gachaResetIfNeeded(now: Date())
             if isAlwaysGachaOnlyMode { selectedGachaIndex = 0 }
             if isTutorialMode == false {
-                // 広告停止中: 今後再開できるよう、無料10回ガチャ用リワード広告の事前ロード処理はコメントアウトで残します。
-                // rewardedAdManager.loadIfNeeded()
+                AdMobManager.shared.prepareRewardGacha()
             } else {
                 state?.memoMarkFirstVisitFreeTenDrawOffered()
             }
@@ -724,18 +733,24 @@ struct GachaView: View {
     }
 
     private func performRewardedAdThenFreeTenDraw() {
-        guard canFreeTenDraw else { showToast("現在利用できる無料10回はありません"); return }
+        guard isFreeTenDrawSlotAvailable else {
+            showToast("現在利用できる無料10回はありません")
+            return
+        }
 
-        // 広告停止中: 今後再開できるよう、リワード広告表示処理はコメントアウトで残します。
-        // rewardedAdManager.show(
-        //     onReward: { beginFreeTenDraw() },
-        //     onUnavailable: {
-        //         rewardedAdManager.loadIfNeeded()
-        //         showToast("広告を読み込み中です。少し待ってからもう一度お試しください")
-        //     }
-        // )
+        guard rewardedAdManager.isReady else {
+            AdMobManager.shared.prepareRewardGacha()
+            showToast("広告を準備中です。少し待ってからもう一度お試しください")
+            return
+        }
 
-        beginFreeTenDraw()
+        rewardedAdManager.show(
+            onReward: { beginFreeTenDraw() },
+            onUnavailable: {
+                AdMobManager.shared.prepareRewardGacha()
+                showToast("広告を準備中です。少し待ってからもう一度お試しください")
+            }
+        )
     }
 
     private func beginFreeTenDraw() {
@@ -1104,8 +1119,7 @@ struct GachaView: View {
         if isTutorialMode {
             onTutorialFinished?()
         } else {
-            // 広告停止中: 今後再開できるよう、次回無料10回ガチャ用リワード広告の再ロード処理はコメントアウトで残します。
-            // rewardedAdManager.loadIfNeeded()
+            AdMobManager.shared.prepareRewardGacha()
         }
     }
 

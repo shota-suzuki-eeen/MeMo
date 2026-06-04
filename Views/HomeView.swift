@@ -3,6 +3,7 @@
 //  MeMo
 //
 //  Created by shota suzuki on 2026/03/20.
+//  2026/06 update: おやすみモード広告は起動時ではなくポップアップ表示時に画面単位プリロードします。
 //
 
 import SwiftUI
@@ -536,7 +537,6 @@ struct HomeView: View {
                 syncFoodSelectorSelection()
                 syncDisplayedFullness()
                 scheduleHappinessDecayIfNeeded(now: Date())
-                AdMobManager.shared.prepareRewardSleepMode()
 
                 updateToiletWiggle()
                 syncCharacterBaseFromState(force: true)
@@ -558,7 +558,6 @@ struct HomeView: View {
                 syncDisplayedHappiness(animated: false)
                 syncDisplayedFullness(animated: false)
                 scheduleHappinessDecayIfNeeded(now: Date())
-                AdMobManager.shared.prepareRewardSleepMode()
 
                 withAnimation(.easeOut(duration: 0.25)) {
                     displayedStepProgress = calcStepProgressRaw(
@@ -3924,7 +3923,7 @@ private struct HomeHappinessRewardsContent: View {
         if let nextRewardLevel,
            let reward = rewardDefinitions.first(where: { $0.level == nextRewardLevel }) {
             let remaining = max(0, nextRewardLevel - happinessLevel)
-            return "次は Lv.\(nextRewardLevel) の \(reward.characterName) まであと \(remaining) Lv"
+            return "次は Lv.\(nextRewardLevel) の \(reward.characterName) まであと Lv.\(remaining)"
         }
 
         return "現在の幸せ報酬はすべて受け取り済みです"

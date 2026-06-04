@@ -6,6 +6,7 @@
 //  Based on the current main branch structure.
 //  iOS 18.6+
 //  お散歩機能の開始ポップアップ・全画面お散歩画面・グローバルリザルト表示を追加。
+//  2026/06 update: 起動時の rewardWalkStart / rewardWalkDouble プリロードを廃止。
 //
 
 import SwiftUI
@@ -121,8 +122,6 @@ struct RootView: View {
                         lastObservedWalletSteps = sharedState.walletSteps
                         walkStore.bootstrap()
                         walkStore.refresh()
-                        AdMobManager.shared.prepareRewardWalkStart()
-                        AdMobManager.shared.prepareRewardWalkDouble()
                         Task { await walkWeatherManager.refreshRainStatus() }
                         AdMobManager.shared.prepareInterstitialGetIfNeeded(
                             isRewardClaimable: sharedState.nextClaimableHappinessRewardLevel() != nil
@@ -269,6 +268,7 @@ struct RootView: View {
             return
         }
 
+        // 2026/06 update: お散歩メニューを開いた時点で rewardWalkStart だけロード。
         AdMobManager.shared.prepareRewardWalkStart()
         Task { await walkWeatherManager.refreshRainStatus() }
 

@@ -4,6 +4,7 @@
 //
 //  お散歩終了時に中央表示するリザルトオーバーレイ。
 //  2026/06 update: 広告停止中のため、2倍獲得を広告なしで実行する表記に調整。
+//  2026/06 update: リザルト画面表示時点で rewardWalkDouble を画面単位プリロード。
 //
 
 import SwiftUI
@@ -31,6 +32,14 @@ struct WalkResultOverlayView: View {
     @State private var isAnimatingDoubleCountUp: Bool = false
     @State private var isClaiming: Bool = false
     @State private var messageText: String?
+
+    private var doubleRewardButtonTitle: String {
+        doubleRewardAd.isReady ? "2倍獲得" : "広告を準備中"
+    }
+
+    private var canUseDoubleRewardButton: Bool {
+        !isClaiming && !isAnimatingDoubleCountUp && doubleRewardAd.isReady
+    }
 
     var body: some View {
         ZStack {
@@ -86,10 +95,10 @@ struct WalkResultOverlayView: View {
                     )
 
                     WalkResultButton(
-                        title: "2倍獲得",
-                        systemImageName: "play.rectangle.fill",
+                        title: doubleRewardButtonTitle,
+                        systemImageName: doubleRewardAd.isReady ? "play.rectangle.fill" : "arrow.triangle.2.circlepath",
                         isPrimary: true,
-                        isEnabled: !isClaiming && !isAnimatingDoubleCountUp,
+                        isEnabled: canUseDoubleRewardButton,
                         action: claimDoubleWithAd
                     )
                 }
@@ -139,11 +148,17 @@ struct WalkResultOverlayView: View {
 
     private func claimDoubleWithAd() {
         guard !isClaiming else { return }
+        guard doubleRewardAd.isReady else {
+            messageText = "広告を準備中です。少し待ってからもう一度お試しください。"
+            AdMobManager.shared.prepareRewardWalkDouble()
+            return
+        }
+
         isClaiming = true
         messageText = nil
         bgmManager.playSE(.push)
 
-        AdMobManager.shared.rewardWalkDouble.show {
+        doubleRewardAd.show {
             Task { @MainActor in
                 await runDoubleCountUpAndClaim()
             }

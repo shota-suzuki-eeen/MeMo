@@ -7,6 +7,7 @@
 //  お散歩機能のリワード広告IDを追加。
 //  おやすみモード用のリワード広告管理を追加。
 //  2026/06 update: 全広告を停止。広告ID・既存広告処理は再開できるように残す。
+//  2026/06 update: リワード広告の起動時一括ロードを廃止し、画面単位プリロードへ変更。
 //
 
 import Foundation
@@ -191,28 +192,17 @@ final class AdMobManager: ObservableObject {
             return
         }
 
-        guard !DeveloperModeStore.isEnabled else {
-            rewardGacha.load()
-            rewardWalkStart.load()
-            rewardWalkDouble.load()
-            rewardSleepMode.load()
-            interstitialCharacterSet.load()
-            interstitialGet.load()
-            return
-        }
-
         #if canImport(GoogleMobileAds)
         MobileAds.shared.start()
         #endif
 
-        // リワード広告はユーザー操作に紐づくため、
-        // 将来のプレミアム特典とは別に扱えるようにしておく。
-        if shouldUseRewardedAds {
-            rewardGacha.load()
-            rewardWalkStart.load()
-            rewardWalkDouble.load()
-            rewardSleepMode.load()
-        } else {
+        // 2026/06 update:
+        // リワード広告は起動時に一括ロードしない。
+        // rewardGacha: ガチャ画面に入った時点で prepareRewardGacha()
+        // rewardWalkStart: お散歩メニューを開いた時点で prepareRewardWalkStart()
+        // rewardWalkDouble: リザルト画面表示時点で prepareRewardWalkDouble()
+        // rewardSleepMode: おやすみモードポップアップ表示時点で prepareRewardSleepMode()
+        if DeveloperModeStore.isEnabled || !shouldUseRewardedAds {
             rewardGacha.markAvailableWithoutAd()
             rewardWalkStart.markAvailableWithoutAd()
             rewardWalkDouble.markAvailableWithoutAd()
@@ -225,6 +215,10 @@ final class AdMobManager: ObservableObject {
     }
 
     func prepareRewardGacha() {
+        guard !AdRuntimePolicy.isAdvertisingPaused else {
+            rewardGacha.markAvailableWithoutAd()
+            return
+        }
         guard shouldUseRewardedAds else {
             rewardGacha.markAvailableWithoutAd()
             return
@@ -233,6 +227,10 @@ final class AdMobManager: ObservableObject {
     }
 
     func prepareRewardWalkStart() {
+        guard !AdRuntimePolicy.isAdvertisingPaused else {
+            rewardWalkStart.markAvailableWithoutAd()
+            return
+        }
         guard shouldUseRewardedAds else {
             rewardWalkStart.markAvailableWithoutAd()
             return
@@ -241,6 +239,10 @@ final class AdMobManager: ObservableObject {
     }
 
     func prepareRewardWalkDouble() {
+        guard !AdRuntimePolicy.isAdvertisingPaused else {
+            rewardWalkDouble.markAvailableWithoutAd()
+            return
+        }
         guard shouldUseRewardedAds else {
             rewardWalkDouble.markAvailableWithoutAd()
             return
@@ -249,6 +251,10 @@ final class AdMobManager: ObservableObject {
     }
 
     func prepareRewardSleepMode() {
+        guard !AdRuntimePolicy.isAdvertisingPaused else {
+            rewardSleepMode.markAvailableWithoutAd()
+            return
+        }
         guard shouldUseRewardedAds else {
             rewardSleepMode.markAvailableWithoutAd()
             return
