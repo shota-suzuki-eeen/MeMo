@@ -14,10 +14,12 @@ struct MeMoCareActivityAttributes: ActivityAttributes {
     public struct ContentState: Codable, Hashable {
         var petName: String
         var petImageName: String
+        var wallpaperAssetName: String
         var todaySteps: Int
         var dailyStepGoal: Int
         var fullnessLevel: Int
         var fullnessMaxLevel: Int
+        var happinessLevel: Int
         var happinessPoint: Int
         var happinessMaxPoint: Int
         var walletSteps: Int
@@ -28,6 +30,7 @@ struct MeMoCareActivityAttributes: ActivityAttributes {
         var clampedDailyStepGoal: Int { max(1, dailyStepGoal) }
         var clampedFullnessLevel: Int { min(max(0, fullnessLevel), max(1, fullnessMaxLevel)) }
         var clampedFullnessMaxLevel: Int { max(1, fullnessMaxLevel) }
+        var clampedHappinessLevel: Int { max(0, happinessLevel) }
         var clampedHappinessPoint: Int { min(max(0, happinessPoint), max(1, happinessMaxPoint)) }
         var clampedHappinessMaxPoint: Int { max(1, happinessMaxPoint) }
         var clampedWalletSteps: Int { max(0, walletSteps) }

@@ -9,7 +9,7 @@
 import Foundation
 
 extension AppState {
-    static let liveActivityTenGachaCost: Int = 5_000
+    static let liveActivityTenGachaCost: Int = 10_000
 
     var liveActivityPetName: String {
         let petID = normalizedCurrentPetID
@@ -26,6 +26,12 @@ extension AppState {
         PetMaster.assetName(for: normalizedCurrentPetID)
     }
 
+    var liveActivityWallpaperAssetName: String {
+        let selected = UserDefaults.standard.string(forKey: WallpaperCatalog.selectedHomeWallpaperAssetNameKey)
+        let trimmed = selected?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+        return trimmed.isEmpty ? WallpaperCatalog.defaultWallpaper.assetName : trimmed
+    }
+
     @available(iOS 16.1, *)
     func makeLiveActivityContentState(now: Date = Date()) -> MeMoCareActivityAttributes.ContentState {
         ensureDailyResetIfNeeded(now: now)
@@ -34,10 +40,12 @@ extension AppState {
         return MeMoCareActivityAttributes.ContentState(
             petName: liveActivityPetName,
             petImageName: liveActivityPetImageName,
+            wallpaperAssetName: liveActivityWallpaperAssetName,
             todaySteps: widgetTodaySteps,
             dailyStepGoal: AppState.fixedDailyStepGoal,
             fullnessLevel: satisfactionLevel,
             fullnessMaxLevel: AppState.fullnessMaxLevel,
+            happinessLevel: happinessLevel,
             happinessPoint: happinessPoint,
             happinessMaxPoint: AppState.happinessMaxPointsPerLevel,
             walletSteps: walletSteps,
