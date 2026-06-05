@@ -106,7 +106,7 @@ enum MemoOnboardingScreen: String, CaseIterable, Identifiable, Codable, Hashable
         case .toiletTutorialIntro:
             return "おそうじの時間だよ"
         case .toiletTutorialScratch:
-            return "「うんち」をこすってきれいにしよう"
+            return "タップかスワイプでうんちをきれいにしよう"
         case .home:
             return "ミーモへようこそ"
         case .step:
@@ -167,7 +167,7 @@ enum MemoOnboardingScreen: String, CaseIterable, Identifiable, Codable, Hashable
         case .toiletTutorialIntro:
             return "おっと！ミーモが大ピンチ！\nトイレのマークが出たら、おそうじが必要だよ！"
         case .toiletTutorialScratch:
-            return "「うんち」を指でこすって、お掃除してあげよう。\nキレイにしてあげると、「幸せ度」が増加するよ。"
+            return "「うんち」はタップでもスワイプでもお掃除できるよ。\nタップすると1回ごとに少しずつ薄くなり、5回タップすると消えるよ。\n画面のどこからスワイプを始めてもOK。スワイプが「うんち」の上を通ると、通った距離に応じてきれいになっていくよ。"
         case .home:
             return "このアプリでは、歩数がコインのような役割になるよ。\n歩いて、ガチャをして、ごはんやキャラクターを集めながら、楽しく健康管理していこう！"
         case .step:

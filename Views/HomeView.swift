@@ -86,6 +86,8 @@ struct HomeView: View {
     @State private var isToiletWiggleOn: Bool = false
 
     @State private var toiletPoopActivePoint: [String: CGPoint] = [:]
+    @State private var toiletPoopGestureStartPoint: CGPoint?
+    @State private var toiletPoopGestureLastPoint: CGPoint?
     @State private var homeContentSize: CGSize = .zero
 
     @State private var toiletTicketClearingPoopIDs: Set<String> = []
@@ -471,7 +473,8 @@ struct HomeView: View {
         static let toiletPoopTopInset: CGFloat = 78
         static let toiletPoopBottomInset: CGFloat = 170
         static let toiletPoopMinSpacing: CGFloat = 6
-        static let toiletPoopScratchDistanceToClear: CGFloat = 640
+        static let toiletPoopScratchDistanceToClear: CGFloat = 420
+        static let toiletPoopTapProgressStep: CGFloat = 0.20
         static let toiletPoopScratchRectInset: CGFloat = 10
 
         static let toiletWiggleOffset: CGFloat = 3
@@ -596,6 +599,8 @@ struct HomeView: View {
                 displayedDesiredFoodID = nil
                 stopFoodSelectorHorizontalRattleIfNeeded()
                 toiletPoopActivePoint.removeAll()
+                toiletPoopGestureStartPoint = nil
+                toiletPoopGestureLastPoint = nil
                 toiletTicketClearingPoopIDs.removeAll()
                 isToiletTicketCleaning = false
                 characterPettingStartPoint = nil
@@ -635,6 +640,8 @@ struct HomeView: View {
                 if state.hasToiletFlag {
                     MemoOnboardingHomeHooks.toiletFlagAppeared(state: state)
                     toiletPoopActivePoint.removeAll()
+                    toiletPoopGestureStartPoint = nil
+                    toiletPoopGestureLastPoint = nil
 
                     if showFoodSelector {
                         closeFoodSelector()
@@ -650,6 +657,8 @@ struct HomeView: View {
                     syncToiletPoopsIfNeeded(containerSize: homeContentSize)
                 } else {
                     toiletPoopActivePoint.removeAll()
+                    toiletPoopGestureStartPoint = nil
+                    toiletPoopGestureLastPoint = nil
                 }
 
                 syncCharacterBaseFromState(force: true)
@@ -1338,17 +1347,23 @@ struct HomeView: View {
                             item: poop,
                             size: Layout.toiletPoopSize,
                             hitSize: Layout.toiletPoopHitSize,
-                            opacity: toiletPoopOpacity(for: poop),
-                            isScratchEnabled: state.hasToiletFlag && !isToiletTicketCleaning,
-                            onScratchChanged: { value in
-                                handleToiletPoopScratchChanged(poop, value: value)
-                            },
-                            onScratchEnded: {
-                                handleToiletPoopScratchEnded(poop)
-                            }
+                            opacity: toiletPoopOpacity(for: poop)
                         )
                         .position(rootPosition(for: poop, rootSize: rootGeo.size))
+                        .allowsHitTesting(false)
                     }
+
+                    Color.black.opacity(0.001)
+                        .contentShape(Rectangle())
+                        .gesture(
+                            DragGesture(minimumDistance: 0)
+                                .onChanged { value in
+                                    handleToiletPoopLayerGestureChanged(value, rootSize: rootGeo.size)
+                                }
+                                .onEnded { value in
+                                    handleToiletPoopLayerGestureEnded(value, rootSize: rootGeo.size)
+                                }
+                        )
                 }
                 .frame(width: rootGeo.size.width, height: rootGeo.size.height)
             }
@@ -1866,6 +1881,8 @@ struct HomeView: View {
 
         if !state.hasToiletFlag {
             toiletPoopActivePoint.removeAll()
+            toiletPoopGestureStartPoint = nil
+            toiletPoopGestureLastPoint = nil
             toiletTicketClearingPoopIDs.removeAll()
             isToiletTicketCleaning = false
 
@@ -1924,51 +1941,173 @@ struct HomeView: View {
         }
 
         let progress = max(0, min(1, CGFloat(poop.cleanedProgress)))
-        return max(0.02, 1 - (progress * 0.98))
+        return Double(max(0, 1 - progress))
     }
 
-    private func toiletPoopScratchRect() -> CGRect {
-        let inset = Layout.toiletPoopScratchRectInset
-        let origin = (Layout.toiletPoopHitSize - Layout.toiletPoopSize) * 0.5 + inset
-        let side = max(18, Layout.toiletPoopSize - (inset * 2))
-        return CGRect(x: origin, y: origin, width: side, height: side)
+    private func toiletPoopHitRect(for poop: AppState.ToiletPoopItem, rootSize: CGSize) -> CGRect {
+        let center = rootPosition(for: poop, rootSize: rootSize)
+        let side = Layout.toiletPoopHitSize
+        return CGRect(
+            x: center.x - side * 0.5,
+            y: center.y - side * 0.5,
+            width: side,
+            height: side
+        )
     }
 
-    private func handleToiletPoopScratchChanged(_ poop: AppState.ToiletPoopItem, value: DragGesture.Value) {
+    private func toiletPoopScratchRect(for poop: AppState.ToiletPoopItem, rootSize: CGSize) -> CGRect {
+        let hitRect = toiletPoopHitRect(for: poop, rootSize: rootSize)
+        return hitRect.insetBy(
+            dx: Layout.toiletPoopScratchRectInset,
+            dy: Layout.toiletPoopScratchRectInset
+        )
+    }
+
+    @discardableResult
+    private func applyToiletPoopProgressDelta(id: String, delta: CGFloat) -> Bool {
+        guard delta > 0 else { return false }
+
+        let current = currentToiletPoopProgress(id: id)
+        let progress = min(1, current + delta)
+        _ = state.updateToiletPoopProgress(id: id, progress: Double(progress))
+
+        if progress >= 1 {
+            completeToiletPoopIfNeeded(id: id)
+            return true
+        }
+
+        return false
+    }
+
+    private func toiletPoopDistanceInsideRect(from start: CGPoint, to end: CGPoint, rect: CGRect) -> CGFloat {
+        let totalDistance = hypot(end.x - start.x, end.y - start.y)
+        guard totalDistance > 0 else { return 0 }
+
+        let sampleCount = 12
+        var insideDistance: CGFloat = 0
+        var previous = start
+        var previousInside = rect.contains(previous)
+
+        for index in 1...sampleCount {
+            let t = CGFloat(index) / CGFloat(sampleCount)
+            let current = CGPoint(
+                x: start.x + ((end.x - start.x) * t),
+                y: start.y + ((end.y - start.y) * t)
+            )
+            let currentInside = rect.contains(current)
+
+            if previousInside || currentInside {
+                insideDistance += hypot(current.x - previous.x, current.y - previous.y)
+            }
+
+            previous = current
+            previousInside = currentInside
+        }
+
+        return insideDistance
+    }
+
+    private func handleToiletPoopLayerGestureChanged(_ value: DragGesture.Value, rootSize: CGSize) {
         guard state.hasToiletFlag else { return }
         guard !isToiletTicketCleaning else { return }
 
-        let scratchRect = toiletPoopScratchRect()
-        let point = value.location
+        if toiletPoopGestureStartPoint == nil {
+            toiletPoopGestureStartPoint = value.startLocation
+        }
 
-        guard scratchRect.contains(point) else {
-            toiletPoopActivePoint.removeValue(forKey: poop.id)
+        let point = value.location
+        let lastPoint = toiletPoopGestureLastPoint
+        let movedDistanceFromStart = hypot(point.x - value.startLocation.x, point.y - value.startLocation.y)
+
+        defer {
+            toiletPoopGestureLastPoint = point
+        }
+
+        // タップ扱いの短い入力では、onEnded 側で 20% ずつ薄くする。
+        guard movedDistanceFromStart >= 8 else { return }
+
+        for poop in visibleToiletPoops {
+            let scratchRect = toiletPoopScratchRect(for: poop, rootSize: rootSize)
+            let isInside = scratchRect.contains(point)
+            let wasInside = lastPoint.map { scratchRect.contains($0) } ?? false
+
+            guard isInside || wasInside else {
+                toiletPoopActivePoint.removeValue(forKey: poop.id)
+                continue
+            }
+
+            MemoOnboardingHomeHooks.toiletScratchStarted()
+
+            let segmentDistance: CGFloat
+            if let lastPoint {
+                segmentDistance = toiletPoopDistanceInsideRect(
+                    from: lastPoint,
+                    to: point,
+                    rect: scratchRect
+                )
+            } else {
+                segmentDistance = 0
+            }
+
+            guard segmentDistance > 0 else {
+                toiletPoopActivePoint[poop.id] = point
+                continue
+            }
+
+            let delta = segmentDistance / Layout.toiletPoopScratchDistanceToClear
+            let didComplete = applyToiletPoopProgressDelta(id: poop.id, delta: delta)
+
+            if didComplete {
+                toiletPoopActivePoint.removeValue(forKey: poop.id)
+            } else {
+                toiletPoopActivePoint[poop.id] = point
+            }
+        }
+    }
+
+    private func handleToiletPoopLayerGestureEnded(_ value: DragGesture.Value, rootSize: CGSize) {
+        defer {
+            toiletPoopActivePoint.removeAll()
+            toiletPoopGestureStartPoint = nil
+            toiletPoopGestureLastPoint = nil
+        }
+
+        guard state.hasToiletFlag else { return }
+        guard !isToiletTicketCleaning else { return }
+
+        let totalDistance = hypot(
+            value.location.x - value.startLocation.x,
+            value.location.y - value.startLocation.y
+        )
+
+        if totalDistance < 10 {
+            handleToiletPoopTap(at: value.location, rootSize: rootSize)
+            return
+        }
+
+        save()
+    }
+
+    private func handleToiletPoopTap(at point: CGPoint, rootSize: CGSize) {
+        guard let poop = visibleToiletPoops.reversed().first(where: {
+            toiletPoopHitRect(for: $0, rootSize: rootSize).contains(point)
+        }) else {
             return
         }
 
         MemoOnboardingHomeHooks.toiletScratchStarted()
-        let current = currentToiletPoopProgress(id: poop.id)
+        let didComplete = applyToiletPoopProgressDelta(
+            id: poop.id,
+            delta: Layout.toiletPoopTapProgressStep
+        )
 
-        if let lastPoint = toiletPoopActivePoint[poop.id], scratchRect.contains(lastPoint) {
-            let segmentDistance = hypot(point.x - lastPoint.x, point.y - lastPoint.y)
-
-            if segmentDistance > 0 {
-                let progress = min(1, current + (segmentDistance / Layout.toiletPoopScratchDistanceToClear))
-                _ = state.updateToiletPoopProgress(id: poop.id, progress: Double(progress))
-
-                if progress >= 1 {
-                    completeToiletPoopIfNeeded(id: poop.id)
-                    return
-                }
-            }
+        Task { @MainActor in
+            Haptics.tap(style: didComplete ? .medium : .soft)
         }
 
-        toiletPoopActivePoint[poop.id] = point
-    }
-
-    private func handleToiletPoopScratchEnded(_ poop: AppState.ToiletPoopItem) {
-        toiletPoopActivePoint.removeValue(forKey: poop.id)
-        save()
+        if !didComplete {
+            save()
+        }
     }
 
     @MainActor
@@ -1985,6 +2124,8 @@ struct HomeView: View {
 
         if !state.hasRemainingToiletPoops {
             toiletPoopActivePoint.removeAll()
+            toiletPoopGestureStartPoint = nil
+            toiletPoopGestureLastPoint = nil
             bgmManager.playSE(.wc)
             resolveToilet(state: state)
         }
@@ -3167,6 +3308,8 @@ struct HomeView: View {
         MemoOnboardingHomeHooks.toiletDidBecomeClean()
 
         toiletPoopActivePoint.removeAll()
+        toiletPoopGestureStartPoint = nil
+        toiletPoopGestureLastPoint = nil
         toiletTicketClearingPoopIDs.removeAll()
         isToiletTicketCleaning = false
 
@@ -3638,9 +3781,6 @@ private struct ToiletPoopView: View {
     let size: CGFloat
     let hitSize: CGFloat
     let opacity: Double
-    let isScratchEnabled: Bool
-    let onScratchChanged: (DragGesture.Value) -> Void
-    let onScratchEnded: () -> Void
 
     var body: some View {
         Image("poop")
@@ -3650,17 +3790,9 @@ private struct ToiletPoopView: View {
             .scaleEffect(x: item.isFlippedHorizontally ? -1 : 1, y: 1)
             .rotationEffect(.degrees(item.rotationDegrees))
             .opacity(opacity)
-            .animation(.easeOut(duration: 0.28), value: opacity)
+            .animation(.easeOut(duration: 0.20), value: opacity)
             .frame(width: hitSize, height: hitSize)
             .contentShape(Rectangle())
-            .gesture(
-                DragGesture(minimumDistance: 0)
-                    .onChanged(onScratchChanged)
-                    .onEnded { _ in
-                        onScratchEnded()
-                    }
-            )
-            .allowsHitTesting(isScratchEnabled)
     }
 }
 

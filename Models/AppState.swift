@@ -228,15 +228,15 @@ extension AppState {
 
     // ✅ トイレpoop仕様
     static let toiletPoopInitialCount: Int = 1
-    static let toiletPoopMaxCount: Int = 15
+    static let toiletPoopMaxCount: Int = 10
     static let toiletPoopSpawnIntervalSeconds: TimeInterval = 15 * 60
-    // 2026/05 update:
-    // poopがほぼ透明な状態で残り続けると掃除完了に見えてしまうため、
-    // 表示透明度が90%以下の状態が5秒続いたら自動的に掃除完了扱いにします。
-    static let toiletPoopAutoClearOpacityThreshold: Double = 0.90
+    // 2026/06 update:
+    // poopはタップ5回またはスワイプ通過距離で 100% まで薄くなった時点で掃除完了にします。
+    // 途中で自動掃除完了にならないよう、自動完了判定はほぼ透明になった場合のみ対象にします。
+    static let toiletPoopAutoClearOpacityThreshold: Double = 0.01
     static let toiletPoopAutoClearOpacityRetentionSeconds: TimeInterval = 5
-    static let toiletPoopVisibleOpacityFloor: Double = 0.02
-    static let toiletPoopOpacityFadeRange: Double = 0.98
+    static let toiletPoopVisibleOpacityFloor: Double = 0.0
+    static let toiletPoopOpacityFadeRange: Double = 1.0
 
     static var toiletPoopAutoClearProgressThreshold: Double {
         let raw = (1 - toiletPoopAutoClearOpacityThreshold) / toiletPoopOpacityFadeRange
