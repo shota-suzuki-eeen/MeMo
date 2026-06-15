@@ -43,7 +43,8 @@ struct SleepModePopupView: View {
     }
 
     private var rewardedButtonSystemImageName: String? {
-        "play.rectangle.fill"
+//        "play.rectangle.fill"
+        nil
     }
 
     var body: some View {

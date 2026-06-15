@@ -27,7 +27,8 @@ struct WalkStartPopupView: View {
     }
 
     private var adStartButtonSystemImageName: String? {
-        "play.rectangle.fill"
+//        "play.rectangle.fill"
+        nil
     }
 
     private var shouldShowAdStartLoadingIndicator: Bool {
@@ -67,7 +68,7 @@ struct WalkStartPopupView: View {
                 if canUseRainFreeStart {
                     WalkPopupButton(
                         title: "スタート",
-                        systemImageName: "play.rectangle.fill",
+                        systemImageName: nil,
                         showsLoadingIndicator: false,
                         isPrimary: true,
                         isEnabled: true,

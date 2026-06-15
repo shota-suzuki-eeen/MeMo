@@ -96,7 +96,7 @@ struct WalkResultOverlayView: View {
 
                     WalkResultButton(
                         title: doubleRewardButtonTitle,
-                        systemImageName: doubleRewardAd.isReady ? "play.rectangle.fill" : "arrow.triangle.2.circlepath",
+                        systemImageName: doubleRewardAd.isReady ? nil : "arrow.triangle.2.circlepath",
                         isPrimary: true,
                         isEnabled: canUseDoubleRewardButton,
                         action: claimDoubleWithAd
