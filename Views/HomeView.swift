@@ -45,6 +45,8 @@ struct HomeView: View {
     @State private var isHomeVisible: Bool = false
     @State private var hasCompletedInitialLoad: Bool = false
     @State private var isForegroundSyncInProgress: Bool = false
+    @State private var lastCareTimelineTickSecond: Int64?
+    @State private var isCareTimelineTickInProgress: Bool = false
 
     @State private var showStepEnjoy: Bool = false
     @State private var showGachaView: Bool = false
@@ -587,6 +589,9 @@ struct HomeView: View {
                 isCharacterActionRunning = false
                 characterAssetName = preferredCharacterRestAssetName
                 activeTopInfoPopup = nil
+                showRightMenuPopup = false
+                lastCareTimelineTickSecond = nil
+                isCareTimelineTickInProgress = false
                 showSleepModePopup = false
                 sleepModeMessage = nil
                 showToiletLockedPopup = false
@@ -1140,6 +1145,11 @@ struct HomeView: View {
                         object: nil
                     )
                 },
+                onNavigate: {
+                    withAnimation(.easeInOut(duration: 0.18)) {
+                        showRightMenuPopup = false
+                    }
+                },
                 onDismiss: {
                     bgmManager.playSE(.push)
                     withAnimation(.easeInOut(duration: 0.18)) {
@@ -1258,6 +1268,7 @@ struct HomeView: View {
     private var bottomButtonsTimelineLayer: some View {
         TimelineView(.periodic(from: Date(), by: Layout.careSpawnCheckInterval)) { timeline in
             let now = timeline.date
+            let tickSecond = Int64(now.timeIntervalSince1970)
 
             BottomButtons(
                 onMenu: {
@@ -1280,44 +1291,50 @@ struct HomeView: View {
                 spacing: Layout.bottomButtonsSpacing,
                 horizontalPadding: Layout.bottomHorizontalPadding
             )
-            .onChange(of: timeline.date) { _, newDate in
-                let previousSnapshot = makeHomePersistenceSnapshot()
-
-                state.ensureDailyResetIfNeeded(now: newDate)
-                syncDisplayedFullness(now: newDate)
-                scheduleHappinessDecayIfNeeded(now: newDate)
-
-                state.ensureToiletNextSpawnScheduled(now: newDate)
-                state.ensureFoodNextSpawnScheduled(now: newDate)
-
-                maybeSpawnToiletFlag(state: state, now: newDate, persistChanges: false)
-                maybeSpawnFoodFlag(state: state, now: newDate, persistChanges: false)
-                syncDesiredFoodDisplay(now: newDate)
-                syncToiletPoopsIfNeeded(containerSize: homeContentSize, now: newDate, persistChanges: false)
-
-                persistHomeStateIfNeeded(previousSnapshot: previousSnapshot)
-            }
-            .onAppear {
-                let previousSnapshot = makeHomePersistenceSnapshot()
-
-                state.ensureDailyResetIfNeeded(now: now)
-                syncDisplayedFullness(now: now)
-                scheduleHappinessDecayIfNeeded(now: now)
-
-                state.ensureToiletNextSpawnScheduled(now: now)
-                state.ensureFoodNextSpawnScheduled(now: now)
-
-                maybeSpawnToiletFlag(state: state, now: now, persistChanges: false)
-                maybeSpawnFoodFlag(state: state, now: now, persistChanges: false)
-                syncDesiredFoodDisplay(now: now)
-                syncToiletPoopsIfNeeded(containerSize: homeContentSize, now: now, persistChanges: false)
-
-                persistHomeStateIfNeeded(previousSnapshot: previousSnapshot)
+            .task(id: tickSecond) {
+                await processCareTimelineTickIfNeeded(now: now, tickSecond: tickSecond)
             }
         }
         .padding(.bottom, Layout.bottomPadding)
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .bottom)
         .zIndex(Layout.zBottomButtons)
+    }
+
+    @MainActor
+    private func processCareTimelineTickIfNeeded(now: Date, tickSecond: Int64) async {
+        guard isHomeVisible else { return }
+        guard hasCompletedInitialLoad else { return }
+        guard scenePhase == .active else { return }
+        guard !isForegroundSyncInProgress else { return }
+        guard !isCareTimelineTickInProgress else { return }
+        guard lastCareTimelineTickSecond != tickSecond else { return }
+
+        lastCareTimelineTickSecond = tickSecond
+        isCareTimelineTickInProgress = true
+        defer { isCareTimelineTickInProgress = false }
+
+        // TimelineView の描画更新と同一フレームで状態更新を重ねないため、
+        // 実処理は次のメインアクター実行機会へ逃がす。
+        await Task.yield()
+
+        guard isHomeVisible else { return }
+        guard scenePhase == .active else { return }
+
+        let previousSnapshot = makeHomePersistenceSnapshot()
+
+        state.ensureDailyResetIfNeeded(now: now)
+        syncDisplayedFullness(now: now)
+        scheduleHappinessDecayIfNeeded(now: now)
+
+        state.ensureToiletNextSpawnScheduled(now: now)
+        state.ensureFoodNextSpawnScheduled(now: now)
+
+        maybeSpawnToiletFlag(state: state, now: now, persistChanges: false)
+        maybeSpawnFoodFlag(state: state, now: now, persistChanges: false)
+        syncDesiredFoodDisplay(now: now)
+        syncToiletPoopsIfNeeded(containerSize: homeContentSize, now: now, persistChanges: false)
+
+        persistHomeStateIfNeeded(previousSnapshot: previousSnapshot)
     }
 
     @ViewBuilder
@@ -4426,6 +4443,7 @@ private struct CenterMenuPopup: View {
     let onBlocked: () -> Void
     let onCamera: () -> Void
     let onWalk: () -> Void
+    let onNavigate: () -> Void
     let onDismiss: () -> Void
     let buttonSize: CGFloat
     let spacing: CGFloat
@@ -4459,6 +4477,7 @@ private struct CenterMenuPopup: View {
                         RightSideButtons(
                             onCamera: onCamera,
                             onWalk: onWalk,
+                            onNavigate: onNavigate,
                             isToiletLocked: isToiletLocked,
                             onBlocked: onBlocked,
                             buttonSize: buttonSize,
@@ -4468,6 +4487,7 @@ private struct CenterMenuPopup: View {
                         MenuSettingsPage(
                             isToiletLocked: isToiletLocked,
                             onBlocked: onBlocked,
+                            onNavigate: onNavigate,
                             buttonSize: buttonSize,
                             spacing: spacing
                         )
@@ -4580,6 +4600,7 @@ private struct RightSideButtons: View {
 
     let onCamera: () -> Void
     let onWalk: () -> Void
+    let onNavigate: () -> Void
     let isToiletLocked: Bool
     let onBlocked: () -> Void
     let buttonSize: CGFloat
@@ -4610,6 +4631,7 @@ private struct RightSideButtons: View {
                     }
                     .simultaneousGesture(TapGesture().onEnded {
                         bgmManager.playSE(.push)
+                        onNavigate()
                     })
                     .buttonStyle(.plain)
                 }
@@ -4631,6 +4653,7 @@ private struct RightSideButtons: View {
                     }
                     .simultaneousGesture(TapGesture().onEnded {
                         bgmManager.playSE(.push)
+                        onNavigate()
                     })
                     .buttonStyle(.plain)
                 }
@@ -4659,6 +4682,7 @@ private struct MenuSettingsPage: View {
 
     let isToiletLocked: Bool
     let onBlocked: () -> Void
+    let onNavigate: () -> Void
     let buttonSize: CGFloat
     let spacing: CGFloat
 
@@ -4679,6 +4703,7 @@ private struct MenuSettingsPage: View {
                     }
                     .simultaneousGesture(TapGesture().onEnded {
                         bgmManager.playSE(.push)
+                        onNavigate()
                     })
                     .buttonStyle(.plain)
                 }
