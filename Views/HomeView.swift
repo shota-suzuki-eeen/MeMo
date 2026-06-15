@@ -1799,14 +1799,14 @@ struct HomeView: View {
     @MainActor
     private func startSleepModeWithAd() {
         showRewardSleepModeAd(
-            successMessage: "おやすみモードを開始しました。幸せ度の低下を6時間おやすみします。"
+            successMessage: "おやすみモードを開始しました。幸せ度の低下を8時間おやすみします。"
         )
     }
 
     @MainActor
     private func resetSleepModeWithAd() {
         showRewardSleepModeAd(
-            successMessage: "おやすみモードの残り時間を6時間にリセットしました。"
+            successMessage: "おやすみモードの残り時間を8時間にリセットしました。"
         )
     }
 

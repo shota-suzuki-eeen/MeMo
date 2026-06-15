@@ -19,7 +19,7 @@ extension AppState {
     static let happinessDailyPettingPointLimit: Int = 100
     static let happinessDecayIntervalSeconds: TimeInterval = 5 * 60
     static let happinessRewardLevelStep: Int = 5
-    static let happinessSleepModeDurationSeconds: TimeInterval = 6 * 60 * 60
+    static let happinessSleepModeDurationSeconds: TimeInterval = 8 * 60 * 60
 
     struct HappinessRewardDefinition: Identifiable, Equatable {
         let level: Int
@@ -93,6 +93,12 @@ extension AppState {
         static let sleepModeEndsAt = "memo.happiness.sleepMode.endsAt"
     }
 
+    private static let happinessStandardStorageContextKey = "standard"
+
+    private static var happinessAllStorageContextKeys: [String] {
+        [happinessStandardStorageContextKey] + PetMaster.happinessRewardPetIDs
+    }
+
     private var happinessDefaults: UserDefaults {
         .standard
     }
@@ -102,15 +108,63 @@ extension AppState {
         if let meterOwnerPetID = PetMaster.happinessMeterOwnerPetID(for: petID) {
             return meterOwnerPetID
         }
-        return "standard"
+        return AppState.happinessStandardStorageContextKey
     }
 
-    private func happinessStorageKey(_ key: String) -> String {
-        let context = happinessStorageContextKey
-        if context == "standard" {
+    private func happinessStorageKey(_ key: String, context: String) -> String {
+        if context == AppState.happinessStandardStorageContextKey {
             return key
         }
         return "\(key).\(context)"
+    }
+
+    private func happinessStorageKey(_ key: String) -> String {
+        happinessStorageKey(key, context: happinessStorageContextKey)
+    }
+
+    private var happinessSleepModeStorageKey: String {
+        HappinessStorageKeys.sleepModeEndsAt
+    }
+
+    private var legacyHappinessSleepModeStorageKeys: [String] {
+        AppState.happinessAllStorageContextKeys
+            .map { happinessStorageKey(HappinessStorageKeys.sleepModeEndsAt, context: $0) }
+            .filter { $0 != happinessSleepModeStorageKey }
+    }
+
+    private func migrateLegacyHappinessSleepModeEndIfNeeded() -> Date? {
+        var candidates: [Date] = []
+
+        if let globalValue = happinessDefaults.object(forKey: happinessSleepModeStorageKey) as? Date {
+            candidates.append(globalValue)
+        }
+
+        for key in legacyHappinessSleepModeStorageKeys {
+            if let legacyValue = happinessDefaults.object(forKey: key) as? Date {
+                candidates.append(legacyValue)
+            }
+        }
+
+        for key in legacyHappinessSleepModeStorageKeys {
+            happinessDefaults.removeObject(forKey: key)
+        }
+
+        guard let latestValue = candidates.max() else { return nil }
+        happinessDefaults.set(latestValue, forKey: happinessSleepModeStorageKey)
+        return latestValue
+    }
+
+    private func advanceHappinessLastDecayAtForAllContexts(to lowerBound: Date) {
+        for context in AppState.happinessAllStorageContextKeys {
+            let key = happinessStorageKey(HappinessStorageKeys.lastDecayAt, context: context)
+            if let currentValue = happinessDefaults.object(forKey: key) as? Date {
+                if currentValue < lowerBound {
+                    happinessDefaults.set(lowerBound, forKey: key)
+                }
+            } else {
+                happinessDefaults.set(lowerBound, forKey: key)
+            }
+        }
     }
 
     func currentHappinessRewardDefinitions() -> [HappinessRewardDefinition] {
@@ -174,12 +228,15 @@ extension AppState {
     }
 
     var happinessSleepModeEndsAt: Date? {
-        get { happinessDefaults.object(forKey: happinessStorageKey(HappinessStorageKeys.sleepModeEndsAt)) as? Date }
+        get { migrateLegacyHappinessSleepModeEndIfNeeded() }
         set {
-            let key = happinessStorageKey(HappinessStorageKeys.sleepModeEndsAt)
             if let newValue {
-                happinessDefaults.set(newValue, forKey: key)
+                happinessDefaults.set(newValue, forKey: happinessSleepModeStorageKey)
             } else {
+                happinessDefaults.removeObject(forKey: happinessSleepModeStorageKey)
+            }
+
+            for key in legacyHappinessSleepModeStorageKeys {
                 happinessDefaults.removeObject(forKey: key)
             }
         }
@@ -245,19 +302,12 @@ extension AppState {
         guard let endsAt = happinessSleepModeEndsAt else { return nil }
 
         if endsAt > now {
+            advanceHappinessLastDecayAtForAllContexts(to: endsAt)
             return endsAt
         }
 
         happinessSleepModeEndsAt = nil
-
-        if let anchor = happinessLastDecayAt {
-            if anchor < endsAt {
-                happinessLastDecayAt = endsAt
-            }
-        } else {
-            happinessLastDecayAt = endsAt
-        }
-
+        advanceHappinessLastDecayAtForAllContexts(to: endsAt)
         return nil
     }
 
@@ -283,8 +333,8 @@ extension AppState {
         happinessSleepModeEndsAt = nextEnd
 
         // おやすみモード中の低下分を終了後にまとめて発生させないため、
-        // 次の低下判定の基準時刻を終了時刻に進めておく。
-        happinessLastDecayAt = nextEnd
+        // 全幸せ度コンテキストの次の低下判定の基準時刻を終了時刻に進めておく。
+        advanceHappinessLastDecayAtForAllContexts(to: nextEnd)
         return nextEnd
     }
 

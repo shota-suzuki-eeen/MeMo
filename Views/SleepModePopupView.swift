@@ -67,7 +67,7 @@ struct SleepModePopupView: View {
                         .multilineTextAlignment(.center)
                         .foregroundStyle(.secondary)
                 } else {
-                    Text("6時間幸せ度が下がらなくなります。\n満腹度はいつも通り変化します。")
+                    Text("8時間幸せ度が下がらなくなります。\n満腹度はいつも通り変化します。")
                         .font(.system(size: 15, weight: .bold))
                         .lineSpacing(4)
                         .multilineTextAlignment(.center)
