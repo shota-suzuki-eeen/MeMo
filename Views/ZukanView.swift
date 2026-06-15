@@ -4,9 +4,11 @@
 //
 //  Updated for character / wallpaper switching UI, AdMob interstitial display,
 //  tutorial-mode character switching through the real Zukan screen,
-//  and limited happiness-reward character cell highlighting.
+//  limited happiness-reward character cell highlighting,
+//  and character nickname editing from the Zukan screen.
 //
 
+import Foundation
 import SwiftUI
 import SwiftData
 #if canImport(WidgetKit)
@@ -27,6 +29,11 @@ struct ZukanView: View {
     @State private var selectedSection: ZukanSection = .character
     @State private var characterCurrentPage: Int = 0
     @State private var wallpaperCurrentPage: Int = 0
+    @State private var isPetNameEditorPresented: Bool = false
+    @State private var editingPetID: String? = nil
+    @State private var petNameDraft: String = ""
+    @State private var petNameValidationMessage: String? = nil
+    @State private var customPetNames: [String: String] = ZukanPetNameStore.load()
 
     private let isTutorialMode: Bool
     private let tutorialTargetPetID: String?
@@ -119,6 +126,12 @@ struct ZukanView: View {
                     Spacer(minLength: 0)
                 }
             }
+
+            if isPetNameEditorPresented, let editingPetID {
+                petNameEditorOverlay(for: editingPetID)
+                    .zIndex(10)
+                    .transition(.opacity.combined(with: .scale(scale: 0.96)))
+            }
         }
         .background(
             ZStack {
@@ -136,6 +149,7 @@ struct ZukanView: View {
         .onAppear {
             NotificationCenter.default.post(name: .memoHideHomeBannerAd, object: nil)
             bgmManager.switchBackground(to: .zukan)
+            customPetNames = ZukanPetNameStore.load()
             if isTutorialMode == false {
                 AdMobManager.shared.prepareInterstitialCharacterSet()
             }
@@ -167,6 +181,10 @@ struct ZukanView: View {
         .onChange(of: currentHomeWallpaperAssetName) { _, _ in
             syncWallpaperSelectionAndPage()
         }
+        .onChange(of: petNameDraft) { _, newValue in
+            normalizePetNameDraft(newValue)
+        }
+        .animation(.easeInOut(duration: 0.18), value: isPetNameEditorPresented)
     }
 
     private var tutorialInstructionCard: some View {
@@ -201,16 +219,40 @@ struct ZukanView: View {
         switch selectedSection {
         case .character:
             let selectedPetID = selectedPetID ?? state.normalizedCurrentPetID
-            let selectedName = PetMaster.all.first(where: { $0.id == selectedPetID })?.name ?? selectedPetID
+            let defaultSelectedName = PetMaster.all.first(where: { $0.id == selectedPetID })?.name ?? selectedPetID
+            let selectedName = ZukanPetNameStore.displayName(
+                for: selectedPetID,
+                defaultName: defaultSelectedName,
+                in: customPetNames
+            )
             let selectedImageName = PetMaster.assetName(for: selectedPetID)
             let descriptionText = PetMaster.description(for: selectedPetID)
             let isCurrentPet = state.normalizedCurrentPetID == selectedPetID
             let isSwitchDisabled = isCurrentPet && isTutorialMode == false
+            let hasCustomName = ZukanPetNameStore.nickname(for: selectedPetID, in: customPetNames) != nil
 
             VStack(alignment: .leading, spacing: 12) {
-                Text("現在選択中のキャラクター")
-                    .font(.headline.weight(.bold))
-                    .foregroundStyle(.primary)
+                HStack(spacing: 8) {
+                    Text("現在選択中のキャラクター")
+                        .font(.headline.weight(.bold))
+                        .foregroundStyle(.primary)
+
+                    Button {
+                        openPetNameEditor(for: selectedPetID)
+                    } label: {
+                        Image(systemName: "pencil.circle.fill")
+                            .font(.title3.weight(.semibold))
+                            .foregroundStyle(isTutorialMode ? Color.secondary : Color.accentColor)
+                            .frame(width: 30, height: 30)
+                            .contentShape(Circle())
+                    }
+                    .buttonStyle(.plain)
+                    .disabled(isTutorialMode)
+                    .accessibilityLabel("キャラクター名を編集")
+                    .accessibilityHint("選択中のキャラクターに名前をつけます")
+
+                    Spacer(minLength: 0)
+                }
 
                 HStack(spacing: 14) {
                     ZStack {
@@ -227,6 +269,15 @@ struct ZukanView: View {
                     VStack(alignment: .leading, spacing: 10) {
                         Text(selectedName)
                             .font(.title3.weight(.bold))
+                            .lineLimit(1)
+                            .minimumScaleFactor(0.75)
+
+                        if hasCustomName {
+                            Text("元の名前: \(defaultSelectedName)")
+                                .font(.caption.weight(.semibold))
+                                .foregroundStyle(.secondary)
+                                .lineLimit(1)
+                        }
 
                         Text(descriptionText)
                             .font(.subheadline)
@@ -378,6 +429,36 @@ struct ZukanView: View {
         .clipShape(RoundedRectangle(cornerRadius: 20))
     }
 
+    @ViewBuilder
+    private func petNameEditorOverlay(for petID: String) -> some View {
+        let defaultName = PetMaster.all.first(where: { $0.id == petID })?.name ?? petID
+
+        ZStack {
+            Color.black.opacity(0.38)
+                .ignoresSafeArea()
+                .onTapGesture {
+                    closePetNameEditor()
+                }
+
+            ZukanPetNameEditorPopup(
+                defaultName: defaultName,
+                nameDraft: $petNameDraft,
+                validationMessage: petNameValidationMessage,
+                maxNameLength: ZukanPetNameStore.maxNicknameLength,
+                onCancel: {
+                    closePetNameEditor()
+                },
+                onSave: {
+                    savePetNameTapped()
+                },
+                onReset: {
+                    resetPetNameTapped()
+                }
+            )
+            .padding(.horizontal, 24)
+        }
+    }
+
     private func activePageCount(state: AppState) -> Int {
         switch selectedSection {
         case .character:
@@ -434,6 +515,58 @@ struct ZukanView: View {
         bgmManager.playSE(.push)
         currentHomeWallpaperAssetName = selectedWallpaperAssetName
         syncWallpaperSelectionAndPage()
+    }
+
+    private func openPetNameEditor(for petID: String) {
+        guard isTutorialMode == false else { return }
+        bgmManager.playSE(.push)
+        editingPetID = petID
+        petNameDraft = ZukanPetNameStore.nickname(for: petID, in: customPetNames) ?? ""
+        petNameValidationMessage = nil
+        isPetNameEditorPresented = true
+    }
+
+    private func closePetNameEditor() {
+        isPetNameEditorPresented = false
+        editingPetID = nil
+        petNameDraft = ""
+        petNameValidationMessage = nil
+    }
+
+    private func savePetNameTapped() {
+        guard let editingPetID else { return }
+
+        switch ZukanPetNameStore.validatedNickname(from: petNameDraft) {
+        case .success(let nickname):
+            customPetNames = ZukanPetNameStore.setNickname(
+                nickname,
+                for: editingPetID,
+                in: customPetNames
+            )
+            bgmManager.playSE(.push)
+            closePetNameEditor()
+        case .failure(let message):
+            petNameValidationMessage = message
+        }
+    }
+
+    private func resetPetNameTapped() {
+        guard let editingPetID else { return }
+        customPetNames = ZukanPetNameStore.removeNickname(
+            for: editingPetID,
+            in: customPetNames
+        )
+        bgmManager.playSE(.push)
+        closePetNameEditor()
+    }
+
+    private func normalizePetNameDraft(_ newValue: String) {
+        let limitedValue = ZukanPetNameStore.limitedInput(newValue)
+        if limitedValue != newValue {
+            petNameDraft = limitedValue
+            return
+        }
+        petNameValidationMessage = ZukanPetNameStore.validationMessage(for: limitedValue)
     }
 
     private func syncCharacterSelectionAndPage(state: AppState) {
@@ -549,6 +682,228 @@ private enum ZukanWidgetBridge {
         defaults.synchronize()
 
         return previousSignature != signature
+    }
+}
+
+
+private enum ZukanPetNameValidationResult {
+    case success(String)
+    case failure(String)
+}
+
+private enum ZukanPetNameStore {
+    static let maxNicknameLength: Int = 12
+
+    private static let storageKey = "memo.zukan.customPetNames.v1"
+    private static let blockedCharacterSet = CharacterSet(charactersIn: "<>[]{}\\/")
+
+    static func load() -> [String: String] {
+        guard let data = UserDefaults.standard.data(forKey: storageKey),
+              let decoded = try? JSONDecoder().decode([String: String].self, from: data) else {
+            return [:]
+        }
+
+        let validPetIDs = Set(PetMaster.all.map(\.id))
+        var sanitized: [String: String] = [:]
+
+        for (petID, rawName) in decoded where validPetIDs.contains(petID) {
+            if case .success(let nickname) = validatedNickname(from: rawName) {
+                sanitized[petID] = nickname
+            }
+        }
+
+        if sanitized.count != decoded.count {
+            persist(sanitized)
+        }
+
+        return sanitized
+    }
+
+    static func nickname(for petID: String, in names: [String: String]) -> String? {
+        guard let rawName = names[petID] else { return nil }
+        guard case .success(let nickname) = validatedNickname(from: rawName) else { return nil }
+        return nickname
+    }
+
+    static func displayName(for petID: String, defaultName: String, in names: [String: String]) -> String {
+        nickname(for: petID, in: names) ?? defaultName
+    }
+
+    static func setNickname(_ nickname: String, for petID: String, in names: [String: String]) -> [String: String] {
+        guard PetMaster.all.contains(where: { $0.id == petID }) else { return names }
+        guard case .success(let sanitizedNickname) = validatedNickname(from: nickname) else { return names }
+
+        var nextNames = names
+        nextNames[petID] = sanitizedNickname
+        persist(nextNames)
+        return nextNames
+    }
+
+    static func removeNickname(for petID: String, in names: [String: String]) -> [String: String] {
+        var nextNames = names
+        nextNames.removeValue(forKey: petID)
+        persist(nextNames)
+        return nextNames
+    }
+
+    static func limitedInput(_ input: String) -> String {
+        let hardLimit = maxNicknameLength + 8
+        guard input.count > hardLimit else { return input }
+        return String(input.prefix(hardLimit))
+    }
+
+    static func validationMessage(for input: String) -> String? {
+        switch validatedNickname(from: input) {
+        case .success:
+            return nil
+        case .failure(let message):
+            return message
+        }
+    }
+
+    static func validatedNickname(from input: String) -> ZukanPetNameValidationResult {
+        let normalized = normalize(input)
+
+        guard normalized.isEmpty == false else {
+            return .failure("名前を入力してください。")
+        }
+
+        guard normalized.count <= maxNicknameLength else {
+            return .failure("名前は\(maxNicknameLength)文字以内で入力してください。")
+        }
+
+        if normalized.unicodeScalars.contains(where: { scalar in
+            CharacterSet.controlCharacters.contains(scalar) || CharacterSet.newlines.contains(scalar)
+        }) {
+            return .failure("改行,一部の文字は使用できません。")
+        }
+
+        if normalized.unicodeScalars.contains(where: { blockedCharacterSet.contains($0) }) {
+            return .failure("名前に使用できない記号が含まれています。")
+        }
+
+        return .success(normalized)
+    }
+
+    private static func normalize(_ input: String) -> String {
+        input
+            .replacingOccurrences(of: "　", with: " ")
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+            .precomposedStringWithCanonicalMapping
+    }
+
+    private static func persist(_ names: [String: String]) {
+        guard let data = try? JSONEncoder().encode(names) else { return }
+        UserDefaults.standard.set(data, forKey: storageKey)
+    }
+}
+
+private struct ZukanPetNameEditorPopup: View {
+    let defaultName: String
+    @Binding var nameDraft: String
+    let validationMessage: String?
+    let maxNameLength: Int
+    let onCancel: () -> Void
+    let onSave: () -> Void
+    let onReset: () -> Void
+
+    @FocusState private var isTextFieldFocused: Bool
+
+    private var trimmedDraft: String {
+        nameDraft.trimmingCharacters(in: .whitespacesAndNewlines)
+    }
+
+    private var canSave: Bool {
+        trimmedDraft.isEmpty == false && validationMessage == nil
+    }
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 16) {
+            HStack(alignment: .top, spacing: 10) {
+                VStack(alignment: .leading, spacing: 4) {
+                    Text("ミーモに名前をつける")
+                        .font(.headline.weight(.bold))
+                        .foregroundStyle(.primary)
+
+                    Text("元の名前: \(defaultName)")
+                        .font(.caption.weight(.semibold))
+                        .foregroundStyle(.secondary)
+                }
+
+                Spacer(minLength: 0)
+
+                Button(action: onCancel) {
+                    Image(systemName: "xmark.circle.fill")
+                        .font(.title3.weight(.semibold))
+                        .foregroundStyle(.secondary)
+                }
+                .buttonStyle(.plain)
+                .accessibilityLabel("閉じる")
+            }
+
+            VStack(alignment: .leading, spacing: 8) {
+                TextField("名前を入力", text: $nameDraft)
+                    .textFieldStyle(.roundedBorder)
+                    .textInputAutocapitalization(.never)
+                    .autocorrectionDisabled(true)
+                    .submitLabel(.done)
+                    .focused($isTextFieldFocused)
+                    .onSubmit {
+                        if canSave {
+                            onSave()
+                        }
+                    }
+
+                HStack(alignment: .firstTextBaseline) {
+                    if let validationMessage {
+                        Text(validationMessage)
+                            .font(.caption.weight(.semibold))
+                            .foregroundStyle(.red)
+                            .frame(maxWidth: .infinity, alignment: .leading)
+                    } else {
+                        Text("改行・一部記号は使用できません。")
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                            .frame(maxWidth: .infinity, alignment: .leading)
+                    }
+
+                    Text("\(trimmedDraft.count)/\(maxNameLength)")
+                        .font(.caption.monospacedDigit())
+                        .foregroundStyle(trimmedDraft.count > maxNameLength ? Color.red : Color.secondary)
+                }
+            }
+
+            HStack(spacing: 10) {
+                Button("名前を戻す") {
+                    onReset()
+                }
+                .buttonStyle(.bordered)
+
+                Spacer(minLength: 0)
+
+                Button("キャンセル") {
+                    onCancel()
+                }
+                .buttonStyle(.bordered)
+
+                Button("決定") {
+                    onSave()
+                }
+                .buttonStyle(.borderedProminent)
+                .disabled(canSave == false)
+            }
+        }
+        .padding(20)
+        .frame(maxWidth: 420)
+        .background(.regularMaterial, in: RoundedRectangle(cornerRadius: 24, style: .continuous))
+        .overlay(
+            RoundedRectangle(cornerRadius: 24, style: .continuous)
+                .stroke(Color.white.opacity(0.55), lineWidth: 1)
+        )
+        .shadow(radius: 18, y: 8)
+        .onAppear {
+            isTextFieldFocused = true
+        }
     }
 }
 
