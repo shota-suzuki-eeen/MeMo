@@ -8,6 +8,8 @@
 //  おやすみモード用のリワード広告管理を追加。
 //  2026/06 update: 全広告を停止。広告ID・既存広告処理は再開できるように残す。
 //  2026/06 update: リワード広告の起動時一括ロードを廃止し、画面単位プリロードへ変更。
+//  2026/06 update: AdMob規約リスク低減のため、開発者モード時の広告SDK停止、
+//  広告リクエスト60秒制限、インタースティシャル広告の頻度制御を追加。
 //
 
 import Foundation
@@ -114,11 +116,58 @@ enum DeveloperModeStore {
     }
 }
 
-// MARK: - Ad pause switch
+// MARK: - Ad runtime policy
 
 private enum AdRuntimePolicy {
     static var isAdvertisingPaused: Bool {
         MonetizationPolicy.isAdvertisingPaused
+    }
+
+    static var isDeveloperMode: Bool {
+        DeveloperModeStore.isEnabled
+    }
+
+    static var canTouchAdvertisingSDK: Bool {
+        MonetizationPolicy.canTouchAdvertisingSDK(isDeveloperMode: isDeveloperMode)
+    }
+
+    static var minimumAdRequestInterval: TimeInterval {
+        MonetizationPolicy.minimumAdRequestInterval
+    }
+
+    static var minimumInterstitialUserActions: Int {
+        max(1, MonetizationPolicy.minimumInterstitialUserActions)
+    }
+
+    static var minimumInterstitialPresentationInterval: TimeInterval {
+        MonetizationPolicy.minimumInterstitialPresentationInterval
+    }
+}
+
+// MARK: - Ad request throttling
+
+private final class AdRequestRateLimiter {
+    static let shared = AdRequestRateLimiter()
+
+    private var lastRequestAtByKey: [String: Date] = [:]
+
+    private init() {}
+
+    func canRequest(key: String, now: Date = Date()) -> Bool {
+        guard let lastRequestAt = lastRequestAtByKey[key] else { return true }
+        return now.timeIntervalSince(lastRequestAt) >= AdRuntimePolicy.minimumAdRequestInterval
+    }
+
+    func recordRequest(key: String, now: Date = Date()) {
+        lastRequestAtByKey[key] = now
+    }
+
+    func reset(key: String) {
+        lastRequestAtByKey[key] = nil
+    }
+
+    func resetAll() {
+        lastRequestAtByKey.removeAll()
     }
 }
 
@@ -159,6 +208,7 @@ final class AdMobManager: ObservableObject {
     private var lastClaimedWorkRewardIDs: Set<String> = []
     private var lastClaimedHappinessRewardLevels: Set<Int> = []
     private var isShowingGetInterstitial: Bool = false
+    private var didStartMobileAdsSDK: Bool = false
 
     private init() {}
 
@@ -176,6 +226,10 @@ final class AdMobManager: ObservableObject {
         )
     }
 
+    private var shouldUseAnyAdvertisingSDKFeature: Bool {
+        AdRuntimePolicy.canTouchAdvertisingSDK && (shouldUsePassiveAds || shouldUseRewardedAds)
+    }
+
     func start() {
         guard !didStart else { return }
         didStart = true
@@ -184,17 +238,12 @@ final class AdMobManager: ObservableObject {
         lastClaimedHappinessRewardLevels = currentClaimedHappinessRewardLevels()
         observeRewardDefaultChanges()
 
-        guard !AdRuntimePolicy.isAdvertisingPaused else {
-            rewardGacha.markAvailableWithoutAd()
-            rewardWalkStart.markAvailableWithoutAd()
-            rewardWalkDouble.markAvailableWithoutAd()
-            rewardSleepMode.markAvailableWithoutAd()
+        guard shouldUseAnyAdvertisingSDKFeature else {
+            applyAdvertisingDisabledState()
             return
         }
 
-        #if canImport(GoogleMobileAds)
-        MobileAds.shared.start()
-        #endif
+        startMobileAdsSDKIfNeeded()
 
         // 2026/06 update:
         // リワード広告は起動時に一括ロードしない。
@@ -202,74 +251,67 @@ final class AdMobManager: ObservableObject {
         // rewardWalkStart: お散歩メニューを開いた時点で prepareRewardWalkStart()
         // rewardWalkDouble: リザルト画面表示時点で prepareRewardWalkDouble()
         // rewardSleepMode: おやすみモードポップアップ表示時点で prepareRewardSleepMode()
-        if DeveloperModeStore.isEnabled || !shouldUseRewardedAds {
-            rewardGacha.markAvailableWithoutAd()
-            rewardWalkStart.markAvailableWithoutAd()
-            rewardWalkDouble.markAvailableWithoutAd()
-            rewardSleepMode.markAvailableWithoutAd()
+        if !shouldUseRewardedAds {
+            markRewardedAdsAvailableWithoutAd()
         }
 
         guard shouldUsePassiveAds else { return }
-        interstitialCharacterSet.load()
+        interstitialCharacterSet.loadIfNeeded()
         evaluateInterstitialGetPreload()
     }
 
     func prepareRewardGacha() {
-        guard !AdRuntimePolicy.isAdvertisingPaused else {
-            rewardGacha.markAvailableWithoutAd()
-            return
-        }
         guard shouldUseRewardedAds else {
             rewardGacha.markAvailableWithoutAd()
             return
         }
+        startMobileAdsSDKIfNeeded()
         rewardGacha.loadIfNeeded()
     }
 
     func prepareRewardWalkStart() {
-        guard !AdRuntimePolicy.isAdvertisingPaused else {
-            rewardWalkStart.markAvailableWithoutAd()
-            return
-        }
         guard shouldUseRewardedAds else {
             rewardWalkStart.markAvailableWithoutAd()
             return
         }
+        startMobileAdsSDKIfNeeded()
         rewardWalkStart.loadIfNeeded()
     }
 
     func prepareRewardWalkDouble() {
-        guard !AdRuntimePolicy.isAdvertisingPaused else {
-            rewardWalkDouble.markAvailableWithoutAd()
-            return
-        }
         guard shouldUseRewardedAds else {
             rewardWalkDouble.markAvailableWithoutAd()
             return
         }
+        startMobileAdsSDKIfNeeded()
         rewardWalkDouble.loadIfNeeded()
     }
 
     func prepareRewardSleepMode() {
-        guard !AdRuntimePolicy.isAdvertisingPaused else {
-            rewardSleepMode.markAvailableWithoutAd()
-            return
-        }
         guard shouldUseRewardedAds else {
             rewardSleepMode.markAvailableWithoutAd()
             return
         }
+        startMobileAdsSDKIfNeeded()
         rewardSleepMode.loadIfNeeded()
     }
 
     func prepareInterstitialCharacterSet() {
-        guard shouldUsePassiveAds else { return }
+        guard shouldUsePassiveAds else {
+            interstitialCharacterSet.clearLoadedAd()
+            return
+        }
+        startMobileAdsSDKIfNeeded()
         interstitialCharacterSet.loadIfNeeded()
     }
 
     func prepareInterstitialGetIfNeeded(isRewardClaimable: Bool) {
-        guard shouldUsePassiveAds else { return }
+        guard shouldUsePassiveAds else {
+            interstitialGet.clearLoadedAd()
+            return
+        }
         guard isRewardClaimable else { return }
+        startMobileAdsSDKIfNeeded()
         interstitialGet.loadIfNeeded()
     }
 
@@ -279,6 +321,7 @@ final class AdMobManager: ObservableObject {
             return
         }
 
+        startMobileAdsSDKIfNeeded()
         prepareInterstitialCharacterSet()
         interstitialCharacterSet.show(onDismiss: action)
     }
@@ -294,6 +337,7 @@ final class AdMobManager: ObservableObject {
             return
         }
 
+        startMobileAdsSDKIfNeeded()
         isShowingGetInterstitial = true
         interstitialGet.show { [weak self] in
             guard let manager = self else {
@@ -307,6 +351,32 @@ final class AdMobManager: ObservableObject {
                 manager.evaluateInterstitialGetPreload()
             }
         }
+    }
+
+    private func startMobileAdsSDKIfNeeded() {
+        guard shouldUseAnyAdvertisingSDKFeature else { return }
+        guard !didStartMobileAdsSDK else { return }
+
+        #if canImport(GoogleMobileAds)
+        MobileAds.shared.start()
+        #endif
+
+        didStartMobileAdsSDK = true
+    }
+
+    private func applyAdvertisingDisabledState() {
+        isShowingGetInterstitial = false
+        markRewardedAdsAvailableWithoutAd()
+        interstitialCharacterSet.clearLoadedAd()
+        interstitialGet.clearLoadedAd()
+        AdRequestRateLimiter.shared.resetAll()
+    }
+
+    private func markRewardedAdsAvailableWithoutAd() {
+        rewardGacha.markAvailableWithoutAd()
+        rewardWalkStart.markAvailableWithoutAd()
+        rewardWalkDouble.markAvailableWithoutAd()
+        rewardSleepMode.markAvailableWithoutAd()
     }
 
     private func observeRewardDefaultChanges() {
@@ -326,6 +396,12 @@ final class AdMobManager: ObservableObject {
     }
 
     private func handleRewardDefaultChanges() {
+        guard shouldUseAnyAdvertisingSDKFeature else {
+            applyAdvertisingDisabledState()
+            return
+        }
+
+        startMobileAdsSDKIfNeeded()
         evaluateInterstitialGetPreload()
 
         let nextWorkIDs = currentClaimedWorkRewardIDs()
@@ -439,10 +515,16 @@ struct AdMobBannerView: UIViewRepresentable {
             return banner
         }
 
+        guard AdRequestRateLimiter.shared.canRequest(key: adUnitID) else {
+            context.coordinator.lastLoadedAdUnitID = adUnitID
+            return banner
+        }
+
         banner.adUnitID = adUnitID
         banner.rootViewController = UIApplication.shared.topMostViewController()
         banner.load(Request())
 
+        AdRequestRateLimiter.shared.recordRequest(key: adUnitID)
         context.coordinator.lastLoadedAdUnitID = adUnitID
         return banner
     }
@@ -459,8 +541,14 @@ struct AdMobBannerView: UIViewRepresentable {
         uiView.rootViewController = UIApplication.shared.topMostViewController()
 
         if context.coordinator.lastLoadedAdUnitID != adUnitID {
+            guard AdRequestRateLimiter.shared.canRequest(key: adUnitID) else {
+                context.coordinator.lastLoadedAdUnitID = adUnitID
+                return
+            }
+
             uiView.adUnitID = adUnitID
             uiView.load(Request())
+            AdRequestRateLimiter.shared.recordRequest(key: adUnitID)
             context.coordinator.lastLoadedAdUnitID = adUnitID
         }
     }
@@ -544,6 +632,7 @@ final class RewardedAdManager: NSObject, ObservableObject {
     private var pendingUnavailable: (() -> Void)?
     private var didEarnRewardDuringPresentation: Bool = false
     private var isPresentingAd: Bool = false
+    private var lastLoadAt: Date?
 
     #if canImport(GoogleMobileAds)
     private var rewardedAd: RewardedAd?
@@ -553,7 +642,7 @@ final class RewardedAdManager: NSObject, ObservableObject {
         self.adUnitID = adUnitID
         super.init()
 
-        if DeveloperModeStore.isEnabled || AdRuntimePolicy.isAdvertisingPaused {
+        if !AdRuntimePolicy.canTouchAdvertisingSDK {
             self.isReady = true
         }
     }
@@ -562,37 +651,52 @@ final class RewardedAdManager: NSObject, ObservableObject {
         isReady = true
         isLoading = false
         lastErrorMessage = nil
+        pendingReward = nil
+        pendingUnavailable = nil
+        didEarnRewardDuringPresentation = false
+        isPresentingAd = false
+        lastLoadAt = nil
+        AdRequestRateLimiter.shared.reset(key: adUnitID)
         #if canImport(GoogleMobileAds)
         rewardedAd = nil
         #endif
     }
 
     func loadIfNeeded() {
-        guard !AdRuntimePolicy.isAdvertisingPaused else {
+        guard AdRuntimePolicy.canTouchAdvertisingSDK else {
             markAvailableWithoutAd()
             return
         }
         guard !isReady, !isLoading else { return }
+        guard canRequestNewAd() else { return }
         load()
     }
 
-    func load() {
-        guard !AdRuntimePolicy.isAdvertisingPaused else {
-            markAvailableWithoutAd()
-            return
-        }
+    private func canRequestNewAd(now: Date = Date()) -> Bool {
+        guard let lastLoadAt else { return true }
+        return now.timeIntervalSince(lastLoadAt) >= AdRuntimePolicy.minimumAdRequestInterval
+    }
 
-        if DeveloperModeStore.isEnabled {
+    private func recordLoadRequest(now: Date = Date()) {
+        lastLoadAt = now
+        AdRequestRateLimiter.shared.recordRequest(key: adUnitID, now: now)
+    }
+
+    func load() {
+        guard AdRuntimePolicy.canTouchAdvertisingSDK else {
             markAvailableWithoutAd()
             return
         }
 
         #if canImport(GoogleMobileAds)
         guard !isLoading else { return }
+        guard canRequestNewAd() else { return }
+
         isReady = false
         isLoading = true
         lastErrorMessage = nil
         rewardedAd = nil
+        recordLoadRequest()
 
         RewardedAd.load(with: adUnitID, request: Request()) { [weak self] ad, error in
             guard let manager = self else { return }
@@ -623,15 +727,9 @@ final class RewardedAdManager: NSObject, ObservableObject {
         onReward: @escaping () -> Void,
         onUnavailable: (() -> Void)? = nil
     ) {
-        guard !AdRuntimePolicy.isAdvertisingPaused else {
+        guard AdRuntimePolicy.canTouchAdvertisingSDK else {
             markAvailableWithoutAd()
             onReward()
-            return
-        }
-
-        if DeveloperModeStore.isEnabled {
-            onReward()
-            markAvailableWithoutAd()
             return
         }
 
@@ -700,7 +798,7 @@ final class RewardedAdManager: NSObject, ObservableObject {
             unavailable?()
         }
 
-        load()
+        loadIfNeeded()
     }
 }
 
@@ -715,6 +813,9 @@ final class InterstitialAdManager: NSObject, ObservableObject {
     private let adUnitID: String
     private var onDismiss: (() -> Void)?
     private var isPresentingAd: Bool = false
+    private var userActionsSinceLastPresentation: Int = 0
+    private var lastPresentedAt: Date?
+    private var lastLoadAt: Date?
 
     #if canImport(GoogleMobileAds)
     private var interstitialAd: InterstitialAd?
@@ -723,45 +824,58 @@ final class InterstitialAdManager: NSObject, ObservableObject {
     init(adUnitID: String) {
         self.adUnitID = adUnitID
         super.init()
+    }
 
-        if DeveloperModeStore.isEnabled {
-            self.isReady = true
-        }
+    func clearLoadedAd() {
+        isReady = false
+        isLoading = false
+        lastErrorMessage = nil
+        onDismiss = nil
+        isPresentingAd = false
+        userActionsSinceLastPresentation = 0
+        lastPresentedAt = nil
+        lastLoadAt = nil
+        AdRequestRateLimiter.shared.reset(key: adUnitID)
+        #if canImport(GoogleMobileAds)
+        interstitialAd = nil
+        #endif
     }
 
     func loadIfNeeded() {
-        guard !AdRuntimePolicy.isAdvertisingPaused else { return }
+        guard AdRuntimePolicy.canTouchAdvertisingSDK else {
+            clearLoadedAd()
+            return
+        }
         guard !isReady, !isLoading else { return }
+        guard canRequestNewAd() else { return }
         load()
     }
 
-    func load() {
-        guard !AdRuntimePolicy.isAdvertisingPaused else {
-            isReady = false
-            isLoading = false
-            lastErrorMessage = nil
-            #if canImport(GoogleMobileAds)
-            interstitialAd = nil
-            #endif
-            return
-        }
+    private func canRequestNewAd(now: Date = Date()) -> Bool {
+        guard let lastLoadAt else { return true }
+        return now.timeIntervalSince(lastLoadAt) >= AdRuntimePolicy.minimumAdRequestInterval
+    }
 
-        if DeveloperModeStore.isEnabled {
-            isReady = true
-            isLoading = false
-            lastErrorMessage = nil
-            #if canImport(GoogleMobileAds)
-            interstitialAd = nil
-            #endif
+    private func recordLoadRequest(now: Date = Date()) {
+        lastLoadAt = now
+        AdRequestRateLimiter.shared.recordRequest(key: adUnitID, now: now)
+    }
+
+    func load() {
+        guard AdRuntimePolicy.canTouchAdvertisingSDK else {
+            clearLoadedAd()
             return
         }
 
         #if canImport(GoogleMobileAds)
         guard !isLoading else { return }
+        guard canRequestNewAd() else { return }
+
         isReady = false
         isLoading = true
         lastErrorMessage = nil
         interstitialAd = nil
+        recordLoadRequest()
 
         InterstitialAd.load(with: adUnitID, request: Request()) { [weak self] ad, error in
             guard let manager = self else { return }
@@ -789,16 +903,8 @@ final class InterstitialAdManager: NSObject, ObservableObject {
     }
 
     func show(onDismiss: @escaping () -> Void) {
-        guard !AdRuntimePolicy.isAdvertisingPaused else {
+        guard AdRuntimePolicy.canTouchAdvertisingSDK else {
             onDismiss()
-            return
-        }
-
-        if DeveloperModeStore.isEnabled {
-            onDismiss()
-            isReady = true
-            isLoading = false
-            lastErrorMessage = nil
             return
         }
 
@@ -808,22 +914,39 @@ final class InterstitialAdManager: NSObject, ObservableObject {
             return
         }
 
+        userActionsSinceLastPresentation += 1
+
+        guard userActionsSinceLastPresentation >= AdRuntimePolicy.minimumInterstitialUserActions else {
+            loadIfNeeded()
+            onDismiss()
+            return
+        }
+
+        if let lastPresentedAt,
+           Date().timeIntervalSince(lastPresentedAt) < AdRuntimePolicy.minimumInterstitialPresentationInterval {
+            loadIfNeeded()
+            onDismiss()
+            return
+        }
+
         guard let ad = interstitialAd else {
             isReady = false
-            onDismiss()
             loadIfNeeded()
+            onDismiss()
             return
         }
 
         guard let root = UIApplication.shared.topMostViewController() else {
             isReady = false
-            onDismiss()
             loadIfNeeded()
+            onDismiss()
             return
         }
 
         self.onDismiss = onDismiss
         isPresentingAd = true
+        userActionsSinceLastPresentation = 0
+        lastPresentedAt = Date()
         ad.fullScreenContentDelegate = self
 
         AdPlaybackAudioMuteController.begin()
@@ -845,7 +968,7 @@ final class InterstitialAdManager: NSObject, ObservableObject {
         AdPlaybackAudioMuteController.end()
 
         callback?()
-        load()
+        loadIfNeeded()
     }
 }
 
