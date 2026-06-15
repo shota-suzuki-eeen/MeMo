@@ -6,7 +6,7 @@
 //  Based on the current main branch structure.
 //  iOS 18.6+
 //  お散歩機能の開始ポップアップ・全画面お散歩画面・グローバルリザルト表示を追加。
-//  2026/06 update: 起動時の rewardWalkStart / rewardWalkDouble プリロードを廃止。
+//  2026/06 update: 起動時の rewardWalkStart / rewardWalkDouble プリロードを廃止.
 //
 
 import SwiftUI
@@ -63,6 +63,10 @@ struct RootView: View {
                 if let sharedState = viewModel.sharedState {
                     ZStack(alignment: .top) {
                         HomeView(state: sharedState, hk: hk)
+
+                        MeMoLiveActivityStateObserver(state: sharedState)
+                            .frame(width: 0, height: 0)
+                            .allowsHitTesting(false)
 
                         HomeNavigationDepthReader { depth in
                             let nextValue = depth > 1
@@ -126,6 +130,9 @@ struct RootView: View {
                         AdMobManager.shared.prepareInterstitialGetIfNeeded(
                             isRewardClaimable: sharedState.nextClaimableHappinessRewardLevel() != nil
                         )
+                        Task { @MainActor in
+                            await MeMoLiveActivityManager.shared.updateIfNeeded(from: sharedState, force: true)
+                        }
                     }
                     .onDisappear {
                         cancelStepGainPopupDismissTask()
@@ -145,11 +152,17 @@ struct RootView: View {
                     }
                     .onChange(of: sharedState.walletSteps) { oldValue, newValue in
                         handleWalletStepsChange(oldValue: oldValue, newValue: newValue)
+                        Task { @MainActor in
+                            await MeMoLiveActivityManager.shared.updateImmediately(from: sharedState)
+                        }
                     }
                     .onChange(of: sharedState.happinessLevel) { _, _ in
                         AdMobManager.shared.prepareInterstitialGetIfNeeded(
                             isRewardClaimable: sharedState.nextClaimableHappinessRewardLevel() != nil
                         )
+                        Task { @MainActor in
+                            await MeMoLiveActivityManager.shared.updateImmediately(from: sharedState)
+                        }
                     }
                 } else {
                     ProgressView()

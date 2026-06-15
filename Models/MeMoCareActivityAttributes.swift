@@ -24,6 +24,9 @@ struct MeMoCareActivityAttributes: ActivityAttributes {
         var happinessMaxPoint: Int
         var walletSteps: Int
         var tenGachaCost: Int
+        var dayKey: String
+        var showsLockScreenCard: Bool
+        var showsDynamicIslandContent: Bool
         var updatedAt: Date
 
         var clampedTodaySteps: Int { max(0, todaySteps) }
@@ -48,12 +51,21 @@ struct MeMoCareActivityAttributes: ActivityAttributes {
             Double(clampedHappinessPoint) / Double(clampedHappinessMaxPoint)
         }
 
+        var tenGachaCompletedCount: Int {
+            clampedWalletSteps / clampedTenGachaCost
+        }
+
+        var tenGachaRemainderSteps: Int {
+            clampedWalletSteps % clampedTenGachaCost
+        }
+
         var tenGachaProgress: Double {
-            min(1, Double(clampedWalletSteps) / Double(clampedTenGachaCost))
+            Double(tenGachaRemainderSteps) / Double(clampedTenGachaCost)
         }
 
         var tenGachaRemainingSteps: Int {
-            max(0, clampedTenGachaCost - clampedWalletSteps)
+            let remainder = tenGachaRemainderSteps
+            return remainder == 0 ? clampedTenGachaCost : max(0, clampedTenGachaCost - remainder)
         }
     }
 
