@@ -14,7 +14,7 @@ struct MeMoLiveActivityStateObserver: View {
 
     let state: AppState
 
-    private let timer = Timer.publish(every: 1, on: .main, in: .common).autoconnect()
+    private let timer = Timer.publish(every: 60, on: .main, in: .common).autoconnect()
 
     var body: some View {
         Color.clear
@@ -22,7 +22,7 @@ struct MeMoLiveActivityStateObserver: View {
             .allowsHitTesting(false)
             .accessibilityHidden(true)
             .task {
-                requestUpdate(force: true)
+                requestLaunchSynchronization()
             }
             .onReceive(timer) { _ in
                 guard scenePhase == .active else { return }
@@ -30,7 +30,7 @@ struct MeMoLiveActivityStateObserver: View {
             }
             .onChange(of: scenePhase) { _, newPhase in
                 guard newPhase == .active else { return }
-                requestUpdate(force: true)
+                requestLaunchSynchronization()
             }
             .onChange(of: state.satisfactionLevel) { _, _ in
                 requestUpdate(force: true)
@@ -47,6 +47,9 @@ struct MeMoLiveActivityStateObserver: View {
             .onChange(of: state.toiletFlagAt) { _, _ in
                 requestUpdate(force: true)
             }
+            .onChange(of: state.toiletNextSpawnAt) { _, _ in
+                requestUpdate(force: false)
+            }
             .onChange(of: state.currentPetID) { _, _ in
                 requestUpdate(force: true)
             }
@@ -56,6 +59,12 @@ struct MeMoLiveActivityStateObserver: View {
             .onChange(of: state.walletSteps) { _, _ in
                 requestUpdate(force: true)
             }
+    }
+
+    private func requestLaunchSynchronization() {
+        Task { @MainActor in
+            await MeMoLiveActivityManager.shared.synchronizeOnAppLaunch(from: state)
+        }
     }
 
     private func requestUpdate(force: Bool) {

@@ -15,9 +15,11 @@ struct MeMoWidgetLiveActivity: Widget {
     var body: some WidgetConfiguration {
         ActivityConfiguration(for: MeMoCareActivityAttributes.self) { context in
             if context.state.showsLockScreenCard {
-                MeMoCareLockScreenLiveActivityView(context: context)
-                    .activityBackgroundTint(.clear)
-                    .activitySystemActionForegroundColor(.white)
+                TimelineView(.periodic(from: context.state.updatedAt, by: 60)) { timeline in
+                    MeMoCareLockScreenLiveActivityView(context: context, now: timeline.date)
+                }
+                .activityBackgroundTint(.clear)
+                .activitySystemActionForegroundColor(.white)
             } else {
                 EmptyView()
                     .activityBackgroundTint(.clear)
@@ -27,51 +29,25 @@ struct MeMoWidgetLiveActivity: Widget {
             DynamicIsland {
                 DynamicIslandExpandedRegion(.leading) {
                     if context.state.showsDynamicIslandContent {
-                        VStack(alignment: .leading, spacing: 5) {
-                            Text(context.state.petName)
-                                .font(.headline.weight(.bold))
-                                .lineLimit(1)
-                                .minimumScaleFactor(0.72)
-
-                            Text("今日 \(context.state.clampedTodaySteps.memoCompactFormatted)歩")
-                                .font(.caption2.monospacedDigit().weight(.semibold))
-                                .foregroundStyle(.secondary)
-
-                            Text("満腹 \(context.state.clampedFullnessLevel)/\(context.state.clampedFullnessMaxLevel)")
-                                .font(.caption2.monospacedDigit().weight(.semibold))
-                                .foregroundStyle(.secondary)
-                        }
-                        .padding(.leading, 4)
+                        MeMoDynamicIslandLeadingView(state: context.state)
                     }
                 }
 
                 DynamicIslandExpandedRegion(.trailing) {
                     if context.state.showsDynamicIslandContent {
-                        Image(context.state.petImageName)
-                            .resizable()
-                            .scaledToFit()
-                            .frame(width: 78, height: 78)
+                        MeMoDynamicIslandPetView(state: context.state, size: CGSize(width: 82, height: 82))
                     }
                 }
 
                 DynamicIslandExpandedRegion(.bottom) {
                     if context.state.showsDynamicIslandContent {
                         VStack(spacing: 7) {
-                            HStack(spacing: 8) {
-                                MeMoLiveActivityMiniPill(
-                                    title: "満腹度",
-                                    value: "\(context.state.clampedFullnessLevel)/\(context.state.clampedFullnessMaxLevel)",
-                                    progress: context.state.fullnessProgress,
-                                    systemImage: "takeoutbag.and.cup.and.straw.fill"
-                                )
-
-                                MeMoLiveActivityMiniPill(
-                                    title: "Lv.\(context.state.clampedHappinessLevel)",
-                                    value: "\(context.state.clampedHappinessPoint)/\(context.state.clampedHappinessMaxPoint)",
-                                    progress: context.state.happinessProgress,
-                                    systemImage: "heart.fill"
-                                )
-                            }
+                            MeMoLiveActivityMiniPill(
+                                title: "満腹度",
+                                value: "\(context.state.estimatedFullnessLevel())/\(context.state.clampedFullnessMaxLevel)",
+                                progress: context.state.estimatedFullnessProgress(),
+                                systemImage: "takeoutbag.and.cup.and.straw.fill"
+                            )
 
                             MeMoLiveActivityGachaProgressView(state: context.state, compact: true)
                         }
@@ -79,10 +55,7 @@ struct MeMoWidgetLiveActivity: Widget {
                 }
             } compactLeading: {
                 if context.state.showsDynamicIslandContent {
-                    Image(context.state.petImageName)
-                        .resizable()
-                        .scaledToFit()
-                        .frame(width: 24, height: 24)
+                    MeMoDynamicIslandPetView(state: context.state, size: CGSize(width: 24, height: 24))
                 }
             } compactTrailing: {
                 if context.state.showsDynamicIslandContent {
@@ -91,10 +64,7 @@ struct MeMoWidgetLiveActivity: Widget {
                 }
             } minimal: {
                 if context.state.showsDynamicIslandContent {
-                    Image(context.state.petImageName)
-                        .resizable()
-                        .scaledToFit()
-                        .frame(width: 22, height: 22)
+                    MeMoDynamicIslandPetView(state: context.state, size: CGSize(width: 22, height: 22))
                 }
             }
             .keylineTint(.yellow)
@@ -102,17 +72,57 @@ struct MeMoWidgetLiveActivity: Widget {
     }
 }
 
+private struct MeMoDynamicIslandLeadingView: View {
+    let state: MeMoCareActivityAttributes.ContentState
+
+    var body: some View {
+        let now = Date()
+
+        VStack(alignment: .leading, spacing: 5) {
+            Text(state.petName)
+                .font(.headline.weight(.bold))
+                .lineLimit(1)
+                .minimumScaleFactor(0.72)
+
+            Text("今日 \(state.clampedTodaySteps.memoCompactFormatted)歩")
+                .font(.caption2.monospacedDigit().weight(.semibold))
+                .foregroundStyle(.secondary)
+
+            Text("満腹 \(state.estimatedFullnessLevel(now: now))/\(state.clampedFullnessMaxLevel)")
+                .font(.caption2.monospacedDigit().weight(.semibold))
+                .foregroundStyle(.secondary)
+        }
+        .padding(.leading, 4)
+    }
+}
+
+private struct MeMoDynamicIslandPetView: View {
+    let state: MeMoCareActivityAttributes.ContentState
+    let size: CGSize
+
+    var body: some View {
+        Image(state.effectivePetImageName())
+            .resizable()
+            .scaledToFit()
+            .frame(width: size.width, height: size.height)
+            .accessibilityLabel(Text(state.petName))
+    }
+}
+
 private struct MeMoCareLockScreenLiveActivityView: View {
     let context: ActivityViewContext<MeMoCareActivityAttributes>
+    let now: Date
+
+    private var state: MeMoCareActivityAttributes.ContentState { context.state }
 
     var body: some View {
         ZStack {
-            MeMoLiveActivityWallpaperBackground(assetName: context.state.wallpaperAssetName)
+            MeMoLiveActivityWallpaperBackground(assetName: state.wallpaperAssetName)
 
             HStack(alignment: .center, spacing: 10) {
-                VStack(alignment: .leading, spacing: 6) {
-                    VStack(alignment: .leading, spacing: 2) {
-                        Text(context.state.petName)
+                VStack(alignment: .leading, spacing: 7) {
+                    VStack(alignment: .leading, spacing: 3) {
+                        Text(state.petName)
                             .font(.title3.weight(.heavy))
                             .foregroundStyle(.white)
                             .lineLimit(1)
@@ -121,38 +131,29 @@ private struct MeMoCareLockScreenLiveActivityView: View {
                         HStack(spacing: 5) {
                             Image(systemName: "figure.walk")
                                 .font(.caption2.weight(.bold))
-                            Text("今日 \(context.state.clampedTodaySteps.memoFormatted)歩")
+                            Text("今日 \(state.clampedTodaySteps.memoFormatted)歩")
                                 .font(.caption2.monospacedDigit().weight(.bold))
                         }
                         .foregroundStyle(.white.opacity(0.88))
                     }
 
-                    VStack(spacing: 5) {
-                        MeMoLiveActivityMetricLine(
-                            title: "満腹度",
-                            value: "\(context.state.clampedFullnessLevel)/\(context.state.clampedFullnessMaxLevel)",
-                            progress: context.state.fullnessProgress,
-                            systemImage: "takeoutbag.and.cup.and.straw.fill"
-                        )
+                    MeMoLiveActivityMetricLine(
+                        title: "満腹度",
+                        value: "\(state.estimatedFullnessLevel(now: now))/\(state.clampedFullnessMaxLevel)",
+                        progress: state.estimatedFullnessProgress(now: now),
+                        systemImage: "takeoutbag.and.cup.and.straw.fill"
+                    )
 
-                        MeMoLiveActivityMetricLine(
-                            title: "Lv.\(context.state.clampedHappinessLevel)",
-                            value: "\(context.state.clampedHappinessPoint)/\(context.state.clampedHappinessMaxPoint)",
-                            progress: context.state.happinessProgress,
-                            systemImage: "heart.fill"
-                        )
-                    }
-
-                    MeMoLiveActivityGachaProgressView(state: context.state, compact: false)
+                    MeMoLiveActivityGachaProgressView(state: state, compact: false)
                 }
                 .frame(maxWidth: .infinity, alignment: .leading)
 
-                Image(context.state.petImageName)
+                Image(state.effectivePetImageName(now: now))
                     .resizable()
                     .scaledToFit()
-                    .frame(width: 116, height: 138)
+                    .frame(width: 130, height: 146)
                     .shadow(color: .black.opacity(0.28), radius: 10, x: 0, y: 6)
-                    .accessibilityLabel(Text(context.state.petName))
+                    .accessibilityLabel(Text(state.petName))
             }
             .padding(.horizontal, 14)
             .padding(.vertical, 10)
@@ -177,8 +178,8 @@ private struct MeMoLiveActivityWallpaperBackground: View {
 
             LinearGradient(
                 colors: [
-                    .black.opacity(0.72),
-                    .black.opacity(0.42),
+                    .black.opacity(0.74),
+                    .black.opacity(0.38),
                     .black.opacity(0.66)
                 ],
                 startPoint: .topLeading,
@@ -186,7 +187,7 @@ private struct MeMoLiveActivityWallpaperBackground: View {
             )
 
             Rectangle()
-                .fill(.ultraThinMaterial.opacity(0.14))
+                .fill(.ultraThinMaterial.opacity(0.12))
         }
     }
 }
@@ -262,7 +263,7 @@ private struct MeMoLiveActivityGachaProgressView: View {
                 Image(systemName: "sparkles")
                     .font(compact ? .caption2 : .caption2.weight(.bold))
 
-                Text("10連ガチャまで")
+                Text("10回ガチャまで")
                     .font(compact ? .caption2.weight(.semibold) : .caption2.weight(.semibold))
                     .lineLimit(1)
                     .minimumScaleFactor(0.8)
@@ -278,7 +279,7 @@ private struct MeMoLiveActivityGachaProgressView: View {
 
                 Spacer(minLength: 4)
 
-                Text("\(state.tenGachaRemainderSteps.memoFormatted) / \(state.clampedTenGachaCost.memoFormatted)歩")
+                Text("あと \(state.tenGachaRemainingSteps.memoFormatted) 歩")
                     .font(compact ? .caption2.monospacedDigit().weight(.bold) : .caption2.monospacedDigit().weight(.heavy))
                     .lineLimit(1)
                     .minimumScaleFactor(0.58)

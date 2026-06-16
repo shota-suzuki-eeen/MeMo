@@ -19,11 +19,15 @@ struct MeMoCareActivityAttributes: ActivityAttributes {
         var dailyStepGoal: Int
         var fullnessLevel: Int
         var fullnessMaxLevel: Int
+        var fullnessLastUpdatedAt: Date?
+        var fullnessDecayUnitSeconds: TimeInterval
         var happinessLevel: Int
         var happinessPoint: Int
         var happinessMaxPoint: Int
         var walletSteps: Int
         var tenGachaCost: Int
+        var toiletFlagAt: Date?
+        var toiletNextSpawnAt: Date?
         var dayKey: String
         var showsLockScreenCard: Bool
         var showsDynamicIslandContent: Bool
@@ -38,6 +42,7 @@ struct MeMoCareActivityAttributes: ActivityAttributes {
         var clampedHappinessMaxPoint: Int { max(1, happinessMaxPoint) }
         var clampedWalletSteps: Int { max(0, walletSteps) }
         var clampedTenGachaCost: Int { max(1, tenGachaCost) }
+        var clampedFullnessDecayUnitSeconds: TimeInterval { max(1, fullnessDecayUnitSeconds) }
 
         var stepProgress: Double {
             min(1, Double(clampedTodaySteps) / Double(clampedDailyStepGoal))
@@ -66,6 +71,43 @@ struct MeMoCareActivityAttributes: ActivityAttributes {
         var tenGachaRemainingSteps: Int {
             let remainder = tenGachaRemainderSteps
             return remainder == 0 ? clampedTenGachaCost : max(0, clampedTenGachaCost - remainder)
+        }
+
+        func estimatedFullnessLevel(now: Date = Date()) -> Int {
+            let current = clampedFullnessLevel
+            guard current > 0 else { return 0 }
+            guard let fullnessLastUpdatedAt else { return current }
+
+            let elapsed = max(0, now.timeIntervalSince(fullnessLastUpdatedAt))
+            let decayCount = Int(floor(elapsed / clampedFullnessDecayUnitSeconds))
+            return min(max(0, current - decayCount), clampedFullnessMaxLevel)
+        }
+
+        func estimatedFullnessProgress(now: Date = Date()) -> Double {
+            Double(estimatedFullnessLevel(now: now)) / Double(clampedFullnessMaxLevel)
+        }
+
+        func isToiletActive(now: Date = Date()) -> Bool {
+            if toiletFlagAt != nil { return true }
+            if let toiletNextSpawnAt, toiletNextSpawnAt <= now { return true }
+            return false
+        }
+
+        func effectiveToiletFlagAt(now: Date = Date()) -> Date? {
+            if let toiletFlagAt { return toiletFlagAt }
+            if let toiletNextSpawnAt, toiletNextSpawnAt <= now { return toiletNextSpawnAt }
+            return nil
+        }
+
+        func effectivePetImageName(now: Date = Date()) -> String {
+            let baseImageName: String
+            if petImageName.hasSuffix("_wc") {
+                baseImageName = String(petImageName.dropLast(3))
+            } else {
+                baseImageName = petImageName
+            }
+
+            return isToiletActive(now: now) ? "\(baseImageName)_wc" : baseImageName
         }
     }
 

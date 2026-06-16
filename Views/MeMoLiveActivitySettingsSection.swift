@@ -74,7 +74,7 @@ struct MeMoLiveActivitySettingsSection: View {
 
     private var descriptionText: String {
         if isEnabled {
-            return "お世話中のペット名、歩数、満腹度、ごきげん、次の10連ガチャまでの進捗を表示します。表示先はロック画面とダイナミックアイランドで個別に切り替えられます。"
+            return "お世話中のペット名、歩数、満腹度、次の10回ガチャまでの残り歩数を表示します。表示先はロック画面とダイナミックアイランドで個別に切り替えられます。"
         }
         return "ONにすると、ロック画面とダイナミックアイランドの表示先を個別に設定できます。"
     }
