@@ -8,6 +8,7 @@
 //
 
 import ActivityKit
+import Foundation
 import SwiftUI
 import WidgetKit
 
@@ -18,7 +19,8 @@ struct MeMoWidgetLiveActivity: Widget {
                 TimelineView(.periodic(from: context.state.updatedAt, by: 60)) { timeline in
                     MeMoCareLockScreenLiveActivityView(context: context, now: timeline.date)
                 }
-                .activityBackgroundTint(.clear)
+                .frame(maxWidth: .infinity, maxHeight: .infinity)
+                .activityBackgroundTint(.black)
                 .activitySystemActionForegroundColor(.white)
             } else {
                 EmptyView()
@@ -117,7 +119,10 @@ private struct MeMoCareLockScreenLiveActivityView: View {
 
     var body: some View {
         ZStack {
+            Color.black
+
             MeMoLiveActivityWallpaperBackground(assetName: state.wallpaperAssetName)
+                .clipped()
 
             HStack(alignment: .center, spacing: 10) {
                 VStack(alignment: .leading, spacing: 7) {
@@ -128,12 +133,19 @@ private struct MeMoCareLockScreenLiveActivityView: View {
                             .lineLimit(1)
                             .minimumScaleFactor(0.62)
 
-                        HStack(spacing: 5) {
+                        HStack(alignment: .firstTextBaseline, spacing: 6) {
                             Image(systemName: "figure.walk")
                                 .font(.caption2.weight(.bold))
+
                             Text("今日 \(state.clampedTodaySteps.memoFormatted)歩")
                                 .font(.caption2.monospacedDigit().weight(.bold))
+
+                            Text("最終更新 \(state.updatedAt.memoHourMinuteFormatted)")
+                                .font(.caption2.monospacedDigit().weight(.semibold))
+                                .foregroundStyle(.white.opacity(0.74))
                         }
+                        .lineLimit(1)
+                        .minimumScaleFactor(0.58)
                         .foregroundStyle(.white.opacity(0.88))
                     }
 
@@ -158,12 +170,12 @@ private struct MeMoCareLockScreenLiveActivityView: View {
             .padding(.horizontal, 14)
             .padding(.vertical, 10)
         }
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
         .clipShape(RoundedRectangle(cornerRadius: 28, style: .continuous))
         .overlay(
             RoundedRectangle(cornerRadius: 28, style: .continuous)
                 .stroke(.white.opacity(0.18), lineWidth: 1)
         )
-        .padding(.horizontal, 2)
     }
 }
 
@@ -294,6 +306,13 @@ private struct MeMoLiveActivityGachaProgressView: View {
         .padding(.horizontal, compact ? 8 : 9)
         .padding(.vertical, compact ? 6 : 7)
         .background(.black.opacity(0.26), in: RoundedRectangle(cornerRadius: compact ? 14 : 16, style: .continuous))
+    }
+}
+
+private extension Date {
+    var memoHourMinuteFormatted: String {
+        let components = Calendar.current.dateComponents([.hour, .minute], from: self)
+        return String(format: "%02d:%02d", components.hour ?? 0, components.minute ?? 0)
     }
 }
 
