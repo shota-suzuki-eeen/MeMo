@@ -30,7 +30,7 @@ struct SettingsView: View {
     private let developerPinCode = "eeen"
     private let hiddenTapRequiredCount = 15
 
-    private let appVersion = "1.0.4"
+    private let appVersion = "1.1.0"
     private let contactURL = URL(
         string: "https://docs.google.com/forms/d/e/1FAIpQLScpk7wVSUGvr8AA2RDpVa3gak2lA_wk0GbLeQTlI62Wc0X58g/viewform?usp=header"
     )!
