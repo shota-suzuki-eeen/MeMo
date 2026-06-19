@@ -27,6 +27,9 @@ final class MeMoLiveActivityManager {
 
     private let stepUpdateThreshold = 1
     private let defaultStaleInterval: TimeInterval = 60 * 30
+    private let launchRefreshSuppressionInterval: TimeInterval = 30
+
+    private var lastLaunchRefreshAt: Date?
 
     var isUserEnabled: Bool {
         get { readBool(forKey: Self.enabledStorageKey, defaultValue: false) }
@@ -75,6 +78,9 @@ final class MeMoLiveActivityManager {
         )
     }
 
+    /// アプリ起動・復帰時の同期。
+    /// 設定が ON の場合は既存 Activity を一度終了してから新規 request し、Live Activity の寿命を更新する。
+    /// UserDefaults 上のユーザー設定は ON のまま保持する。
     func synchronizeOnAppLaunch(from state: AppState) async {
         guard isSupported else { return }
 
@@ -83,8 +89,29 @@ final class MeMoLiveActivityManager {
             return
         }
 
-        await startIfNeeded(from: state)
+        guard hasAnyVisibleDestination else {
+            await endAll()
+            return
+        }
+
+        let now = Date()
+        if shouldRefreshActivityOnLaunch(now: now) {
+            lastLaunchRefreshAt = now
+            await endAll()
+
+            if #available(iOS 16.1, *) {
+                await requestNewActivity(from: state, now: Date())
+            }
+        } else {
+            await startIfNeeded(from: state)
+        }
+
         await updateImmediately(from: state)
+    }
+
+    private func shouldRefreshActivityOnLaunch(now: Date) -> Bool {
+        guard let lastLaunchRefreshAt else { return true }
+        return now.timeIntervalSince(lastLaunchRefreshAt) >= launchRefreshSuppressionInterval
     }
 
     func startIfNeeded(from state: AppState) async {
@@ -102,31 +129,35 @@ final class MeMoLiveActivityManager {
                 return
             }
 
-            let attributes = MeMoCareActivityAttributes(appDisplayName: "ミーモ")
-            let now = Date()
-            let contentState = makeContentState(from: state, now: now)
+            await requestNewActivity(from: state, now: Date())
+        }
+    }
 
-            do {
-                if #available(iOS 16.2, *) {
-                    let content = ActivityContent(
-                        state: contentState,
-                        staleDate: staleDate(for: contentState, now: now)
-                    )
-                    _ = try Activity<MeMoCareActivityAttributes>.request(
-                        attributes: attributes,
-                        content: content,
-                        pushType: nil
-                    )
-                } else {
-                    _ = try Activity<MeMoCareActivityAttributes>.request(
-                        attributes: attributes,
-                        contentState: contentState,
-                        pushType: nil
-                    )
-                }
-            } catch {
-                print("[MeMoLiveActivityManager] start failed: \(error)")
+    @available(iOS 16.1, *)
+    private func requestNewActivity(from state: AppState, now: Date) async {
+        let attributes = MeMoCareActivityAttributes(appDisplayName: "ミーモ")
+        let contentState = makeContentState(from: state, now: now)
+
+        do {
+            if #available(iOS 16.2, *) {
+                let content = ActivityContent(
+                    state: contentState,
+                    staleDate: staleDate(for: contentState, now: now)
+                )
+                _ = try Activity<MeMoCareActivityAttributes>.request(
+                    attributes: attributes,
+                    content: content,
+                    pushType: nil
+                )
+            } else {
+                _ = try Activity<MeMoCareActivityAttributes>.request(
+                    attributes: attributes,
+                    contentState: contentState,
+                    pushType: nil
+                )
             }
+        } catch {
+            print("[MeMoLiveActivityManager] start failed: \(error)")
         }
     }
 
@@ -249,11 +280,14 @@ final class MeMoLiveActivityManager {
     ) -> Date {
         var candidates: [Date] = [now.addingTimeInterval(defaultStaleInterval)]
 
-        if contentState.estimatedFullnessLevel(now: now) > 0 {
-            let elapsedSinceFullnessUpdate = contentState.fullnessLastUpdatedAt.map { max(0, now.timeIntervalSince($0)) } ?? 0
-            let elapsedInCurrentUnit = elapsedSinceFullnessUpdate.truncatingRemainder(dividingBy: contentState.clampedFullnessDecayUnitSeconds)
-            let remaining = max(1, contentState.clampedFullnessDecayUnitSeconds - elapsedInCurrentUnit)
-            candidates.append(now.addingTimeInterval(remaining))
+        if let fullnessNextDecayAt = contentState.fullnessNextDecayAt,
+           fullnessNextDecayAt > now {
+            candidates.append(fullnessNextDecayAt)
+        }
+
+        if let fullnessZeroAt = contentState.fullnessZeroAt,
+           fullnessZeroAt > now {
+            candidates.append(fullnessZeroAt)
         }
 
         if contentState.toiletFlagAt == nil,
@@ -285,6 +319,8 @@ final class MeMoLiveActivityManager {
         if old.clampedFullnessMaxLevel != new.clampedFullnessMaxLevel { return true }
         if old.fullnessLastUpdatedAt != new.fullnessLastUpdatedAt { return true }
         if old.fullnessDecayUnitSeconds != new.fullnessDecayUnitSeconds { return true }
+        if old.fullnessNextDecayAt != new.fullnessNextDecayAt { return true }
+        if old.fullnessZeroAt != new.fullnessZeroAt { return true }
 
         if old.clampedHappinessLevel != new.clampedHappinessLevel { return true }
         if old.clampedHappinessPoint != new.clampedHappinessPoint { return true }

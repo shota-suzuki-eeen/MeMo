@@ -31,42 +31,53 @@ struct MeMoWidgetLiveActivity: Widget {
             DynamicIsland {
                 DynamicIslandExpandedRegion(.leading) {
                     if context.state.showsDynamicIslandContent {
-                        MeMoDynamicIslandLeadingView(state: context.state)
+                        TimelineView(.periodic(from: context.state.updatedAt, by: 60)) { timeline in
+                            MeMoDynamicIslandLeadingView(state: context.state, now: timeline.date)
+                        }
                     }
                 }
 
                 DynamicIslandExpandedRegion(.trailing) {
                     if context.state.showsDynamicIslandContent {
-                        MeMoDynamicIslandPetView(state: context.state, size: CGSize(width: 82, height: 82))
+                        TimelineView(.periodic(from: context.state.updatedAt, by: 60)) { timeline in
+                            MeMoDynamicIslandPetView(
+                                state: context.state,
+                                now: timeline.date,
+                                size: CGSize(width: 112, height: 112)
+                            )
+                        }
                     }
                 }
 
                 DynamicIslandExpandedRegion(.bottom) {
-                    if context.state.showsDynamicIslandContent {
-                        VStack(spacing: 7) {
-                            MeMoLiveActivityMiniPill(
-                                title: "満腹度",
-                                value: "\(context.state.estimatedFullnessLevel())/\(context.state.clampedFullnessMaxLevel)",
-                                progress: context.state.estimatedFullnessProgress(),
-                                systemImage: "takeoutbag.and.cup.and.straw.fill"
-                            )
-
-                            MeMoLiveActivityGachaProgressView(state: context.state, compact: true)
-                        }
-                    }
+                    EmptyView()
                 }
             } compactLeading: {
                 if context.state.showsDynamicIslandContent {
-                    MeMoDynamicIslandPetView(state: context.state, size: CGSize(width: 24, height: 24))
+                    TimelineView(.periodic(from: context.state.updatedAt, by: 60)) { timeline in
+                        MeMoDynamicIslandPetView(
+                            state: context.state,
+                            now: timeline.date,
+                            size: CGSize(width: 24, height: 24)
+                        )
+                    }
                 }
             } compactTrailing: {
                 if context.state.showsDynamicIslandContent {
                     Text("\(context.state.clampedTodaySteps.memoCompactFormatted)歩")
                         .font(.caption2.monospacedDigit().weight(.bold))
+                        .lineLimit(1)
+                        .minimumScaleFactor(0.72)
                 }
             } minimal: {
                 if context.state.showsDynamicIslandContent {
-                    MeMoDynamicIslandPetView(state: context.state, size: CGSize(width: 22, height: 22))
+                    TimelineView(.periodic(from: context.state.updatedAt, by: 60)) { timeline in
+                        MeMoDynamicIslandPetView(
+                            state: context.state,
+                            now: timeline.date,
+                            size: CGSize(width: 22, height: 22)
+                        )
+                    }
                 }
             }
             .keylineTint(.yellow)
@@ -76,40 +87,55 @@ struct MeMoWidgetLiveActivity: Widget {
 
 private struct MeMoDynamicIslandLeadingView: View {
     let state: MeMoCareActivityAttributes.ContentState
+    let now: Date
 
     var body: some View {
-        let now = Date()
+        VStack(alignment: .leading, spacing: 0) {
+            VStack(alignment: .leading, spacing: 3) {
+                Text(state.petName)
+                    .font(.subheadline.weight(.bold))
+                    .foregroundStyle(.white)
+                    .lineLimit(1)
+                    .minimumScaleFactor(0.72)
 
-        VStack(alignment: .leading, spacing: 5) {
-            Text(state.petName)
-                .font(.headline.weight(.bold))
-                .lineLimit(1)
-                .minimumScaleFactor(0.72)
+                Text("今日 \(state.clampedTodaySteps.memoCompactFormatted)歩")
+                    .font(.title3.monospacedDigit().weight(.heavy))
+                    .foregroundStyle(.white)
+                    .lineLimit(1)
+                    .minimumScaleFactor(0.70)
 
-            Text("今日 \(state.clampedTodaySteps.memoCompactFormatted)歩")
-                .font(.caption2.monospacedDigit().weight(.semibold))
-                .foregroundStyle(.secondary)
+                Text("最終更新 \(state.updatedAt.memoHourMinuteFormatted)")
+                    .font(.caption2.monospacedDigit().weight(.semibold))
+                    .foregroundStyle(.white.opacity(0.78))
+                    .lineLimit(1)
+                    .minimumScaleFactor(0.72)
+            }
 
-            Text("満腹 \(state.estimatedFullnessLevel(now: now))/\(state.clampedFullnessMaxLevel)")
-                .font(.caption2.monospacedDigit().weight(.semibold))
-                .foregroundStyle(.secondary)
+            Spacer(minLength: 10)
+
+            MeMoDynamicIslandFullnessPanel(state: state, now: now)
+                .frame(width: 250, alignment: .leading)
         }
-        .padding(.leading, 4)
+        .padding(.leading, 6)
+        .padding(.top, 1)
+        .frame(width: 258, height: 130, alignment: .topLeading)
+        .clipped()
     }
 }
-
 private struct MeMoDynamicIslandPetView: View {
     let state: MeMoCareActivityAttributes.ContentState
+    let now: Date
     let size: CGSize
 
     var body: some View {
-        Image(state.effectivePetImageName())
+        Image(state.effectivePetImageName(now: now))
             .resizable()
             .scaledToFit()
             .frame(width: size.width, height: size.height)
             .accessibilityLabel(Text(state.petName))
     }
 }
+
 
 private struct MeMoCareLockScreenLiveActivityView: View {
     let context: ActivityViewContext<MeMoCareActivityAttributes>
@@ -139,22 +165,13 @@ private struct MeMoCareLockScreenLiveActivityView: View {
 
                             Text("今日 \(state.clampedTodaySteps.memoFormatted)歩")
                                 .font(.caption2.monospacedDigit().weight(.bold))
-
-                            Text("最終更新 \(state.updatedAt.memoHourMinuteFormatted)")
-                                .font(.caption2.monospacedDigit().weight(.semibold))
-                                .foregroundStyle(.white.opacity(0.74))
                         }
                         .lineLimit(1)
                         .minimumScaleFactor(0.58)
                         .foregroundStyle(.white.opacity(0.88))
                     }
 
-                    MeMoLiveActivityMetricLine(
-                        title: "満腹度",
-                        value: "\(state.estimatedFullnessLevel(now: now))/\(state.clampedFullnessMaxLevel)",
-                        progress: state.estimatedFullnessProgress(now: now),
-                        systemImage: "takeoutbag.and.cup.and.straw.fill"
-                    )
+                    MeMoLiveActivityFullnessCountdownView(state: state, now: now)
 
                     MeMoLiveActivityGachaProgressView(state: state, compact: false)
                 }
@@ -204,31 +221,50 @@ private struct MeMoLiveActivityWallpaperBackground: View {
     }
 }
 
-private struct MeMoLiveActivityMetricLine: View {
-    let title: String
-    let value: String
-    let progress: Double
-    let systemImage: String
+private struct MeMoFullnessRemainingTimeText: View {
+    let state: MeMoCareActivityAttributes.ContentState
+    let now: Date
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 2) {
+        if let interval = state.fullnessZeroDateInterval(now: now) {
+            Text(timerInterval: interval.start...interval.end, countsDown: true)
+        } else {
+            Text(state.fullnessZeroRemainingText(now: now))
+        }
+    }
+}
+
+private struct MeMoLiveActivityFullnessCountdownView: View {
+    let state: MeMoCareActivityAttributes.ContentState
+    let now: Date
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 3) {
             HStack(spacing: 5) {
-                Image(systemName: systemImage)
+                Image(systemName: "takeoutbag.and.cup.and.straw.fill")
                     .font(.caption2.weight(.bold))
                     .frame(width: 14)
 
-                Text(title)
+                Text("満腹")
                     .font(.caption2.weight(.semibold))
+
+                Text("\(state.estimatedFullnessLevel(now: now))/\(state.clampedFullnessMaxLevel)")
+                    .font(.caption2.monospacedDigit().weight(.heavy))
+                    .lineLimit(1)
 
                 Spacer(minLength: 6)
 
-                Text(value)
-                    .font(.caption2.monospacedDigit().weight(.heavy))
-                    .lineLimit(1)
+                HStack(spacing: 2) {
+                    Text("0まで")
+                    MeMoFullnessRemainingTimeText(state: state, now: now)
+                }
+                .font(.caption2.monospacedDigit().weight(.heavy))
+                .lineLimit(1)
+                .minimumScaleFactor(0.58)
             }
             .foregroundStyle(.white.opacity(0.94))
 
-            ProgressView(value: min(1, max(0, progress)))
+            ProgressView(value: state.fullnessZeroProgress(now: now))
                 .progressViewStyle(.linear)
                 .tint(.yellow)
                 .scaleEffect(x: 1, y: 0.62, anchor: .center)
@@ -236,26 +272,93 @@ private struct MeMoLiveActivityMetricLine: View {
     }
 }
 
-private struct MeMoLiveActivityMiniPill: View {
-    let title: String
-    let value: String
-    let progress: Double
-    let systemImage: String
+private struct MeMoDynamicIslandFullnessPanel: View {
+    let state: MeMoCareActivityAttributes.ContentState
+    let now: Date
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 4) {
+            HStack(alignment: .firstTextBaseline, spacing: 7) {
+                HStack(alignment: .firstTextBaseline, spacing: 4) {
+                    Image(systemName: "takeoutbag.and.cup.and.straw.fill")
+                        .font(.caption.weight(.bold))
+
+                    Text("満腹度")
+                        .font(.caption.weight(.bold))
+
+                    Text("\(state.estimatedFullnessLevel(now: now))/\(state.clampedFullnessMaxLevel)")
+                        .font(.caption.monospacedDigit().weight(.heavy))
+                        .lineLimit(1)
+                }
+                .foregroundStyle(.white)
+
+                HStack(alignment: .firstTextBaseline, spacing: 3) {
+                    Text("0まで")
+                        .font(.caption2.weight(.bold))
+                        .foregroundStyle(.white.opacity(0.82))
+
+                    MeMoFullnessRemainingTimeText(state: state, now: now)
+                        .font(.caption.monospacedDigit().weight(.heavy))
+                        .foregroundStyle(.white)
+                        .lineLimit(1)
+                        .minimumScaleFactor(0.68)
+                }
+                .foregroundStyle(.white)
+
+                Spacer(minLength: 0)
+            }
+            .lineLimit(1)
+            .minimumScaleFactor(0.68)
+
+            ProgressView(value: state.fullnessZeroProgress(now: now))
+                .progressViewStyle(.linear)
+                .tint(.yellow)
+                .scaleEffect(x: 1, y: 0.9, anchor: .center)
+        }
+        .padding(.leading, 0)
+        .padding(.trailing, 0)
+        .padding(.top, 0)
+        .padding(.bottom, 0)
+        .frame(maxWidth: 250, maxHeight: 38, alignment: .leading)
+        .layoutPriority(20)
+    }
+}
+
+private struct MeMoLiveActivityFullnessMiniPill: View {
+    let state: MeMoCareActivityAttributes.ContentState
+    let now: Date
 
     var body: some View {
         VStack(alignment: .leading, spacing: 3) {
             HStack(spacing: 4) {
-                Image(systemName: systemImage)
+                Image(systemName: "takeoutbag.and.cup.and.straw.fill")
                     .font(.caption2)
-                Text(title)
+
+                Text("満腹")
                     .font(.caption2.weight(.semibold))
+
                 Spacer(minLength: 2)
-                Text(value)
+
+                Text("\(state.estimatedFullnessLevel(now: now))/\(state.clampedFullnessMaxLevel)")
                     .font(.caption2.monospacedDigit().weight(.bold))
             }
             .foregroundStyle(.white.opacity(0.94))
 
-            ProgressView(value: min(1, max(0, progress)))
+            HStack(spacing: 4) {
+                Text("0まで")
+                    .font(.caption2.weight(.semibold))
+                    .foregroundStyle(.white.opacity(0.76))
+
+                Spacer(minLength: 2)
+
+                MeMoFullnessRemainingTimeText(state: state, now: now)
+                    .font(.caption2.monospacedDigit().weight(.bold))
+                    .foregroundStyle(.white.opacity(0.94))
+                    .lineLimit(1)
+                    .minimumScaleFactor(0.58)
+            }
+
+            ProgressView(value: state.fullnessZeroProgress(now: now))
                 .progressViewStyle(.linear)
                 .tint(.yellow)
         }
@@ -302,6 +405,14 @@ private struct MeMoLiveActivityGachaProgressView: View {
                 .progressViewStyle(.linear)
                 .tint(.yellow)
                 .scaleEffect(x: 1, y: compact ? 0.62 : 0.68, anchor: .center)
+
+            if !compact {
+                Text("最終更新 \(state.updatedAt.memoHourMinuteFormatted)")
+                    .font(.caption2.monospacedDigit().weight(.semibold))
+                    .foregroundStyle(.white.opacity(0.74))
+                    .lineLimit(1)
+                    .minimumScaleFactor(0.72)
+            }
         }
         .padding(.horizontal, compact ? 8 : 9)
         .padding(.vertical, compact ? 6 : 7)

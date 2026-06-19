@@ -21,6 +21,8 @@ struct MeMoCareActivityAttributes: ActivityAttributes {
         var fullnessMaxLevel: Int
         var fullnessLastUpdatedAt: Date?
         var fullnessDecayUnitSeconds: TimeInterval
+        var fullnessNextDecayAt: Date?
+        var fullnessZeroAt: Date?
         var happinessLevel: Int
         var happinessPoint: Int
         var happinessMaxPoint: Int
@@ -48,6 +50,9 @@ struct MeMoCareActivityAttributes: ActivityAttributes {
             min(1, Double(clampedTodaySteps) / Double(clampedDailyStepGoal))
         }
 
+        /// 保存値そのものを 5 段階メーターとして見る場合の進捗。
+        /// Live Activity の表示では、原則 `estimatedFullnessProgress(now:)` または
+        /// `fullnessZeroProgress(now:)` を使う。
         var fullnessProgress: Double {
             Double(clampedFullnessLevel) / Double(clampedFullnessMaxLevel)
         }
@@ -73,18 +78,76 @@ struct MeMoCareActivityAttributes: ActivityAttributes {
             return remainder == 0 ? clampedTenGachaCost : max(0, clampedTenGachaCost - remainder)
         }
 
+        /// `fullnessLevel` はアプリ側の保存値をそのまま保持する。
+        /// Live Activity / Widget 側では、保存時刻と decay schedule から現在表示用の満腹度を推定する。
         func estimatedFullnessLevel(now: Date = Date()) -> Int {
-            let current = clampedFullnessLevel
-            guard current > 0 else { return 0 }
-            guard let fullnessLastUpdatedAt else { return current }
+            let baseLevel = clampedFullnessLevel
+            guard baseLevel > 0 else { return 0 }
+
+            if let fullnessZeroAt, fullnessZeroAt <= now {
+                return 0
+            }
+
+            if let fullnessNextDecayAt {
+                guard fullnessNextDecayAt <= now else { return baseLevel }
+
+                let elapsedAfterNextDecay = max(0, now.timeIntervalSince(fullnessNextDecayAt))
+                let additionalDecayCount = Int(floor(elapsedAfterNextDecay / clampedFullnessDecayUnitSeconds))
+                let totalDecayCount = 1 + additionalDecayCount
+                return min(max(0, baseLevel - totalDecayCount), clampedFullnessMaxLevel)
+            }
+
+            guard let fullnessLastUpdatedAt else { return baseLevel }
 
             let elapsed = max(0, now.timeIntervalSince(fullnessLastUpdatedAt))
             let decayCount = Int(floor(elapsed / clampedFullnessDecayUnitSeconds))
-            return min(max(0, current - decayCount), clampedFullnessMaxLevel)
+            return min(max(0, baseLevel - decayCount), clampedFullnessMaxLevel)
         }
 
         func estimatedFullnessProgress(now: Date = Date()) -> Double {
             Double(estimatedFullnessLevel(now: now)) / Double(clampedFullnessMaxLevel)
+        }
+
+        /// 満腹度が 0 になるまでの「時間ベース」進捗。
+        /// 5 段階の残量ではなく、保存時刻から 0 到達時刻までの残り時間を 0...1 で返す。
+        func fullnessZeroProgress(now: Date = Date()) -> Double {
+            guard estimatedFullnessLevel(now: now) > 0 else { return 0 }
+            guard let fullnessZeroAt else { return estimatedFullnessProgress(now: now) }
+
+            let start = fullnessProgressStartDate(now: now)
+            let total = max(1, fullnessZeroAt.timeIntervalSince(start))
+            let remaining = max(0, fullnessZeroAt.timeIntervalSince(now))
+            return min(1, max(0, remaining / total))
+        }
+
+        func fullnessZeroRemainingSeconds(now: Date = Date()) -> TimeInterval {
+            guard estimatedFullnessLevel(now: now) > 0 else { return 0 }
+            guard let fullnessZeroAt else { return 0 }
+            return max(0, fullnessZeroAt.timeIntervalSince(now))
+        }
+
+        func fullnessZeroRemainingText(now: Date = Date()) -> String {
+            let seconds = Int(ceil(fullnessZeroRemainingSeconds(now: now)))
+            let hours = seconds / 3_600
+            let minutes = (seconds % 3_600) / 60
+            let remainingSeconds = seconds % 60
+            return String(format: "%d:%02d:%02d", hours, minutes, remainingSeconds)
+        }
+
+        func fullnessZeroDateInterval(now: Date = Date()) -> DateInterval? {
+            guard estimatedFullnessLevel(now: now) > 0 else { return nil }
+            guard let fullnessZeroAt, fullnessZeroAt > now else { return nil }
+
+            let start = fullnessProgressStartDate(now: now)
+            guard start < fullnessZeroAt else { return nil }
+
+            return DateInterval(start: start, end: fullnessZeroAt)
+        }
+
+        private func fullnessProgressStartDate(now: Date = Date()) -> Date {
+            let rawStart = fullnessLastUpdatedAt ?? updatedAt
+            if rawStart > now { return now }
+            return rawStart
         }
 
         func isToiletActive(now: Date = Date()) -> Bool {

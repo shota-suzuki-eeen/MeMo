@@ -60,7 +60,8 @@ extension AppState {
         ensureDailyResetIfNeeded(now: now)
         resetHappinessPettingIfNeeded(now: now)
 
-        let currentFullness = currentFullness(now: now)
+        let fullnessLevelForLiveActivity = min(max(0, satisfactionLevel), AppState.fullnessMaxLevel)
+        let fullnessSchedule = liveActivityFullnessSchedule(now: now, savedFullnessLevel: fullnessLevelForLiveActivity)
 
         return MeMoCareActivityAttributes.ContentState(
             petName: liveActivityPetName,
@@ -68,10 +69,12 @@ extension AppState {
             wallpaperAssetName: liveActivityWallpaperAssetName,
             todaySteps: widgetTodaySteps,
             dailyStepGoal: AppState.fixedDailyStepGoal,
-            fullnessLevel: currentFullness,
+            fullnessLevel: fullnessLevelForLiveActivity,
             fullnessMaxLevel: AppState.fullnessMaxLevel,
             fullnessLastUpdatedAt: satisfactionLastUpdatedAt,
             fullnessDecayUnitSeconds: AppState.fullnessDecayUnitSeconds,
+            fullnessNextDecayAt: fullnessSchedule.nextDecayAt,
+            fullnessZeroAt: fullnessSchedule.zeroAt,
             happinessLevel: happinessLevel,
             happinessPoint: happinessPoint,
             happinessMaxPoint: AppState.happinessMaxPointsPerLevel,
@@ -84,6 +87,29 @@ extension AppState {
             showsDynamicIslandContent: showsDynamicIslandContent,
             updatedAt: now
         )
+    }
+
+    private func liveActivityFullnessSchedule(
+        now: Date,
+        savedFullnessLevel: Int
+    ) -> (nextDecayAt: Date?, zeroAt: Date?) {
+        guard savedFullnessLevel > 0 else {
+            return (nil, nil)
+        }
+
+        let unitSeconds = max(1, AppState.fullnessDecayUnitSeconds)
+        let baseDate = satisfactionLastUpdatedAt ?? now
+        let zeroAt = baseDate.addingTimeInterval(Double(savedFullnessLevel) * unitSeconds)
+
+        guard zeroAt > now else {
+            return (nil, zeroAt)
+        }
+
+        let elapsed = max(0, now.timeIntervalSince(baseDate))
+        let completedDecayUnits = max(0, Int(floor(elapsed / unitSeconds)))
+        let nextDecayAt = baseDate.addingTimeInterval(Double(completedDecayUnits + 1) * unitSeconds)
+
+        return (min(nextDecayAt, zeroAt), zeroAt)
     }
 }
 
