@@ -7,6 +7,7 @@
 //  iOS 18.6+
 //  お散歩機能の開始ポップアップ・全画面お散歩画面・グローバルリザルト表示を追加。
 //  2026/06 update: 起動時の rewardWalkStart / rewardWalkDouble プリロードを廃止.
+//  2026/06 update: Home画面上部バナーを廃止し、歩数獲得表示は上部メーターへ吸い込まれる演出に変更。
 //
 
 import SwiftUI
@@ -27,18 +28,20 @@ struct RootView: View {
     @ObservedObject private var walkWeatherManager = WalkWeatherManager.shared
     @ObservedObject private var walkStartAd = AdMobManager.shared.rewardWalkStart
 
-    @State private var isHomeBannerHiddenByChildScreen: Bool = false
-    @State private var isHomeNavigationDestinationVisible: Bool = false
     @State private var showWalkStartPopup: Bool = false
     @State private var showWalkView: Bool = false
     @State private var walkStartMessage: String?
     @State private var stepGainPopup: StepGainPopupItem?
+    @State private var isStepGainPopupAbsorbing: Bool = false
     @State private var stepGainPopupDismissTask: Task<Void, Never>?
     @State private var lastObservedWalletSteps: Int?
 
-    private enum HomeBannerLayout {
-        static let height: CGFloat = 50
-        static let maxWidth: CGFloat = 320
+    private enum StepGainPopupLayout {
+        static let initialTopPadding: CGFloat = 210
+        static let absorbOffsetY: CGFloat = -178
+        static let absorbScale: CGFloat = 0.22
+        static let absorbDelayNanoseconds: UInt64 = 1_350_000_000
+        static let absorbDurationNanoseconds: UInt64 = 560_000_000
     }
 
     private var isIPadWalkAdFallbackAvailable: Bool {
@@ -67,30 +70,6 @@ struct RootView: View {
                         MeMoLiveActivityStateObserver(state: sharedState)
                             .frame(width: 0, height: 0)
                             .allowsHitTesting(false)
-
-                        HomeNavigationDepthReader { depth in
-                            let nextValue = depth > 1
-
-                            DispatchQueue.main.async {
-                                guard isHomeNavigationDestinationVisible != nextValue else { return }
-                                isHomeNavigationDestinationVisible = nextValue
-                            }
-                        }
-                        .frame(width: 0, height: 0)
-                        .allowsHitTesting(false)
-
-                        if !isHomeBannerHiddenByChildScreen && !isHomeNavigationDestinationVisible {
-                            AdBannerView(
-                                placement: .home,
-                                height: HomeBannerLayout.height,
-                                maxBannerWidth: HomeBannerLayout.maxWidth,
-                                contentHeight: HomeBannerLayout.height,
-                                topOffset: 0
-                            )
-                            .allowsHitTesting(false)
-                            .zIndex(10_000)
-                            .transition(.opacity)
-                        }
 
                         walkStartPopupLayer
 
@@ -122,7 +101,6 @@ struct RootView: View {
                         viewModel: onboardingViewModel
                     )
                     .onAppear {
-                        isHomeBannerHiddenByChildScreen = false
                         lastObservedWalletSteps = sharedState.walletSteps
                         walkStore.bootstrap()
                         walkStore.refresh()
@@ -139,16 +117,6 @@ struct RootView: View {
                     }
                     .onReceive(NotificationCenter.default.publisher(for: .memoShowWalkStart)) { _ in
                         handleWalkMenuRequest()
-                    }
-                    .onReceive(NotificationCenter.default.publisher(for: .memoHideHomeBannerAd)) { _ in
-                        withAnimation(.easeInOut(duration: 0.18)) {
-                            isHomeBannerHiddenByChildScreen = true
-                        }
-                    }
-                    .onReceive(NotificationCenter.default.publisher(for: .memoShowHomeBannerAd)) { _ in
-                        withAnimation(.easeInOut(duration: 0.18)) {
-                            isHomeBannerHiddenByChildScreen = false
-                        }
                     }
                     .onChange(of: sharedState.walletSteps) { oldValue, newValue in
                         handleWalletStepsChange(oldValue: oldValue, newValue: newValue)
@@ -225,7 +193,10 @@ struct RootView: View {
             StepGainPopupView(amount: stepGainPopup.amount)
                 .id(stepGainPopup.id)
                 .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
-                .padding(.top, 210)
+                .padding(.top, StepGainPopupLayout.initialTopPadding)
+                .offset(y: isStepGainPopupAbsorbing ? StepGainPopupLayout.absorbOffsetY : 0)
+                .scaleEffect(isStepGainPopupAbsorbing ? StepGainPopupLayout.absorbScale : 1.0)
+                .opacity(isStepGainPopupAbsorbing ? 0.0 : 1.0)
                 .allowsHitTesting(false)
                 .zIndex(30_000)
                 .transition(.scale(scale: 0.82).combined(with: .opacity))
@@ -249,18 +220,27 @@ struct RootView: View {
         cancelStepGainPopupDismissTask()
 
         let item = StepGainPopupItem(amount: safeAmount)
+        isStepGainPopupAbsorbing = false
+
         withAnimation(.spring(response: 0.26, dampingFraction: 0.68)) {
             stepGainPopup = item
         }
 
         stepGainPopupDismissTask = Task { @MainActor in
-            try? await Task.sleep(nanoseconds: 2_000_000_000)
+            try? await Task.sleep(nanoseconds: StepGainPopupLayout.absorbDelayNanoseconds)
             guard !Task.isCancelled else { return }
             guard stepGainPopup?.id == item.id else { return }
 
-            withAnimation(.easeOut(duration: 0.35)) {
-                stepGainPopup = nil
+            withAnimation(.easeInOut(duration: 0.56)) {
+                isStepGainPopupAbsorbing = true
             }
+
+            try? await Task.sleep(nanoseconds: StepGainPopupLayout.absorbDurationNanoseconds)
+            guard !Task.isCancelled else { return }
+            guard stepGainPopup?.id == item.id else { return }
+
+            stepGainPopup = nil
+            isStepGainPopupAbsorbing = false
             stepGainPopupDismissTask = nil
         }
     }
@@ -414,151 +394,13 @@ private struct DeniedView: View {
 
 extension Notification.Name {
     /// HomeView上部のバナー広告を、Home配下の遷移先画面で一時的に非表示にするための通知。
+    /// Home上部バナーは廃止済みのため、既存の遷移先コードとの互換目的で通知名のみ残す。
     static let memoHideHomeBannerAd = Notification.Name("memo.hideHomeBannerAd")
 
     /// HomeViewへ戻ったタイミングで、HomeView上部のバナー広告を再表示するための通知。
+    /// Home上部バナーは廃止済みのため、既存の遷移先コードとの互換目的で通知名のみ残す。
     static let memoShowHomeBannerAd = Notification.Name("memo.showHomeBannerAd")
 
-    /// HomeView の menu_button 内 walk_button から、お散歩開始ポップアップを表示するための通知。
+    /// Homeメニューの「お散歩」ボタンからRootView側の開始ポップアップを開く。
     static let memoShowWalkStart = Notification.Name("memo.showWalkStart")
-}
-
-// MARK: - Navigation Depth Reader
-
-private struct HomeNavigationDepthReader: UIViewControllerRepresentable {
-    var onDepthChange: (Int) -> Void
-
-    func makeUIViewController(context: Context) -> ObserverViewController {
-        let controller = ObserverViewController()
-        controller.onDepthChange = onDepthChange
-        return controller
-    }
-
-    func updateUIViewController(_ uiViewController: ObserverViewController, context: Context) {
-        uiViewController.onDepthChange = onDepthChange
-        uiViewController.startMonitoringIfNeeded()
-    }
-
-    final class ObserverViewController: UIViewController {
-        var onDepthChange: ((Int) -> Void)?
-
-        private var timer: Timer?
-        private var lastDepth: Int?
-
-        override func viewDidAppear(_ animated: Bool) {
-            super.viewDidAppear(animated)
-            startMonitoringIfNeeded()
-            publishDepthIfNeeded()
-        }
-
-        override func viewDidDisappear(_ animated: Bool) {
-            super.viewDidDisappear(animated)
-            stopMonitoring()
-        }
-
-        deinit {
-            stopMonitoring()
-        }
-
-        func startMonitoringIfNeeded() {
-            guard timer == nil else { return }
-
-            let newTimer = Timer(timeInterval: 0.25, repeats: true) { [weak self] _ in
-                self?.publishDepthIfNeeded()
-            }
-            timer = newTimer
-            RunLoop.main.add(newTimer, forMode: .common)
-            publishDepthIfNeeded()
-        }
-
-        private func stopMonitoring() {
-            timer?.invalidate()
-            timer = nil
-        }
-
-        private func publishDepthIfNeeded() {
-            let depth = currentMaximumNavigationDepth()
-            guard depth != lastDepth else { return }
-            lastDepth = depth
-            onDepthChange?(depth)
-        }
-
-        private func currentMaximumNavigationDepth() -> Int {
-            var depths: [Int] = []
-
-            if let navigationController {
-                depths.append(navigationController.viewControllers.count)
-            }
-
-            if let nearestNavigationController = nearestNavigationController() {
-                depths.append(nearestNavigationController.viewControllers.count)
-            }
-
-            if let root = activeRootViewController() {
-                let globalDepths = collectNavigationControllers(from: root).map { $0.viewControllers.count }
-                depths.append(contentsOf: globalDepths)
-            }
-
-            return max(depths.max() ?? 1, 1)
-        }
-
-        private func nearestNavigationController() -> UINavigationController? {
-            if let navigationController {
-                return navigationController
-            }
-
-            var current: UIViewController? = parent
-            while let controller = current {
-                if let navigationController = controller as? UINavigationController {
-                    return navigationController
-                }
-                if let navigationController = controller.navigationController {
-                    return navigationController
-                }
-                current = controller.parent
-            }
-
-            return nil
-        }
-
-        private func activeRootViewController() -> UIViewController? {
-            let activeScenes = UIApplication.shared.connectedScenes
-                .compactMap { $0 as? UIWindowScene }
-                .filter { $0.activationState == .foregroundActive }
-
-            let keyWindow = activeScenes
-                .flatMap { $0.windows }
-                .first { $0.isKeyWindow }
-
-            return keyWindow?.rootViewController
-        }
-
-        private func collectNavigationControllers(from controller: UIViewController) -> [UINavigationController] {
-            var result: [UINavigationController] = []
-
-            if let navigationController = controller as? UINavigationController {
-                result.append(navigationController)
-            }
-
-            if let navigationController = controller.navigationController {
-                result.append(navigationController)
-            }
-
-            if let presentedViewController = controller.presentedViewController {
-                result.append(contentsOf: collectNavigationControllers(from: presentedViewController))
-            }
-
-            for child in controller.children {
-                result.append(contentsOf: collectNavigationControllers(from: child))
-            }
-
-            var seen = Set<ObjectIdentifier>()
-            return result.filter { navigationController in
-                let identifier = ObjectIdentifier(navigationController)
-                guard !seen.contains(identifier) else { return false }
-                seen.insert(identifier)
-                return true
-            }
-        }
-    }
 }

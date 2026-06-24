@@ -10,6 +10,7 @@ import SwiftUI
 import SwiftData
 import UIKit
 import AVFoundation
+import MetalKit
 #if canImport(WidgetKit)
 import WidgetKit
 #endif
@@ -105,6 +106,7 @@ struct HomeView: View {
     @State private var floatingHearts: [FloatingHeart] = []
 
     private let characterRubDistancePerTouch: CGFloat = 28
+    private let stepGainPopupAbsorbAnimationNanoseconds: UInt64 = 1_900_000_000
 
     private enum CharacterPettingTriggerKind {
         case tap
@@ -340,6 +342,16 @@ struct HomeView: View {
     fileprivate enum Layout {
         static let bannerHeight: CGFloat = 76
         static let bannerWidthIPhone: CGFloat = 320
+        static let stepMeterWidthIPhone: CGFloat = 332
+        static let stepMeterHeight: CGFloat = 65
+        static let stepMeterTrackHeight: CGFloat = 35
+        static let stepMeterTopPadding: CGFloat = 74
+        static let stepMeterHorizontalPadding: CGFloat = 18
+        static let stepMeterMiniCharacterSize: CGFloat = 34
+        static let stepMeterMiniCharacterBottomOverlap: CGFloat = 4
+        static let stepMeterMiniCharacterXOffset: CGFloat = -8
+        static let stepMeterCurrentStepFontSize: CGFloat = 28
+        static let stepMeterGoalStepFontSize: CGFloat = 11
 
         static let leftTopPaddingTop: CGFloat = 44
         static let leftTopPaddingLeading: CGFloat = 18
@@ -351,7 +363,7 @@ struct HomeView: View {
         static let topStatusButtonSize: CGFloat = 56
         static let topStatusButtonIconSize: CGFloat = 42
 
-        static let happinessGaugeTop: CGFloat = 75
+        static let happinessGaugeTop: CGFloat = 95
         static let happinessGaugeLeading: CGFloat = 28
         static let fullnessGaugeLeading: CGFloat = 178
         static let topStatusButtonsTrailing: CGFloat = 28
@@ -368,7 +380,7 @@ struct HomeView: View {
         static let redMinWidth: CGFloat = 18
 
 
-        static let fullnessGaugeTop: CGFloat = 75
+        static let fullnessGaugeTop: CGFloat = 95
         static let fullnessGaugeTrailing: CGFloat = 28
         static let fullnessGaugeOuterSize: CGFloat = 135
         static let fullnessGaugeInnerSize: CGFloat = 115
@@ -838,7 +850,7 @@ struct HomeView: View {
             toiletTicketButtonLayer
             toiletPoopsLayer
             toiletBubbleLayer
-            topBannerOverlay
+            topStepMeterOverlay
         }
     }
 
@@ -915,8 +927,7 @@ struct HomeView: View {
     private var topStatusButtonsLayer: some View {
         TimelineView(.periodic(from: Date(), by: 1)) { timeline in
             TopStatusButtons(
-                onCoin: { openTopInfoPopup(.wallet) },
-                onShoes: { openTopInfoPopup(.todaySteps) },
+                onCamera: { openCameraFromTopButton() },
                 onPresentBox: { openTopInfoPopup(.happinessRewards) },
                 onSleep: { openSleepModePopup() },
                 isSleepModeActive: state.isHappinessSleepModeActive(now: timeline.date),
@@ -1125,14 +1136,6 @@ struct HomeView: View {
             CenterMenuPopup(
                 isToiletLocked: isToiletLocked,
                 onBlocked: { showToiletLockedMessage() },
-                onCamera: {
-                    if isToiletLocked {
-                        showToiletLockedMessage()
-                        return
-                    }
-                    showRightMenuPopup = false
-                    showCaptureModeDialog = true
-                },
                 onWalk: {
                     if isToiletLocked {
                         showToiletLockedMessage()
@@ -1408,13 +1411,20 @@ struct HomeView: View {
         }
     }
 
-    private var topBannerOverlay: some View {
-        Color.clear
-            .frame(width: Layout.bannerWidthIPhone, height: Layout.bannerHeight)
-            .frame(maxWidth: .infinity)
-            .frame(height: Layout.bannerHeight)
-            .frame(maxHeight: .infinity, alignment: .top)
-            .zIndex(Layout.zBanner)
+    private var topStepMeterOverlay: some View {
+        HomeStepMeter(
+            steps: displayedTodaySteps,
+            goalSteps: fixedDailyGoalSteps,
+            isAnimating: isAnimatingGain,
+            miniCharacterAssetName: "mini_person"
+        )
+        .frame(width: Layout.stepMeterWidthIPhone, height: Layout.stepMeterHeight)
+        .frame(maxWidth: .infinity)
+        .padding(.horizontal, Layout.stepMeterHorizontalPadding)
+        .padding(.top, Layout.stepMeterTopPadding)
+        .frame(maxHeight: .infinity, alignment: .top)
+        .allowsHitTesting(false)
+        .zIndex(Layout.zBanner)
     }
 
     private func makeHomePersistenceSnapshot() -> HomePersistenceSnapshot {
@@ -1773,6 +1783,19 @@ struct HomeView: View {
         if totalDistance < 10 {
             registerCharacterPettingTouch(at: value.location, in: gestureAreaSize, triggerKind: .tap)
         }
+    }
+
+
+    private func openCameraFromTopButton() {
+        bgmManager.playSE(.push)
+
+        if isToiletLocked {
+            showToiletLockedMessage()
+            return
+        }
+
+        showRightMenuPopup = false
+        showCaptureModeDialog = true
     }
 
     private func openSleepModePopup() {
@@ -3467,6 +3490,17 @@ struct HomeView: View {
             save()
         }
 
+        // RootView 側の「+歩数」表示が上部メーターへ吸い込まれる演出を待ってから、
+        // Home のメーター本体と歩数テキストをカウントアップさせる。
+        if deltaWallet > 0 || targetTodaySteps > fromDisplayedTodaySteps {
+            try? await Task.sleep(nanoseconds: stepGainPopupAbsorbAnimationNanoseconds)
+            guard isHomeVisible else {
+                isAnimatingGain = false
+                Haptics.stopRattle()
+                return
+            }
+        }
+
         let totalMagnitude = max(targetWallet - fromDisplayedWallet, targetTodaySteps - fromDisplayedTodaySteps)
         let duration = min(1.6, max(0.45, Double(totalMagnitude) * 0.008))
 
@@ -3509,6 +3543,346 @@ struct HomeView: View {
         isAnimatingGain = false
         syncCharacterBaseFromState(force: true)
     }
+}
+
+
+// MARK: - Home Step Meter
+
+private struct HomeStepMeter: View {
+    let steps: Int
+    let goalSteps: Int
+    let isAnimating: Bool
+    let miniCharacterAssetName: String
+
+    private var safeGoalSteps: Int { max(1, goalSteps) }
+    private var safeSteps: Int { max(0, steps) }
+
+    private var blueProgress: Double {
+        min(1, Double(safeSteps) / Double(safeGoalSteps))
+    }
+
+    private var goldProgress: Double {
+        guard safeSteps > safeGoalSteps else { return 0 }
+        return min(1, Double(safeSteps - safeGoalSteps) / Double(safeGoalSteps))
+    }
+
+    private var activeProgress: Double {
+        if goldProgress > 0 { return goldProgress }
+        return blueProgress
+    }
+
+    private var formattedCurrentStepText: String {
+        Self.numberFormatter.string(from: NSNumber(value: safeSteps)) ?? "0"
+    }
+
+    private var formattedGoalStepText: String {
+        Self.numberFormatter.string(from: NSNumber(value: safeGoalSteps)) ?? "0"
+    }
+
+    private static let numberFormatter: NumberFormatter = {
+        let formatter = NumberFormatter()
+        formatter.numberStyle = .decimal
+        return formatter
+    }()
+
+    var body: some View {
+        GeometryReader { geo in
+            let width = max(1, geo.size.width)
+            let height = max(1, geo.size.height)
+            let trackHeight = min(HomeView.Layout.stepMeterTrackHeight, height)
+            let iconSize = min(HomeView.Layout.stepMeterMiniCharacterSize, height)
+            let iconHalf = iconSize / 2
+            let metalInset: CGFloat = 2
+            let trackCenterY = max(trackHeight / 2, height - (trackHeight / 2))
+            let trackTopY = trackCenterY - (trackHeight / 2)
+            let iconOverlap = min(HomeView.Layout.stepMeterMiniCharacterBottomOverlap, iconSize * 0.5)
+            let iconCenterY = max(iconHalf, trackTopY - iconHalf + iconOverlap)
+            let liquidUsableWidth = max(1, width - (metalInset * 2))
+            let liquidFrontX = metalInset + (liquidUsableWidth * CGFloat(activeProgress))
+            let iconX = liquidFrontX + HomeView.Layout.stepMeterMiniCharacterXOffset
+            let clampedIconX = min(max(iconHalf, iconX), width - iconHalf)
+
+            ZStack(alignment: .topLeading) {
+                HomeStepMeterMetalSurface(
+                    blueProgress: blueProgress,
+                    goldProgress: goldProgress,
+                    isAnimating: isAnimating
+                )
+                .frame(width: width, height: trackHeight)
+                .clipShape(Capsule(style: .continuous))
+                .shadow(color: .black.opacity(0.12), radius: 8, x: 0, y: 4)
+                .position(x: width / 2, y: trackCenterY)
+
+                HStack(alignment: .firstTextBaseline, spacing: 4) {
+                    Text(formattedCurrentStepText)
+                        .font(.system(size: HomeView.Layout.stepMeterCurrentStepFontSize, weight: .black, design: .rounded))
+                        .foregroundStyle(.white)
+
+                    Text("/ \(formattedGoalStepText)歩")
+                        .font(.system(size: HomeView.Layout.stepMeterGoalStepFontSize, weight: .black, design: .rounded))
+                        .foregroundStyle(.white.opacity(0.92))
+                        .baselineOffset(2)
+                }
+                .monospacedDigit()
+                .shadow(color: .black.opacity(0.50), radius: 3, x: 0, y: 1)
+                .lineLimit(1)
+                .minimumScaleFactor(0.72)
+                .padding(.horizontal, 8)
+                .position(x: width / 2, y: trackCenterY)
+                .allowsHitTesting(false)
+
+                Image(miniCharacterAssetName)
+                    .resizable()
+                    .scaledToFit()
+                    .frame(width: iconSize, height: iconSize)
+                    .position(x: clampedIconX, y: iconCenterY)
+                    .animation(.easeOut(duration: isAnimating ? 0.16 : 0.28), value: activeProgress)
+                    .allowsHitTesting(false)
+            }
+        }
+        .accessibilityElement(children: .ignore)
+        .accessibilityLabel("今日の歩数メーター \(safeSteps)歩")
+    }
+}
+
+private struct HomeStepMeterMetalSurface: UIViewRepresentable {
+    let blueProgress: Double
+    let goldProgress: Double
+    let isAnimating: Bool
+
+    func makeCoordinator() -> Coordinator {
+        Coordinator(
+            blueProgress: Float(blueProgress),
+            goldProgress: Float(goldProgress),
+            isAnimating: isAnimating
+        )
+    }
+
+    func makeUIView(context: Context) -> MTKView {
+        let view = MTKView(frame: .zero, device: MTLCreateSystemDefaultDevice())
+        view.backgroundColor = .clear
+        view.isOpaque = false
+        view.clearColor = MTLClearColor(red: 0, green: 0, blue: 0, alpha: 0)
+        view.framebufferOnly = false
+        view.enableSetNeedsDisplay = false
+        view.isPaused = false
+        view.preferredFramesPerSecond = isAnimating ? 60 : 30
+        context.coordinator.configure(view: view)
+        return view
+    }
+
+    func updateUIView(_ view: MTKView, context: Context) {
+        context.coordinator.blueProgress = Float(max(0, min(1, blueProgress)))
+        context.coordinator.goldProgress = Float(max(0, min(1, goldProgress)))
+        context.coordinator.isAnimating = isAnimating
+        view.preferredFramesPerSecond = isAnimating ? 60 : 30
+    }
+
+    final class Coordinator: NSObject, MTKViewDelegate {
+        var blueProgress: Float
+        var goldProgress: Float
+        var isAnimating: Bool
+
+        private var device: MTLDevice?
+        private var commandQueue: MTLCommandQueue?
+        private var pipelineState: MTLRenderPipelineState?
+        private var startTime = CACurrentMediaTime()
+
+        init(blueProgress: Float, goldProgress: Float, isAnimating: Bool) {
+            self.blueProgress = max(0, min(1, blueProgress))
+            self.goldProgress = max(0, min(1, goldProgress))
+            self.isAnimating = isAnimating
+            super.init()
+        }
+
+        func configure(view: MTKView) {
+            guard let device = view.device else { return }
+            self.device = device
+            self.commandQueue = device.makeCommandQueue()
+            self.pipelineState = makePipelineState(device: device, colorPixelFormat: view.colorPixelFormat)
+            view.delegate = self
+        }
+
+        func mtkView(_ view: MTKView, drawableSizeWillChange size: CGSize) {}
+
+        func draw(in view: MTKView) {
+            guard
+                let commandQueue,
+                let pipelineState,
+                let descriptor = view.currentRenderPassDescriptor,
+                let drawable = view.currentDrawable,
+                let commandBuffer = commandQueue.makeCommandBuffer(),
+                let encoder = commandBuffer.makeRenderCommandEncoder(descriptor: descriptor)
+            else { return }
+
+            var uniforms = HomeStepMeterUniforms(
+                viewportSize: SIMD2<Float>(
+                    max(1, Float(view.drawableSize.width)),
+                    max(1, Float(view.drawableSize.height))
+                ),
+                blueProgress: blueProgress,
+                goldProgress: goldProgress,
+                time: Float(CACurrentMediaTime() - startTime),
+                animationFlag: isAnimating ? 1 : 0
+            )
+
+            encoder.setRenderPipelineState(pipelineState)
+            encoder.setFragmentBytes(&uniforms, length: MemoryLayout<HomeStepMeterUniforms>.stride, index: 0)
+            encoder.drawPrimitives(type: .triangle, vertexStart: 0, vertexCount: 3)
+            encoder.endEncoding()
+            commandBuffer.present(drawable)
+            commandBuffer.commit()
+        }
+
+        private func makePipelineState(device: MTLDevice, colorPixelFormat: MTLPixelFormat) -> MTLRenderPipelineState? {
+            do {
+                let library = try device.makeLibrary(source: Self.shaderSource, options: nil)
+                let descriptor = MTLRenderPipelineDescriptor()
+                descriptor.vertexFunction = library.makeFunction(name: "homeStepMeterVertex")
+                descriptor.fragmentFunction = library.makeFunction(name: "homeStepMeterFragment")
+                descriptor.colorAttachments[0].pixelFormat = colorPixelFormat
+                descriptor.colorAttachments[0].isBlendingEnabled = true
+                descriptor.colorAttachments[0].sourceRGBBlendFactor = .sourceAlpha
+                descriptor.colorAttachments[0].destinationRGBBlendFactor = .oneMinusSourceAlpha
+                descriptor.colorAttachments[0].sourceAlphaBlendFactor = .sourceAlpha
+                descriptor.colorAttachments[0].destinationAlphaBlendFactor = .oneMinusSourceAlpha
+                return try device.makeRenderPipelineState(descriptor: descriptor)
+            } catch {
+                print("HomeStepMeter Metal pipeline failed: \(error.localizedDescription)")
+                return nil
+            }
+        }
+
+        private static let shaderSource = """
+        #include <metal_stdlib>
+        using namespace metal;
+
+        struct VertexOut {
+            float4 position [[position]];
+            float2 uv;
+        };
+
+        struct Uniforms {
+            float2 viewportSize;
+            float blueProgress;
+            float goldProgress;
+            float time;
+            float animationFlag;
+        };
+
+        vertex VertexOut homeStepMeterVertex(uint vertexID [[vertex_id]]) {
+            float2 positions[3] = {
+                float2(-1.0, -1.0),
+                float2( 3.0, -1.0),
+                float2(-1.0,  3.0)
+            };
+
+            VertexOut out;
+            float2 position = positions[vertexID];
+            out.position = float4(position, 0.0, 1.0);
+            out.uv = position * 0.5 + 0.5;
+            return out;
+        }
+
+        float roundedRectSDF(float2 point, float2 center, float2 halfSize, float radius) {
+            float2 q = abs(point - center) - (halfSize - float2(radius, radius));
+            return length(max(q, 0.0)) + min(max(q.x, q.y), 0.0) - radius;
+        }
+
+        float liquidFillMask(float localX, float localY, float progress, float usableWidth, float time, float phase) {
+            float safeProgress = clamp(progress, 0.0, 1.0);
+            float fillX = usableWidth * safeProgress;
+            float wave = (
+                sin(localY * 0.22 + time * 2.8 + phase)
+                + 0.55 * sin(localY * 0.51 - time * 2.0 + phase * 1.7)
+            ) * 2.6;
+
+            float mask = 1.0 - smoothstep(fillX + wave - 2.2, fillX + wave + 2.2, localX);
+            mask *= step(0.001, safeProgress);
+            mask = max(mask, step(0.999, safeProgress));
+            return clamp(mask, 0.0, 1.0);
+        }
+
+        float liquidSheen(float localX, float localY, float time, float phase) {
+            float movingWave = sin(localX * 0.055 - time * 3.2 + phase) * 0.5 + 0.5;
+            float surfaceWave = sin(localY * 0.20 + time * 2.4 + phase * 0.7) * 0.5 + 0.5;
+            return (movingWave * 0.060) + (surfaceWave * 0.045);
+        }
+
+        fragment float4 homeStepMeterFragment(VertexOut in [[stage_in]], constant Uniforms& uniforms [[buffer(0)]]) {
+            float2 size = uniforms.viewportSize;
+            float2 point = float2(in.uv.x * size.x, (1.0 - in.uv.y) * size.y);
+            float inset = 2.0;
+            float2 center = size * 0.5;
+            float2 halfSize = max(float2(1.0, 1.0), size * 0.5 - float2(inset, inset));
+            float radius = halfSize.y;
+            float distance = roundedRectSDF(point, center, halfSize, radius);
+            float edge = 1.0 - smoothstep(-1.0, 1.0, distance);
+
+            if (edge <= 0.001) {
+                return float4(0.0, 0.0, 0.0, 0.0);
+            }
+
+            float usableWidth = max(1.0, size.x - inset * 2.0);
+            float usableHeight = max(1.0, size.y - inset * 2.0);
+            float localX = clamp(point.x - inset, 0.0, usableWidth);
+            float localY = clamp(point.y - inset, 0.0, usableHeight);
+
+            float blueProgress = clamp(uniforms.blueProgress, 0.0, 1.0);
+            float goldProgress = clamp(uniforms.goldProgress, 0.0, 1.0);
+
+            float blueMask = liquidFillMask(localX, localY, blueProgress, usableWidth, uniforms.time, 0.0);
+            float goldMask = liquidFillMask(localX, localY, goldProgress, usableWidth, uniforms.time, 2.3) * step(0.001, goldProgress);
+
+            float topLight = 1.0 - smoothstep(0.0, usableHeight * 0.92, localY);
+            float animationPulse = uniforms.animationFlag * 0.045 * sin(uniforms.time * 8.0 + localX * 0.045);
+
+            float3 blueDeep = float3(0.01, 0.25, 0.74);
+            float3 blueMain = float3(0.04, 0.53, 1.00);
+            float3 blueLiquid = mix(blueDeep, blueMain, topLight);
+            blueLiquid += liquidSheen(localX, localY, uniforms.time, 0.0);
+            blueLiquid += smoothstep(0.92, 1.0, sin(localX * 0.11 + uniforms.time * 1.6) * sin(localY * 0.19 - uniforms.time * 1.1)) * 0.13;
+            blueLiquid += animationPulse;
+
+            float3 goldDeep = float3(0.78, 0.42, 0.02);
+            float3 goldMain = float3(1.00, 0.78, 0.08);
+            float3 goldLiquid = mix(goldDeep, goldMain, topLight);
+            goldLiquid += liquidSheen(localX, localY, uniforms.time, 2.1);
+            goldLiquid += smoothstep(0.90, 1.0, sin(localX * 0.10 - uniforms.time * 1.35) * sin(localY * 0.17 + uniforms.time * 1.0)) * 0.16;
+            goldLiquid += animationPulse * 0.8;
+
+            float blueFrontX = usableWidth * blueProgress;
+            float goldFrontX = usableWidth * goldProgress;
+            float blueFront = (1.0 - smoothstep(0.0, 5.0, abs(localX - blueFrontX))) * step(0.001, blueProgress) * step(blueProgress, 0.999);
+            float goldFront = (1.0 - smoothstep(0.0, 5.0, abs(localX - goldFrontX))) * step(0.001, goldProgress) * step(goldProgress, 0.999);
+
+            blueLiquid += blueFront * 0.16;
+            goldLiquid += goldFront * 0.18;
+
+            float liquidMask = clamp(max(blueMask, goldMask), 0.0, 1.0);
+            if (liquidMask <= 0.001) {
+                return float4(0.0, 0.0, 0.0, 0.0);
+            }
+
+            float4 color = float4(0.0, 0.0, 0.0, 0.0);
+            color = mix(color, float4(clamp(blueLiquid, float3(0.0), float3(1.0)), 0.98), blueMask);
+            color = mix(color, float4(clamp(goldLiquid, float3(0.0), float3(1.0)), 0.99), goldMask);
+
+            float bevel = smoothstep(-3.0, 1.5, distance);
+            color.rgb -= bevel * 0.10 * liquidMask;
+            color.a *= edge * liquidMask;
+            return color;
+        }
+        """
+    }
+}
+
+private struct HomeStepMeterUniforms {
+    var viewportSize: SIMD2<Float>
+    var blueProgress: Float
+    var goldProgress: Float
+    var time: Float
+    var animationFlag: Float
 }
 
 // MARK: - Widget Bridge
@@ -3852,8 +4226,7 @@ private struct FloatingThoughtButton: View {
 }
 
 private struct TopStatusButtons: View {
-    let onCoin: () -> Void
-    let onShoes: () -> Void
+    let onCamera: () -> Void
     let onPresentBox: () -> Void
     let onSleep: () -> Void
     let isSleepModeActive: Bool
@@ -3863,9 +4236,10 @@ private struct TopStatusButtons: View {
 
     var body: some View {
         VStack(spacing: spacing) {
-            StatusIconButton(imageName: "coin", buttonSize: buttonSize, iconSize: iconSize, action: onCoin)
-            StatusIconButton(imageName: "shoes", buttonSize: buttonSize, iconSize: iconSize, action: onShoes)
+            StatusIconButton(imageName: "camera_button", buttonSize: buttonSize, iconSize: iconSize, action: onCamera)
+                .accessibilityLabel("カメラ")
             StatusIconButton(imageName: "presentBox", buttonSize: buttonSize, iconSize: iconSize, action: onPresentBox)
+                .accessibilityLabel("幸せ報酬")
             SleepStatusIconButton(
                 imageName: isSleepModeActive ? "sleep_button_on" : "sleep_button_off",
                 buttonSize: buttonSize,
@@ -4437,33 +4811,13 @@ private struct HomeTopInfoValueBlock: View {
     }
 }
 private struct CenterMenuPopup: View {
-    @EnvironmentObject private var bgmManager: BGMManager
-
     let isToiletLocked: Bool
     let onBlocked: () -> Void
-    let onCamera: () -> Void
     let onWalk: () -> Void
     let onNavigate: () -> Void
     let onDismiss: () -> Void
     let buttonSize: CGFloat
     let spacing: CGFloat
-
-    @State private var currentPage: Int = 0
-
-    private let pageCount: Int = 2
-    private let swipeThreshold: CGFloat = 42
-
-    private var clampedPage: Int {
-        min(pageCount - 1, max(0, currentPage))
-    }
-
-    private var canMovePrevious: Bool {
-        clampedPage > 0
-    }
-
-    private var canMoveNext: Bool {
-        clampedPage < pageCount - 1
-    }
 
     var body: some View {
         ZStack(alignment: .topTrailing) {
@@ -4471,41 +4825,14 @@ private struct CenterMenuPopup: View {
                 .resizable()
                 .scaledToFit()
 
-            VStack(spacing: 10) {
-                Group {
-                    if clampedPage == 0 {
-                        RightSideButtons(
-                            onCamera: onCamera,
-                            onWalk: onWalk,
-                            onNavigate: onNavigate,
-                            isToiletLocked: isToiletLocked,
-                            onBlocked: onBlocked,
-                            buttonSize: buttonSize,
-                            spacing: spacing
-                        )
-                    } else {
-                        MenuSettingsPage(
-                            isToiletLocked: isToiletLocked,
-                            onBlocked: onBlocked,
-                            onNavigate: onNavigate,
-                            buttonSize: buttonSize,
-                            spacing: spacing
-                        )
-                    }
-                }
-                .frame(width: HomeView.Layout.menuPopupGridWidth, alignment: .leading)
-                .transition(.opacity.combined(with: .move(edge: clampedPage == 0 ? .leading : .trailing)))
-                .animation(.easeInOut(duration: 0.18), value: clampedPage)
-
-                MenuPageControl(
-                    currentPage: clampedPage,
-                    pageCount: pageCount,
-                    onSelectPage: { page in
-                        selectPage(page)
-                    }
-                )
-                .padding(.top, 2)
-            }
+            RightSideButtons(
+                onWalk: onWalk,
+                onNavigate: onNavigate,
+                isToiletLocked: isToiletLocked,
+                onBlocked: onBlocked,
+                buttonSize: buttonSize,
+                spacing: spacing
+            )
             .frame(width: HomeView.Layout.menuPopupGridWidth, alignment: .leading)
             .padding(.top, HomeView.Layout.menuPopupContentTopPadding)
             .padding(.bottom, HomeView.Layout.menuPopupContentBottomPadding)
@@ -4513,7 +4840,6 @@ private struct CenterMenuPopup: View {
                 x: HomeView.Layout.menuPopupGridOffsetX,
                 y: HomeView.Layout.menuPopupGridOffsetY
             )
-
 
             Button(action: onDismiss) {
                 Image(HomeView.Layout.menuPopupCloseButtonAssetName)
@@ -4529,76 +4855,14 @@ private struct CenterMenuPopup: View {
             .padding(.trailing, HomeView.Layout.menuPopupCloseButtonTrailingPadding)
         }
         .frame(maxWidth: HomeView.Layout.menuPopupMaxWidth)
-        .overlay(alignment: .center) {
-            HStack {
-                MenuPageArrowButton(
-                    systemName: "chevron.left",
-                    isEnabled: canMovePrevious,
-                    action: { movePage(delta: -1) }
-                )
-                .accessibilityLabel("前のメニューページへ")
-
-                Spacer(minLength: 0)
-
-                MenuPageArrowButton(
-                    systemName: "chevron.right",
-                    isEnabled: canMoveNext,
-                    action: { movePage(delta: 1) }
-                )
-                .accessibilityLabel("次のメニューページへ")
-            }
-            .padding(.horizontal, 10)
-            .allowsHitTesting(true)
-        }
         .contentShape(Rectangle())
-        .simultaneousGesture(
-            DragGesture(minimumDistance: 18)
-                .onEnded { value in
-                    handlePageSwipe(value)
-                }
-        )
         .shadow(color: .black.opacity(0.22), radius: 18, x: 0, y: 10)
-        .onAppear {
-            currentPage = 0
-        }
-    }
-
-    private func selectPage(_ page: Int) {
-        let nextPage = min(pageCount - 1, max(0, page))
-        guard nextPage != clampedPage else { return }
-
-        bgmManager.playSE(.push)
-        withAnimation(.easeInOut(duration: 0.18)) {
-            currentPage = nextPage
-        }
-    }
-
-    private func movePage(delta: Int) {
-        guard delta != 0 else { return }
-        selectPage(clampedPage + delta)
-    }
-
-    private func handlePageSwipe(_ value: DragGesture.Value) {
-        let horizontal = value.translation.width
-        let predictedHorizontal = value.predictedEndTranslation.width
-        let resolvedHorizontal = abs(predictedHorizontal) > abs(horizontal) ? predictedHorizontal : horizontal
-        let vertical = value.translation.height
-
-        guard abs(resolvedHorizontal) > swipeThreshold else { return }
-        guard abs(resolvedHorizontal) > abs(vertical) * 1.2 else { return }
-
-        if resolvedHorizontal < 0 {
-            movePage(delta: 1)
-        } else {
-            movePage(delta: -1)
-        }
     }
 }
 
 private struct RightSideButtons: View {
     @EnvironmentObject private var bgmManager: BGMManager
 
-    let onCamera: () -> Void
     let onWalk: () -> Void
     let onNavigate: () -> Void
     let isToiletLocked: Bool
@@ -4609,14 +4873,6 @@ private struct RightSideButtons: View {
     var body: some View {
         VStack(alignment: .leading, spacing: spacing) {
             HStack(spacing: spacing) {
-                Button(action: {
-                    bgmManager.playSE(.push)
-                    onCamera()
-                }) {
-                    MenuPopupActionIcon(imageName: "camera_button", buttonSize: buttonSize)
-                }
-                .buttonStyle(.plain)
-
                 if isToiletLocked {
                     Button(action: {
                         bgmManager.playSE(.push)
@@ -4635,10 +4891,7 @@ private struct RightSideButtons: View {
                     })
                     .buttonStyle(.plain)
                 }
-            }
-            .frame(maxWidth: .infinity, alignment: .leading)
 
-            HStack(spacing: spacing) {
                 if isToiletLocked {
                     Button(action: {
                         bgmManager.playSE(.push)
@@ -4657,7 +4910,10 @@ private struct RightSideButtons: View {
                     })
                     .buttonStyle(.plain)
                 }
+            }
+            .frame(maxWidth: .infinity, alignment: .leading)
 
+            HStack(spacing: spacing) {
                 Button(action: {
                     bgmManager.playSE(.push)
                     if isToiletLocked {
@@ -4670,25 +4926,7 @@ private struct RightSideButtons: View {
                 }
                 .buttonStyle(.plain)
                 .accessibilityLabel("お散歩")
-            }
-            .frame(maxWidth: .infinity, alignment: .leading)
-        }
-        .frame(width: HomeView.Layout.menuPopupGridWidth, alignment: .leading)
-    }
-}
 
-private struct MenuSettingsPage: View {
-    @EnvironmentObject private var bgmManager: BGMManager
-
-    let isToiletLocked: Bool
-    let onBlocked: () -> Void
-    let onNavigate: () -> Void
-    let buttonSize: CGFloat
-    let spacing: CGFloat
-
-    var body: some View {
-        VStack(alignment: .leading, spacing: spacing) {
-            HStack(spacing: spacing) {
                 if isToiletLocked {
                     Button(action: {
                         bgmManager.playSE(.push)
@@ -4697,6 +4935,7 @@ private struct MenuSettingsPage: View {
                         MenuPopupActionIcon(imageName: "option_button", buttonSize: buttonSize)
                     }
                     .buttonStyle(.plain)
+                    .accessibilityLabel("設定")
                 } else {
                     NavigationLink { SettingsView().memoOnboardingScreen(.settings) } label: {
                         MenuPopupActionIcon(imageName: "option_button", buttonSize: buttonSize)
@@ -4706,19 +4945,8 @@ private struct MenuSettingsPage: View {
                         onNavigate()
                     })
                     .buttonStyle(.plain)
+                    .accessibilityLabel("設定")
                 }
-
-                Spacer(minLength: 0)
-                    .frame(width: buttonSize, height: buttonSize)
-            }
-            .frame(maxWidth: .infinity, alignment: .leading)
-
-            HStack(spacing: spacing) {
-                Spacer(minLength: 0)
-                    .frame(width: buttonSize, height: buttonSize)
-
-                Spacer(minLength: 0)
-                    .frame(width: buttonSize, height: buttonSize)
             }
             .frame(maxWidth: .infinity, alignment: .leading)
         }
@@ -4726,59 +4954,6 @@ private struct MenuSettingsPage: View {
     }
 }
 
-private struct MenuPageArrowButton: View {
-    let systemName: String
-    let isEnabled: Bool
-    let action: () -> Void
-
-    var body: some View {
-        Button(action: action) {
-            Image(systemName: systemName)
-                .font(.system(size: 18, weight: .black))
-                .foregroundStyle(.white)
-                .frame(width: 30, height: 64)
-                .background(
-                    Capsule(style: .continuous)
-                        .fill(Color.black.opacity(isEnabled ? 0.30 : 0.12))
-                )
-                .overlay(
-                    Capsule(style: .continuous)
-                        .stroke(Color.white.opacity(isEnabled ? 0.32 : 0.12), lineWidth: 1)
-                )
-                .contentShape(Capsule(style: .continuous))
-        }
-        .buttonStyle(.plain)
-        .disabled(!isEnabled)
-        .opacity(isEnabled ? 1.0 : 0.32)
-    }
-}
-
-private struct MenuPageControl: View {
-    let currentPage: Int
-    let pageCount: Int
-    let onSelectPage: (Int) -> Void
-
-    var body: some View {
-        HStack(spacing: 12) {
-            ForEach(0..<pageCount, id: \.self) { page in
-                Button(action: {
-                    onSelectPage(page)
-                }) {
-                    Circle()
-                        .fill(page == currentPage ? Color.white.opacity(0.94) : Color.white.opacity(0.34))
-                        .frame(width: page == currentPage ? 12 : 9, height: page == currentPage ? 12 : 9)
-                        .overlay(
-                            Circle()
-                                .stroke(Color.black.opacity(0.16), lineWidth: 1)
-                        )
-                }
-                .buttonStyle(.plain)
-                .accessibilityLabel("メニュー\(page + 1)ページ目")
-            }
-        }
-        .frame(width: HomeView.Layout.menuPopupGridWidth, alignment: .center)
-    }
-}
 
 private struct MenuPopupActionIcon: View {
     let imageName: String
