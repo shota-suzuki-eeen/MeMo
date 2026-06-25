@@ -1269,8 +1269,11 @@ fileprivate struct ToastView: View {
 
 fileprivate struct GachaEmissionListView: View {
     @Environment(\.dismiss) private var dismiss
+    @Query private var states: [AppState]
     let gacha: GachaDefinition
     private let columns: [GridItem] = [GridItem(.flexible(), spacing: 14), GridItem(.flexible(), spacing: 14)]
+
+    private var ownedPetIDs: Set<String> { Set(states.first?.ownedPetIDs() ?? []) }
 
     var body: some View {
         NavigationStack {
@@ -1280,7 +1283,27 @@ fileprivate struct GachaEmissionListView: View {
                     LazyVGrid(columns: columns, spacing: 14) {
                         ForEach(gacha.emissionCharacters) { character in
                             VStack(spacing: 10) {
-                                Image(character.imageName).resizable().scaledToFit().frame(width: 104, height: 104).padding(12).frame(maxWidth: .infinity).background(Color.white.opacity(0.12), in: RoundedRectangle(cornerRadius: 20, style: .continuous))
+                                ZStack(alignment: .top) {
+                                    Image(character.imageName)
+                                        .resizable()
+                                        .scaledToFit()
+                                        .frame(width: 104, height: 104)
+                                        .padding(12)
+                                        .frame(maxWidth: .infinity)
+
+                                    if ownedPetIDs.contains(character.id) {
+                                        Image("GET")
+                                            .resizable()
+                                            .scaledToFit()
+                                            .frame(width: 78)
+                                            .rotationEffect(.degrees(-12))
+                                            .offset(y: 24)
+                                            .shadow(color: .black.opacity(0.26), radius: 3, y: 2)
+                                            .allowsHitTesting(false)
+                                    }
+                                }
+                                .background(Color.white.opacity(0.12), in: RoundedRectangle(cornerRadius: 20, style: .continuous))
+
                                 Text(character.name).font(.system(size: 13, weight: .black)).foregroundStyle(.primary).multilineTextAlignment(.center).lineLimit(2).minimumScaleFactor(0.72)
                             }
                             .padding(10)
