@@ -31,8 +31,7 @@ struct HomeView: View {
     @State private var displayedTodaySteps: Int = 0
     @State private var displayedWalletSteps: Int = 0
 
-    @State private var showCaptureModeDialog: Bool = false
-    @State private var selectedCaptureMode: CameraCaptureView.Mode?
+    @State private var showPicoStyleCamera: Bool = false
 
     @State private var workOnboardingViewModel = MemoOnboardingViewModel()
     @State private var stepOnboardingViewModel = MemoOnboardingViewModel()
@@ -670,7 +669,7 @@ struct HomeView: View {
                         }
                     }
 
-                    showCaptureModeDialog = false
+                    showPicoStyleCamera = false
                     syncToiletPoopsIfNeeded(containerSize: homeContentSize)
                 } else {
                     toiletPoopActivePoint.removeAll()
@@ -752,22 +751,9 @@ struct HomeView: View {
 
     private var modalConfiguredHomeView: some View {
         homeRootView
-            .confirmationDialog("撮影モードを選択", isPresented: $showCaptureModeDialog, titleVisibility: .visible) {
-                Button("ARで撮影") {
-                    bgmManager.playSE(.push)
-                    selectedCaptureMode = .ar
-                }
-                Button("通常撮影") {
-                    bgmManager.playSE(.push)
-                    selectedCaptureMode = .plain
-                }
-                Button("キャンセル", role: .cancel) {
-                    bgmManager.playSE(.push)
-                }
-            }
-            .fullScreenCover(item: $selectedCaptureMode) { mode in
-                CameraCaptureView(
-                    initialMode: mode,
+            .fullScreenCover(isPresented: $showPicoStyleCamera) {
+                CameraStyleView(
+                    initialMode: .plain,
                     todaySteps: captureMetricValues.steps,
                     todayActiveKcal: captureMetricValues.activeKcal,
                     todayTotalKcal: captureMetricValues.totalKcal,
@@ -778,7 +764,7 @@ struct HomeView: View {
                         return (steps: values.steps, activeKcal: values.activeKcal, totalKcal: values.totalKcal)
                     }
                 ) {
-                    selectedCaptureMode = nil
+                    showPicoStyleCamera = false
                 } onCapture: { image in
                     saveTodayPhoto(image, placeName: nil, latitude: nil, longitude: nil)
                 } onCaptureWithPlace: { image, placeName, lat, lon in
@@ -1795,7 +1781,7 @@ struct HomeView: View {
         }
 
         showRightMenuPopup = false
-        showCaptureModeDialog = true
+        showPicoStyleCamera = true
     }
 
     private func openSleepModePopup() {
