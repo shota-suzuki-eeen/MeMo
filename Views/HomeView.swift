@@ -4813,8 +4813,6 @@ private struct HomeTopInfoValueBlock: View {
     }
 }
 private struct CenterMenuPopup: View {
-    @EnvironmentObject private var bgmManager: BGMManager
-
     let isToiletLocked: Bool
     let onBlocked: () -> Void
     let onWalk: () -> Void
@@ -4823,23 +4821,6 @@ private struct CenterMenuPopup: View {
     let buttonSize: CGFloat
     let spacing: CGFloat
 
-    @State private var currentPage: Int = 0
-
-    private let pageCount: Int = 2
-    private let swipeThreshold: CGFloat = 42
-
-    private var clampedPage: Int {
-        min(pageCount - 1, max(0, currentPage))
-    }
-
-    private var canMovePrevious: Bool {
-        clampedPage > 0
-    }
-
-    private var canMoveNext: Bool {
-        clampedPage < pageCount - 1
-    }
-
     var body: some View {
         ZStack(alignment: .topTrailing) {
             Image(HomeView.Layout.menuPopupBackgroundAssetName)
@@ -4847,38 +4828,15 @@ private struct CenterMenuPopup: View {
                 .scaledToFit()
 
             VStack(spacing: 10) {
-                Group {
-                    if clampedPage == 0 {
-                        RightSideButtons(
-                            onWalk: onWalk,
-                            onNavigate: onNavigate,
-                            isToiletLocked: isToiletLocked,
-                            onBlocked: onBlocked,
-                            buttonSize: buttonSize,
-                            spacing: spacing
-                        )
-                    } else {
-                        MenuSettingsPage(
-                            isToiletLocked: isToiletLocked,
-                            onBlocked: onBlocked,
-                            onNavigate: onNavigate,
-                            buttonSize: buttonSize,
-                            spacing: spacing
-                        )
-                    }
-                }
-                .frame(width: HomeView.Layout.menuPopupGridWidth, alignment: .leading)
-                .transition(.opacity.combined(with: .move(edge: clampedPage == 0 ? .leading : .trailing)))
-                .animation(.easeInOut(duration: 0.18), value: clampedPage)
-
-                MenuPageControl(
-                    currentPage: clampedPage,
-                    pageCount: pageCount,
-                    onSelectPage: { page in
-                        selectPage(page)
-                    }
+                RightSideButtons(
+                    onWalk: onWalk,
+                    onNavigate: onNavigate,
+                    isToiletLocked: isToiletLocked,
+                    onBlocked: onBlocked,
+                    buttonSize: buttonSize,
+                    spacing: spacing
                 )
-                .padding(.top, 2)
+                .frame(width: HomeView.Layout.menuPopupGridWidth, alignment: .leading)
             }
             .frame(width: HomeView.Layout.menuPopupGridWidth, alignment: .leading)
             .padding(.top, HomeView.Layout.menuPopupContentTopPadding)
@@ -4887,7 +4845,6 @@ private struct CenterMenuPopup: View {
                 x: HomeView.Layout.menuPopupGridOffsetX,
                 y: HomeView.Layout.menuPopupGridOffsetY
             )
-
 
             Button(action: onDismiss) {
                 Image(HomeView.Layout.menuPopupCloseButtonAssetName)
@@ -4903,69 +4860,8 @@ private struct CenterMenuPopup: View {
             .padding(.trailing, HomeView.Layout.menuPopupCloseButtonTrailingPadding)
         }
         .frame(maxWidth: HomeView.Layout.menuPopupMaxWidth)
-        .overlay(alignment: .center) {
-            HStack {
-                MenuPageArrowButton(
-                    systemName: "chevron.left",
-                    isEnabled: canMovePrevious,
-                    action: { movePage(delta: -1) }
-                )
-                .accessibilityLabel("前のメニューページへ")
-
-                Spacer(minLength: 0)
-
-                MenuPageArrowButton(
-                    systemName: "chevron.right",
-                    isEnabled: canMoveNext,
-                    action: { movePage(delta: 1) }
-                )
-                .accessibilityLabel("次のメニューページへ")
-            }
-            .padding(.horizontal, 10)
-            .allowsHitTesting(true)
-        }
         .contentShape(Rectangle())
-        .simultaneousGesture(
-            DragGesture(minimumDistance: 18)
-                .onEnded { value in
-                    handlePageSwipe(value)
-                }
-        )
         .shadow(color: .black.opacity(0.22), radius: 18, x: 0, y: 10)
-        .onAppear {
-            currentPage = 0
-        }
-    }
-
-    private func selectPage(_ page: Int) {
-        let nextPage = min(pageCount - 1, max(0, page))
-        guard nextPage != clampedPage else { return }
-
-        bgmManager.playSE(.push)
-        withAnimation(.easeInOut(duration: 0.18)) {
-            currentPage = nextPage
-        }
-    }
-
-    private func movePage(delta: Int) {
-        guard delta != 0 else { return }
-        selectPage(clampedPage + delta)
-    }
-
-    private func handlePageSwipe(_ value: DragGesture.Value) {
-        let horizontal = value.translation.width
-        let predictedHorizontal = value.predictedEndTranslation.width
-        let resolvedHorizontal = abs(predictedHorizontal) > abs(horizontal) ? predictedHorizontal : horizontal
-        let vertical = value.translation.height
-
-        guard abs(resolvedHorizontal) > swipeThreshold else { return }
-        guard abs(resolvedHorizontal) > abs(vertical) * 1.2 else { return }
-
-        if resolvedHorizontal < 0 {
-            movePage(delta: 1)
-        } else {
-            movePage(delta: -1)
-        }
     }
 }
 
@@ -5036,27 +4932,6 @@ private struct RightSideButtons: View {
                 .buttonStyle(.plain)
                 .accessibilityLabel("お散歩")
 
-                Spacer(minLength: 0)
-                    .frame(width: buttonSize, height: buttonSize)
-            }
-            .frame(maxWidth: .infinity, alignment: .leading)
-        }
-        .frame(width: HomeView.Layout.menuPopupGridWidth, alignment: .leading)
-    }
-}
-
-private struct MenuSettingsPage: View {
-    @EnvironmentObject private var bgmManager: BGMManager
-
-    let isToiletLocked: Bool
-    let onBlocked: () -> Void
-    let onNavigate: () -> Void
-    let buttonSize: CGFloat
-    let spacing: CGFloat
-
-    var body: some View {
-        VStack(alignment: .leading, spacing: spacing) {
-            HStack(spacing: spacing) {
                 if isToiletLocked {
                     Button(action: {
                         bgmManager.playSE(.push)
@@ -5075,76 +4950,10 @@ private struct MenuSettingsPage: View {
                     })
                     .buttonStyle(.plain)
                 }
-
-                Spacer(minLength: 0)
-                    .frame(width: buttonSize, height: buttonSize)
-            }
-            .frame(maxWidth: .infinity, alignment: .leading)
-
-            HStack(spacing: spacing) {
-                Spacer(minLength: 0)
-                    .frame(width: buttonSize, height: buttonSize)
-
-                Spacer(minLength: 0)
-                    .frame(width: buttonSize, height: buttonSize)
             }
             .frame(maxWidth: .infinity, alignment: .leading)
         }
         .frame(width: HomeView.Layout.menuPopupGridWidth, alignment: .leading)
-    }
-}
-
-private struct MenuPageArrowButton: View {
-    let systemName: String
-    let isEnabled: Bool
-    let action: () -> Void
-
-    var body: some View {
-        Button(action: action) {
-            Image(systemName: systemName)
-                .font(.system(size: 18, weight: .black))
-                .foregroundStyle(.white)
-                .frame(width: 30, height: 64)
-                .background(
-                    Capsule(style: .continuous)
-                        .fill(Color.black.opacity(isEnabled ? 0.30 : 0.12))
-                )
-                .overlay(
-                    Capsule(style: .continuous)
-                        .stroke(Color.white.opacity(isEnabled ? 0.32 : 0.12), lineWidth: 1)
-                )
-                .contentShape(Capsule(style: .continuous))
-        }
-        .buttonStyle(.plain)
-        .disabled(!isEnabled)
-        .opacity(isEnabled ? 1.0 : 0.32)
-    }
-}
-
-private struct MenuPageControl: View {
-    let currentPage: Int
-    let pageCount: Int
-    let onSelectPage: (Int) -> Void
-
-    var body: some View {
-        HStack(spacing: 12) {
-            ForEach(0..<pageCount, id: \.self) { page in
-                Button(action: {
-                    onSelectPage(page)
-                }) {
-                    Circle()
-                        .fill(page == currentPage ? Color.white.opacity(0.94) : Color.white.opacity(0.34))
-                        .frame(width: page == currentPage ? 12 : 9, height: page == currentPage ? 12 : 9)
-                        .overlay(
-                            Circle()
-                                .stroke(Color.black.opacity(0.16), lineWidth: 1)
-                        )
-                }
-                .buttonStyle(.plain)
-                .accessibilityLabel("メニュー\(page + 1)ページ目")
-            }
-        }
-        .frame(width: HomeView.Layout.menuPopupGridWidth, alignment: .center)
     }
 }
 
