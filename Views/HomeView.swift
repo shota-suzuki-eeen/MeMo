@@ -4,6 +4,7 @@
 //
 //  Created by shota suzuki on 2026/03/20.
 //  2026/06 update: おやすみモード広告は起動時ではなくポップアップ表示時に画面単位プリロードします。
+//  2026/06 update: カメラ画面は fullScreenCover を使わず、ホーム上の overlay として表示します。
 //
 
 import SwiftUI
@@ -751,30 +752,10 @@ struct HomeView: View {
 
     private var modalConfiguredHomeView: some View {
         homeRootView
-            .fullScreenCover(isPresented: $showPicoStyleCamera) {
-                CameraStyleView(
-                    initialMode: .plain,
-                    todaySteps: captureMetricValues.steps,
-                    todayActiveKcal: captureMetricValues.activeKcal,
-                    todayTotalKcal: captureMetricValues.totalKcal,
-                    plainBackgroundAssetName: effectiveCurrentHomeWallpaperAssetName,
-                    characterAssetName: PetMaster.assetName(for: state.normalizedCurrentPetID),
-                    metricValueProvider: {
-                        let values = captureMetricValues
-                        return (steps: values.steps, activeKcal: values.activeKcal, totalKcal: values.totalKcal)
-                    }
-                ) {
-                    showPicoStyleCamera = false
-                } onCapture: { image in
-                    saveTodayPhoto(image, placeName: nil, latitude: nil, longitude: nil)
-                } onCaptureWithPlace: { image, placeName, lat, lon in
-                    saveTodayPhoto(image, placeName: placeName, latitude: lat, longitude: lon)
-                }
-                .memoOnboardingRoot(state: state, viewModel: cameraOnboardingViewModel)
-                .onAppear {
-                    cameraOnboardingViewModel.presentIfNeeded(.cameraCapture, state: state)
-                }
+            .overlay {
+                picoStyleCameraOverlay
             }
+            .statusBarHidden(showPicoStyleCamera)
             .fullScreenCover(isPresented: $showWorkTimerPreparation) {
                 WorkTimerPreparationView()
                     .memoOnboardingRoot(state: state, viewModel: workOnboardingViewModel)
@@ -791,6 +772,39 @@ struct HomeView: View {
             .fullScreenCover(isPresented: $showStepEnjoy) {
                 stepEnjoyPresentedView
             }
+    }
+
+    @ViewBuilder
+    private var picoStyleCameraOverlay: some View {
+        if showPicoStyleCamera {
+            CameraStyleView(
+                initialMode: .plain,
+                todaySteps: captureMetricValues.steps,
+                todayActiveKcal: captureMetricValues.activeKcal,
+                todayTotalKcal: captureMetricValues.totalKcal,
+                plainBackgroundAssetName: effectiveCurrentHomeWallpaperAssetName,
+                characterAssetName: PetMaster.assetName(for: state.normalizedCurrentPetID),
+                metricValueProvider: {
+                    let values = captureMetricValues
+                    return (steps: values.steps, activeKcal: values.activeKcal, totalKcal: values.totalKcal)
+                }
+            ) {
+                showPicoStyleCamera = false
+            } onCapture: { image in
+                saveTodayPhoto(image, placeName: nil, latitude: nil, longitude: nil)
+            } onCaptureWithPlace: { image, placeName, lat, lon in
+                saveTodayPhoto(image, placeName: placeName, latitude: lat, longitude: lon)
+            }
+            .memoOnboardingRoot(state: state, viewModel: cameraOnboardingViewModel)
+            .onAppear {
+                cameraOnboardingViewModel.presentIfNeeded(.cameraCapture, state: state)
+            }
+            .frame(maxWidth: .infinity, maxHeight: .infinity)
+            .ignoresSafeArea()
+            .zIndex(10_000)
+            .transition(.identity)
+            .allowsHitTesting(true)
+        }
     }
 
     @ViewBuilder

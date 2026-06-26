@@ -3,14 +3,12 @@
 //  MeMo
 //
 //  Created for MeMo camera printing UI adjustment.
-//  BUILD_FIX_V5_APPLIED.
+//  BUILD_FIX_V9_SEAMLESS_SQUARE_CAMERA_APPLIED.
 //
 
 import SwiftUI
 import UIKit
 import AVFoundation
-import ARKit
-import RealityKit
 
 struct CameraStyleView: View {
     typealias Snapshotter = (@escaping (UIImage?) -> Void) -> Void
@@ -46,6 +44,15 @@ struct CameraStyleView: View {
         case back
     }
 
+    private struct CameraPanelLayout {
+        let width: CGFloat
+        let height: CGFloat
+        let corner: CGFloat
+        let frameInset: CGFloat
+        let previewCorner: CGFloat
+        let topMargin: CGFloat
+    }
+
     let initialMode: Mode
     let todaySteps: Int
     let todayActiveKcal: Int
@@ -60,12 +67,6 @@ struct CameraStyleView: View {
     @State private var mode: Mode
     @State private var cameraPosition: CameraPosition = .back
 
-    @State private var characterOffset: CGSize = .zero
-    @State private var characterScale: CGFloat = 1.0
-    @State private var lastOffset: CGSize = .zero
-    @State private var lastScale: CGFloat = 1.0
-    @State private var sliderScale: Double = 1.0
-
     @State private var takeBackgroundSnapshot: Snapshotter?
     @State private var lastPreviewSize: CGSize = .zero
     @State private var safeAreaInsets: UIEdgeInsets = .zero
@@ -73,6 +74,9 @@ struct CameraStyleView: View {
     @State private var isCapturing: Bool = false
     @State private var isPrinting: Bool = false
     @State private var isSlotExpanded: Bool = false
+    @State private var isClosing: Bool = false
+    @State private var cameraRevealProgress: CGFloat = 0
+    @State private var chromeRevealProgress: CGFloat = 0
     @State private var printProgress: CGFloat = 0
     @State private var printingPhoto: UIImage?
     @State private var recentPhotos: [PicoPrintedPhoto] = []
@@ -100,7 +104,9 @@ struct CameraStyleView: View {
         self.onCancel = onCancel
         self.onCapture = onCapture
         self.onCaptureWithPlace = onCaptureWithPlace
-        _mode = State(initialValue: initialMode)
+
+        // AR機能は廃止し、既存呼び出し元との互換性を維持しながら通常カメラ固定にする。
+        _mode = State(initialValue: .plain)
     }
 
     private var currentMetricValues: (steps: Int, activeKcal: Int, totalKcal: Int) {
@@ -115,46 +121,56 @@ struct CameraStyleView: View {
     }
 
     private var cameraRotateEnabled: Bool {
-        mode == .plain || mode == .ar
+        !isCapturing && !isPrinting && !isClosing
+    }
+
+    private var backgroundRevealOpacity: CGFloat {
+        max(0, min(1, chromeRevealProgress))
     }
 
     var body: some View {
         GeometryReader { geometry in
+            let panelLayout = cameraPanelLayout(in: geometry.size, safeTop: geometry.safeAreaInsets.top)
+
             ZStack {
                 backgroundBody
+                    .opacity(backgroundRevealOpacity)
+                    .allowsHitTesting(false)
 
                 VStack(spacing: 0) {
-                    topSpacer(height: geometry.safeAreaInsets.top)
+                    Color.clear
+                        .frame(height: panelLayout.topMargin)
 
-                    printerArea(screenSize: geometry.size)
+                    cameraPanel(layout: panelLayout, screenSize: geometry.size)
+
+                    closeButtonRow
                         .padding(.top, 12)
+                        .padding(.horizontal, 26)
+                        .opacity(chromeRevealProgress)
+                        .allowsHitTesting(chromeRevealProgress > 0.98 && !isClosing)
 
                     controlsArea
-                        .padding(.top, 42)
+                        .padding(.top, 20)
+                        .opacity(chromeRevealProgress)
+                        .allowsHitTesting(chromeRevealProgress > 0.98 && !isClosing)
 
-                    Spacer(minLength: 24)
-
-                    appMark
-                        .padding(.bottom, 34)
+                    Spacer(minLength: 22)
 
                     photoTray
                         .frame(height: max(230, geometry.size.height * 0.30))
                         .padding(.horizontal, 18)
                         .padding(.bottom, 18 + geometry.safeAreaInsets.bottom)
+                        .opacity(chromeRevealProgress)
+                        .allowsHitTesting(chromeRevealProgress > 0.98 && !isClosing)
                 }
                 .frame(width: geometry.size.width, height: geometry.size.height)
+                .opacity(isClosing ? max(0.001, cameraRevealProgress) : 1)
 
                 if let printingPhoto {
                     printingPhotoLayer(image: printingPhoto, screenSize: geometry.size)
                         .zIndex(240)
                         .allowsHitTesting(false)
                 }
-
-                topCloseButton
-                    .padding(.top, geometry.safeAreaInsets.top + 12)
-                    .padding(.leading, 18)
-                    .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
-                    .zIndex(500)
 
                 if let selectedPhoto {
                     PicoPrintedPhotoDetailOverlay(
@@ -166,44 +182,60 @@ struct CameraStyleView: View {
                     .transition(.opacity.combined(with: .scale(scale: 0.96)))
                 }
             }
+            .background(FullScreenCoverClearBackground())
             .ignoresSafeArea()
             .onAppear {
                 safeAreaInsets = Self.currentWindowSafeAreaInsets()
-                sliderScale = Double(characterScale)
+                mode = .plain
+                cameraPosition = .back
+                isClosing = false
+                isSlotExpanded = false
+                cameraRevealProgress = 0
+                chromeRevealProgress = 0
+
+                DispatchQueue.main.async {
+                    withAnimation(.spring(response: 0.46, dampingFraction: 0.86)) {
+                        cameraRevealProgress = 1
+                    }
+                }
+
+                DispatchQueue.main.asyncAfter(deadline: .now() + 0.06) {
+                    guard !isClosing else { return }
+                    withAnimation(.easeOut(duration: 0.14)) {
+                        chromeRevealProgress = 1
+                    }
+                }
             }
             .onChange(of: geometry.size) { _, _ in
                 safeAreaInsets = Self.currentWindowSafeAreaInsets()
             }
-            .onChange(of: mode) { _, newMode in
+            .onChange(of: mode) { _, _ in
+                mode = .plain
                 takeBackgroundSnapshot = nil
-                if newMode == .ar {
-                    cameraPosition = .back
-                }
             }
-            .onChange(of: sliderScale) { _, newValue in
-                let clamped = max(0.55, min(2.4, newValue))
-                characterScale = CGFloat(clamped)
-                lastScale = characterScale
+            .onChange(of: cameraPosition) { _, _ in
+                takeBackgroundSnapshot = nil
             }
-            .onChange(of: characterScale) { _, newValue in
-                sliderScale = Double(newValue)
-            }
+            .accessibilityElement(children: .contain)
+            .accessibilityLabel("カメラ画面")
         }
+        .statusBarHidden(true)
+        .ignoresSafeArea()
     }
 
     private var backgroundBody: some View {
         LinearGradient(
             colors: [
-                Color(red: 1.00, green: 0.20, blue: 0.17),
-                Color(red: 0.93, green: 0.11, blue: 0.10),
-                Color(red: 1.00, green: 0.24, blue: 0.17)
+                Color(red: 0.38, green: 0.39, blue: 0.41),
+                Color(red: 0.27, green: 0.28, blue: 0.30),
+                Color(red: 0.43, green: 0.44, blue: 0.46)
             ],
             startPoint: .top,
             endPoint: .bottom
         )
         .overlay(alignment: .top) {
             LinearGradient(
-                colors: [.white.opacity(0.26), .clear],
+                colors: [.white.opacity(0.24), .clear],
                 startPoint: .top,
                 endPoint: .bottom
             )
@@ -211,7 +243,7 @@ struct CameraStyleView: View {
         }
         .overlay(alignment: .bottom) {
             LinearGradient(
-                colors: [.clear, .black.opacity(0.22)],
+                colors: [.clear, .black.opacity(0.24)],
                 startPoint: .top,
                 endPoint: .bottom
             )
@@ -220,41 +252,70 @@ struct CameraStyleView: View {
         .ignoresSafeArea()
     }
 
-    private func topSpacer(height: CGFloat) -> some View {
-        Color.clear.frame(height: max(0, height))
+    private func cameraPanelLayout(in screenSize: CGSize, safeTop: CGFloat) -> CameraPanelLayout {
+        let horizontalMargin: CGFloat = 26
+        let expandedWidth = max(300, screenSize.width - (horizontalMargin * 2))
+
+        // ダイナミックアイランドの縦幅を黒枠の基準値として扱う。
+        // 左右・下もこの値に揃えて、外枠の厚みを均一化する。
+        let dynamicIslandHeight = max(38, min(54, safeTop + 2))
+        let previewWidth = max(180, expandedWidth - (dynamicIslandHeight * 2))
+
+        // 撮影画面と外黒枠の上端・横位置は維持し、縦方向だけ下へ拡張する。
+        // 既存の撮影画面の横幅を基準に正方形化するため、外黒枠も結果的に正方形になる。
+        let previewHeight = previewWidth
+        let expandedHeight = previewHeight + (dynamicIslandHeight * 2)
+
+        let compactWidth: CGFloat = 132
+        let compactHeight: CGFloat = max(36, dynamicIslandHeight * 0.82)
+        let progress = max(0, min(1, cameraRevealProgress))
+
+        let width = compactWidth.interpolated(to: expandedWidth, progress: progress)
+        let height = compactHeight.interpolated(to: expandedHeight, progress: progress)
+        let corner = CGFloat(22).interpolated(to: 56, progress: progress)
+        let previewCorner = CGFloat(18).interpolated(to: 34, progress: progress)
+        let topMargin = max(4, safeTop * 0.10) + 8
+
+        return CameraPanelLayout(
+            width: width,
+            height: height,
+            corner: corner,
+            frameInset: dynamicIslandHeight,
+            previewCorner: previewCorner,
+            topMargin: topMargin
+        )
     }
 
-    private func printerArea(screenSize: CGSize) -> some View {
-        let expandedWidth = min(screenSize.width * 0.68, 330)
+    private func cameraPanel(layout: CameraPanelLayout, screenSize: CGSize) -> some View {
         let compactWidth = min(screenSize.width * 0.72, 360)
-        let width = isSlotExpanded ? compactWidth : expandedWidth
-        let height: CGFloat = isSlotExpanded ? 74 : min(screenSize.height * 0.27, 260)
-        let corner: CGFloat = isSlotExpanded ? 38 : 56
+        let displayedWidth = isSlotExpanded ? compactWidth : layout.width
+        let displayedHeight: CGFloat = isSlotExpanded ? 74 : layout.height
+        let displayedCorner: CGFloat = isSlotExpanded ? 38 : layout.corner
+
+        // アニメーション中の小さいカプセル状態では実寸の黒枠が入り切らないため、
+        // 最終状態では frameInset に一致し、途中だけ破綻しない範囲に丸める。
+        let effectiveFrameInset = min(
+            layout.frameInset,
+            max(8, (displayedWidth - 26) * 0.5),
+            max(8, (displayedHeight - 26) * 0.5)
+        )
 
         return ZStack(alignment: .top) {
-            RoundedRectangle(cornerRadius: corner, style: .continuous)
+            RoundedRectangle(cornerRadius: displayedCorner, style: .continuous)
                 .fill(Color.black)
                 .overlay(
-                    RoundedRectangle(cornerRadius: corner, style: .continuous)
-                        .stroke(Color(red: 1.0, green: 0.36, blue: 0.32), lineWidth: 4)
+                    RoundedRectangle(cornerRadius: displayedCorner, style: .continuous)
+                        .stroke(Color.black.opacity(0.98), lineWidth: 4)
                 )
                 .shadow(color: .black.opacity(0.34), radius: 12, x: 0, y: 8)
-                .shadow(color: .white.opacity(0.18), radius: 3, x: 0, y: -1)
+                .shadow(color: .white.opacity(0.13), radius: 3, x: 0, y: -1)
 
             if !isSlotExpanded {
-                cameraPreviewWindow
-                    .padding(.horizontal, 18)
-                    .padding(.top, 30)
-                    .padding(.bottom, 18)
-                    .transition(.opacity.combined(with: .scale(scale: 0.96)))
-            }
-
-            if !isSlotExpanded {
-                Circle()
-                    .fill(Color(red: 0.17, green: 0.90, blue: 0.42))
-                    .frame(width: 10, height: 10)
-                    .padding(.top, 16)
-                    .transition(.opacity)
+                cameraPreviewWindow(previewCorner: layout.previewCorner)
+                    .padding(.horizontal, effectiveFrameInset)
+                    .padding(.vertical, effectiveFrameInset)
+                    .opacity(cameraRevealProgress > 0.08 ? 1 : 0)
+                    .transition(.opacity.combined(with: .scale(scale: 0.96, anchor: .top)))
             }
 
             if isSlotExpanded {
@@ -266,29 +327,20 @@ struct CameraStyleView: View {
                     .shadow(color: .black.opacity(0.55), radius: 8, x: 0, y: 4)
             }
         }
-        .frame(width: width, height: height)
+        .frame(width: displayedWidth, height: displayedHeight)
+        .scaleEffect(0.92 + (cameraRevealProgress * 0.08), anchor: .top)
         .animation(.spring(response: 0.36, dampingFraction: 0.82), value: isSlotExpanded)
     }
 
-    private var cameraPreviewWindow: some View {
+    private func cameraPreviewWindow(previewCorner: CGFloat) -> some View {
         GeometryReader { proxy in
             ZStack {
                 captureSurface
-
-                Image(characterAssetName)
-                    .resizable()
-                    .scaledToFit()
-                    .frame(width: min(proxy.size.width * 0.32, 132))
-                    .scaleEffect(characterScale)
-                    .offset(characterOffset)
-                    .gesture(characterGesture)
-                    .shadow(color: .black.opacity(0.26), radius: 8, x: 0, y: 5)
-                    .zIndex(10)
             }
             .frame(width: proxy.size.width, height: proxy.size.height)
-            .clipShape(RoundedRectangle(cornerRadius: 34, style: .continuous))
+            .clipShape(RoundedRectangle(cornerRadius: previewCorner, style: .continuous))
             .overlay {
-                RoundedRectangle(cornerRadius: 34, style: .continuous)
+                RoundedRectangle(cornerRadius: previewCorner, style: .continuous)
                     .stroke(Color.white.opacity(0.10), lineWidth: 1)
             }
             .onAppear { lastPreviewSize = proxy.size }
@@ -298,121 +350,98 @@ struct CameraStyleView: View {
 
     @ViewBuilder
     private var captureSurface: some View {
-        if mode == .ar && cameraPosition == .back {
-            PicoARCameraBackgroundView { snapshotter in
-                DispatchQueue.main.async {
-                    takeBackgroundSnapshot = snapshotter
-                }
+        PicoCameraPreviewView(position: cameraPosition == .front ? .front : .back) { snapshotter in
+            DispatchQueue.main.async {
+                takeBackgroundSnapshot = snapshotter
             }
-            .id("pico_ar_back")
-        } else {
-            PicoCameraPreviewView(position: cameraPosition == .front ? .front : .back) { snapshotter in
-                DispatchQueue.main.async {
-                    takeBackgroundSnapshot = snapshotter
-                }
-            }
-            .id("pico_camera_\(cameraPosition == .front ? "front" : "back")_\(mode.rawValue)")
+        }
+        .id("pico_plain_camera_\(cameraPosition == .front ? "front" : "back")")
+    }
+
+    private var closeButtonRow: some View {
+        HStack {
+            topCloseButton
+
+            Spacer()
         }
     }
 
     private var controlsArea: some View {
-        VStack(spacing: 26) {
-            PicoCameraModeSelector(selection: $mode, isDisabled: isCapturing || isPrinting)
-                .frame(maxWidth: 260)
-
-            HStack(alignment: .center, spacing: 58) {
-                Button {
-                    // 見た目だけのフラッシュOFFボタン。実撮影は常に flashMode = .off。
-                } label: {
-                    PicoRoundControlButton(
-                        systemImage: "bolt.slash.fill",
-                        size: 58,
-                        fill: Color(red: 0.47, green: 0.55, blue: 0.18),
-                        foreground: Color.black.opacity(0.50),
-                        lineWidth: 0
-                    )
-                }
-                .disabled(true)
-                .opacity(0.90)
-
-                Button {
-                    captureAndPrint()
-                } label: {
-                    ZStack {
-                        Circle()
-                            .fill(Color(red: 1.0, green: 0.20, blue: 0.16))
-                            .frame(width: 104, height: 104)
-                            .shadow(color: .black.opacity(0.28), radius: 8, x: 0, y: 7)
-
-                        Circle()
-                            .fill(Color(red: 1.0, green: 0.60, blue: 0.0))
-                            .frame(width: 84, height: 84)
-                            .overlay(Circle().stroke(Color.black.opacity(0.78), lineWidth: 3))
-                            .shadow(color: .white.opacity(0.30), radius: 3, x: 0, y: -2)
-                    }
-                }
-                .buttonStyle(.plain)
-                .disabled(isCapturing || isPrinting || takeBackgroundSnapshot == nil)
-                .opacity((isCapturing || isPrinting || takeBackgroundSnapshot == nil) ? 0.58 : 1.0)
-                .accessibilityLabel("撮影")
-
-                Button {
-                    guard cameraRotateEnabled else { return }
-                    cameraPosition = cameraPosition == .back ? .front : .back
-                    takeBackgroundSnapshot = nil
-                } label: {
-                    PicoRoundControlButton(
-                        systemImage: "arrow.triangle.2.circlepath.camera",
-                        size: 58,
-                        fill: .clear,
-                        foreground: Color.black.opacity(0.58),
-                        lineWidth: 3
-                    )
-                }
-                .disabled(!cameraRotateEnabled || isCapturing || isPrinting)
-                .opacity((!cameraRotateEnabled || isCapturing || isPrinting) ? 0.36 : 1.0)
-                .accessibilityLabel("カメラ切り替え")
+        HStack(alignment: .center, spacing: 58) {
+            Button {
+                // 見た目だけのフラッシュOFFボタン。実撮影は常に flashMode = .off。
+            } label: {
+                PicoRoundControlButton(
+                    systemImage: "bolt.slash.fill",
+                    size: 58,
+                    fill: Color.black.opacity(0.08),
+                    foreground: Color.black.opacity(0.46),
+                    lineWidth: 0
+                )
             }
+            .disabled(true)
+            .opacity(0.90)
 
-            VStack(spacing: 6) {
-                Slider(value: $sliderScale, in: 0.55...2.4)
-                    .tint(.white.opacity(0.88))
-                    .frame(maxWidth: 230)
-                Text("CHARACTER SIZE")
-                    .font(.system(size: 9, weight: .heavy, design: .rounded))
-                    .tracking(1.2)
-                    .foregroundStyle(.white.opacity(0.74))
+            Button {
+                captureAndPrint()
+            } label: {
+                ZStack {
+                    Circle()
+                        .fill(Color.black.opacity(0.16))
+                        .frame(width: 104, height: 104)
+                        .shadow(color: .black.opacity(0.28), radius: 8, x: 0, y: 7)
+
+                    Circle()
+                        .fill(Color(red: 1.0, green: 0.60, blue: 0.0))
+                        .frame(width: 84, height: 84)
+                        .overlay(Circle().stroke(Color.black.opacity(0.78), lineWidth: 3))
+                        .shadow(color: .white.opacity(0.30), radius: 3, x: 0, y: -2)
+                }
             }
-            .opacity(isSlotExpanded ? 0 : 1)
-            .animation(.easeInOut(duration: 0.18), value: isSlotExpanded)
+            .buttonStyle(.plain)
+            .disabled(isCapturing || isPrinting || takeBackgroundSnapshot == nil || isClosing)
+            .opacity((isCapturing || isPrinting || takeBackgroundSnapshot == nil || isClosing) ? 0.58 : 1.0)
+            .accessibilityLabel("撮影")
+
+            Button {
+                guard cameraRotateEnabled else { return }
+                cameraPosition = cameraPosition == .back ? .front : .back
+                takeBackgroundSnapshot = nil
+            } label: {
+                PicoRoundControlButton(
+                    systemImage: "arrow.triangle.2.circlepath.camera",
+                    size: 58,
+                    fill: .clear,
+                    foreground: Color.black.opacity(0.58),
+                    lineWidth: 3
+                )
+            }
+            .disabled(!cameraRotateEnabled)
+            .opacity(!cameraRotateEnabled ? 0.36 : 1.0)
+            .accessibilityLabel("カメラ切り替え")
         }
     }
 
     private var topCloseButton: some View {
-        Button(action: onCancel) {
-            Image(systemName: "xmark")
-                .font(.system(size: 15, weight: .heavy))
-                .foregroundStyle(.white)
-                .frame(width: 42, height: 42)
-                .background(Color.black.opacity(0.24), in: Circle())
-                .overlay(Circle().stroke(Color.white.opacity(0.18), lineWidth: 1))
+        Button(action: requestClose) {
+            HStack(spacing: 8) {
+                Image(systemName: "xmark")
+                    .font(.system(size: 14, weight: .heavy))
+
+                Text("閉じる")
+                    .font(.system(size: 12, weight: .heavy, design: .rounded))
+            }
+            .foregroundStyle(.white.opacity(0.94))
+            .padding(.horizontal, 14)
+            .frame(height: 40)
+            .background(Color.black.opacity(0.24), in: Capsule())
+            .overlay(Capsule().stroke(Color.white.opacity(0.18), lineWidth: 1))
+            .shadow(color: .black.opacity(0.18), radius: 5, x: 0, y: 3)
         }
         .buttonStyle(.plain)
-        .opacity(isPrinting ? 0.35 : 1.0)
-        .disabled(isPrinting)
+        .opacity((isPrinting || isClosing) ? 0.35 : 1.0)
+        .disabled(isPrinting || isClosing)
         .accessibilityLabel("閉じる")
-    }
-
-    private var appMark: some View {
-        VStack(spacing: -5) {
-            Text("MeMo")
-                .font(.system(size: 32, weight: .black, design: .rounded))
-            Text("cam")
-                .font(.system(size: 24, weight: .black, design: .rounded))
-        }
-        .foregroundStyle(.white)
-        .shadow(color: .black.opacity(0.15), radius: 1, x: 0, y: 1)
-        .opacity(isPrinting ? 0.60 : 1.0)
     }
 
     private var photoTray: some View {
@@ -450,7 +479,7 @@ struct CameraStyleView: View {
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
         .background(
             RoundedRectangle(cornerRadius: 18, style: .continuous)
-                .fill(Color(red: 0.16, green: 0.08, blue: 0.14).opacity(0.96))
+                .fill(Color(red: 0.13, green: 0.13, blue: 0.15).opacity(0.96))
                 .shadow(color: .black.opacity(0.42), radius: 8, x: 0, y: 4)
         )
         .overlay(
@@ -475,38 +504,36 @@ struct CameraStyleView: View {
             .position(x: screenSize.width * 0.5, y: y)
     }
 
-    private var characterGesture: some Gesture {
-        SimultaneousGesture(
-            DragGesture()
-                .onChanged { value in
-                    characterOffset = CGSize(
-                        width: lastOffset.width + value.translation.width,
-                        height: lastOffset.height + value.translation.height
-                    )
-                }
-                .onEnded { _ in
-                    lastOffset = characterOffset
-                },
-            MagnificationGesture()
-                .onChanged { value in
-                    characterScale = max(0.55, min(2.4, lastScale * value))
-                }
-                .onEnded { _ in
-                    lastScale = characterScale
-                }
-        )
+    private func requestClose() {
+        guard !isPrinting, !isClosing else { return }
+        isClosing = true
+        selectedPhoto = nil
+
+        // 閉じる時は開く時の逆順にする。
+        // 先に背景・操作UI・写真トレイをフェードアウトし、その後で撮影画面だけを
+        // ダイナミックアイランド方向へ畳むことで、ホーム画面へシームレスに戻す。
+        withAnimation(.easeInOut(duration: 0.12)) {
+            chromeRevealProgress = 0
+        }
+
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.06) {
+            withAnimation(.easeInOut(duration: 0.30)) {
+                cameraRevealProgress = 0
+            }
+        }
+
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.54) {
+            onCancel()
+        }
     }
 
     private func captureAndPrint() {
-        guard !isCapturing, !isPrinting else { return }
+        guard !isCapturing, !isPrinting, !isClosing else { return }
         guard let takeBackgroundSnapshot else { return }
         guard lastPreviewSize.width > 1, lastPreviewSize.height > 1 else { return }
 
         isCapturing = true
 
-        let fixedCharacterOffset = characterOffset
-        let fixedCharacterScale = characterScale
-        let fixedCharacterAssetName = characterAssetName
         let fixedPreviewSize = lastPreviewSize
         let fixedMetrics = currentMetricValues
 
@@ -527,9 +554,6 @@ struct CameraStyleView: View {
             let composed = PicoCameraImageComposer.composeScene(
                 background: normalizedBackground,
                 previewSize: fixedPreviewSize,
-                characterAssetName: fixedCharacterAssetName,
-                characterOffset: fixedCharacterOffset,
-                characterScale: fixedCharacterScale,
                 steps: fixedMetrics.steps
             )
 
@@ -614,6 +638,32 @@ struct CameraStyleView: View {
     }
 }
 
+private struct FullScreenCoverClearBackground: UIViewRepresentable {
+    func makeUIView(context: Context) -> UIView {
+        let view = UIView()
+        view.backgroundColor = .clear
+
+        DispatchQueue.main.async {
+            clearPresentationBackground(from: view)
+        }
+
+        return view
+    }
+
+    func updateUIView(_ uiView: UIView, context: Context) {
+        DispatchQueue.main.async {
+            clearPresentationBackground(from: uiView)
+        }
+    }
+
+    private func clearPresentationBackground(from view: UIView) {
+        view.backgroundColor = .clear
+        view.superview?.backgroundColor = .clear
+        view.superview?.superview?.backgroundColor = .clear
+        view.superview?.superview?.superview?.backgroundColor = .clear
+    }
+}
+
 private struct PicoPrintedPhoto: Identifiable, Equatable {
     let id = UUID()
     let image: UIImage
@@ -621,40 +671,6 @@ private struct PicoPrintedPhoto: Identifiable, Equatable {
 
     static func == (lhs: PicoPrintedPhoto, rhs: PicoPrintedPhoto) -> Bool {
         lhs.id == rhs.id
-    }
-}
-
-private struct PicoCameraModeSelector: View {
-    @Binding var selection: CameraStyleView.Mode
-    let isDisabled: Bool
-
-    var body: some View {
-        HStack(spacing: 6) {
-            ForEach(CameraStyleView.Mode.allCases) { mode in
-                Button {
-                    guard !isDisabled else { return }
-                    withAnimation(.spring(response: 0.24, dampingFraction: 0.86)) {
-                        selection = mode
-                    }
-                } label: {
-                    Text(mode.shortTitle)
-                        .font(.system(size: 12, weight: .heavy, design: .rounded))
-                        .tracking(0.8)
-                        .foregroundStyle(selection == mode ? .black : .white.opacity(0.80))
-                        .frame(maxWidth: .infinity)
-                        .padding(.vertical, 9)
-                        .background(
-                            Capsule()
-                                .fill(selection == mode ? Color.white.opacity(0.92) : Color.clear)
-                        )
-                }
-                .buttonStyle(.plain)
-            }
-        }
-        .padding(5)
-        .background(Color.black.opacity(0.25), in: Capsule())
-        .overlay(Capsule().stroke(Color.white.opacity(0.18), lineWidth: 1))
-        .opacity(isDisabled ? 0.48 : 1.0)
     }
 }
 
@@ -690,7 +706,7 @@ private struct PicoPrintedPhotoDetailOverlay: View {
 
     var body: some View {
         ZStack {
-            Color(red: 0.09, green: 0.04, blue: 0.08)
+            Color(red: 0.09, green: 0.09, blue: 0.10)
                 .opacity(0.98)
                 .ignoresSafeArea()
                 .onTapGesture(perform: onDismiss)
@@ -703,7 +719,7 @@ private struct PicoPrintedPhotoDetailOverlay: View {
                             .foregroundStyle(.white)
                             .frame(width: 56, height: 56)
                             .background(Color.white.opacity(0.06), in: Circle())
-                            .overlay(Circle().stroke(Color.purple.opacity(0.32), lineWidth: 2))
+                            .overlay(Circle().stroke(Color.white.opacity(0.22), lineWidth: 2))
                     }
                     .buttonStyle(.plain)
 
@@ -719,7 +735,7 @@ private struct PicoPrintedPhotoDetailOverlay: View {
                     .padding(.horizontal, 28)
                     .padding(.vertical, 8)
                     .background(Color.white.opacity(0.06), in: Capsule())
-                    .overlay(Capsule().stroke(Color.purple.opacity(0.32), lineWidth: 2))
+                    .overlay(Capsule().stroke(Color.white.opacity(0.22), lineWidth: 2))
 
                     Spacer()
 
@@ -729,7 +745,7 @@ private struct PicoPrintedPhotoDetailOverlay: View {
                             .foregroundStyle(.white)
                             .frame(width: 56, height: 56)
                             .background(Color.white.opacity(0.06), in: Circle())
-                            .overlay(Circle().stroke(Color.purple.opacity(0.32), lineWidth: 2))
+                            .overlay(Circle().stroke(Color.white.opacity(0.22), lineWidth: 2))
                     }
                     .buttonStyle(.plain)
                 }
@@ -756,43 +772,17 @@ private enum PicoCameraImageComposer {
     static func composeScene(
         background: UIImage,
         previewSize: CGSize,
-        characterAssetName: String,
-        characterOffset: CGSize,
-        characterScale: CGFloat,
         steps: Int
     ) -> UIImage {
         let backgroundSize = background.size
-        let scaleX = backgroundSize.width / max(previewSize.width, 1)
-        let scaleY = backgroundSize.height / max(previewSize.height, 1)
 
         let format = UIGraphicsImageRendererFormat.default()
         format.scale = background.scale
         format.opaque = true
 
         let renderer = UIGraphicsImageRenderer(size: backgroundSize, format: format)
-        return renderer.image { context in
+        return renderer.image { _ in
             background.draw(in: CGRect(origin: .zero, size: backgroundSize))
-
-            if let characterImage = UIImage(named: characterAssetName) {
-                let baseCharacterWidth = min(previewSize.width * 0.32, 132)
-                let characterWidth = baseCharacterWidth * characterScale * scaleX
-                let characterAspect = characterImage.size.height / max(characterImage.size.width, 1)
-                let characterHeight = characterWidth * characterAspect
-                let centerX = (previewSize.width * 0.5 + characterOffset.width) * scaleX
-                let centerY = (previewSize.height * 0.5 + characterOffset.height) * scaleY
-                let rect = CGRect(
-                    x: centerX - characterWidth * 0.5,
-                    y: centerY - characterHeight * 0.5,
-                    width: characterWidth,
-                    height: characterHeight
-                )
-
-                context.cgContext.saveGState()
-                context.cgContext.setShadow(offset: CGSize(width: 0, height: 8), blur: 12, color: UIColor.black.withAlphaComponent(0.24).cgColor)
-                characterImage.draw(in: rect)
-                context.cgContext.restoreGState()
-            }
-
             drawTinyStepStamp(steps: steps, canvasSize: backgroundSize)
         }
     }
@@ -913,6 +903,7 @@ private struct PicoCameraPreviewView: UIViewRepresentable {
     }
 
     func updateUIView(_ uiView: PreviewUIView, context: Context) {
+        uiView.updatePreviewMirroring()
     }
 
     static func dismantleUIView(_ uiView: PreviewUIView, coordinator: ()) {
@@ -947,6 +938,7 @@ private struct PicoCameraPreviewView: UIViewRepresentable {
         override func layoutSubviews() {
             super.layoutSubviews()
             previewLayer.frame = bounds
+            updatePreviewMirroring()
         }
 
         private func setupSession() {
@@ -973,6 +965,15 @@ private struct PicoCameraPreviewView: UIViewRepresentable {
                 session.addOutput(photoOutput)
             }
             session.commitConfiguration()
+
+            updatePreviewMirroring()
+        }
+
+        func updatePreviewMirroring() {
+            guard let connection = previewLayer.connection else { return }
+            guard connection.isVideoMirroringSupported else { return }
+            connection.automaticallyAdjustsVideoMirroring = false
+            connection.isVideoMirrored = position == .front
         }
 
         func startRunning() {
@@ -1023,42 +1024,6 @@ private struct PicoCameraPreviewView: UIViewRepresentable {
     }
 }
 
-private struct PicoARCameraBackgroundView: UIViewRepresentable {
-    typealias Snapshotter = CameraStyleView.Snapshotter
-
-    let onSnapshotReady: (@escaping Snapshotter) -> Void
-
-    func makeUIView(context: Context) -> ARView {
-        let view = ARView(frame: .zero)
-        view.isUserInteractionEnabled = false
-
-        let configuration = ARWorldTrackingConfiguration()
-        configuration.planeDetection = [.horizontal, .vertical]
-
-        view.automaticallyConfigureSession = false
-        view.session.run(configuration)
-        view.renderOptions.insert(.disableMotionBlur)
-
-        DispatchQueue.main.async {
-            onSnapshotReady { completion in
-                view.snapshot(saveToHDR: false) { image in
-                    completion(image)
-                }
-            }
-        }
-
-        return view
-    }
-
-    func updateUIView(_ uiView: ARView, context: Context) {
-    }
-
-    static func dismantleUIView(_ uiView: ARView, coordinator: ()) {
-        uiView.session.pause()
-    }
-}
-
-
 private extension UIImage {
     func picoFixedOrientation() -> UIImage {
         guard imageOrientation != .up else { return self }
@@ -1104,5 +1069,11 @@ private extension UIImage {
 
         guard let cropped = cgImage.cropping(to: cropRect.integral) else { return nil }
         return UIImage(cgImage: cropped, scale: scale, orientation: .up)
+    }
+}
+
+private extension CGFloat {
+    func interpolated(to target: CGFloat, progress: CGFloat) -> CGFloat {
+        self + ((target - self) * progress)
     }
 }
