@@ -3,7 +3,7 @@
 //  MeMo
 //
 //  Created for MeMo camera printing UI adjustment.
-//  BUILD_FIX_V9_SEAMLESS_SQUARE_CAMERA_APPLIED.
+//  BUILD_FIX_V12_OPAQUE_CAMERA_FRAME_APPLIED.
 //
 
 import SwiftUI
@@ -66,6 +66,7 @@ struct CameraStyleView: View {
 
     @State private var mode: Mode
     @State private var cameraPosition: CameraPosition = .back
+    @State private var isFlashOn: Bool = false
 
     @State private var takeBackgroundSnapshot: Snapshotter?
     @State private var lastPreviewSize: CGSize = .zero
@@ -164,7 +165,6 @@ struct CameraStyleView: View {
                         .allowsHitTesting(chromeRevealProgress > 0.98 && !isClosing)
                 }
                 .frame(width: geometry.size.width, height: geometry.size.height)
-                .opacity(isClosing ? max(0.001, cameraRevealProgress) : 1)
 
                 if let printingPhoto {
                     printingPhotoLayer(image: printingPhoto, screenSize: geometry.size)
@@ -188,6 +188,7 @@ struct CameraStyleView: View {
                 safeAreaInsets = Self.currentWindowSafeAreaInsets()
                 mode = .plain
                 cameraPosition = .back
+                isFlashOn = false
                 isClosing = false
                 isSlotExpanded = false
                 cameraRevealProgress = 0
@@ -274,7 +275,7 @@ struct CameraStyleView: View {
         let height = compactHeight.interpolated(to: expandedHeight, progress: progress)
         let corner = CGFloat(22).interpolated(to: 56, progress: progress)
         let previewCorner = CGFloat(18).interpolated(to: 34, progress: progress)
-        let topMargin = max(4, safeTop * 0.10) + 8
+        let topMargin = max(4, safeTop * 0.10) + 6
 
         return CameraPanelLayout(
             width: width,
@@ -301,14 +302,13 @@ struct CameraStyleView: View {
         )
 
         return ZStack(alignment: .top) {
-            RoundedRectangle(cornerRadius: displayedCorner, style: .continuous)
-                .fill(Color.black)
-                .overlay(
-                    RoundedRectangle(cornerRadius: displayedCorner, style: .continuous)
-                        .stroke(Color.black.opacity(0.98), lineWidth: 4)
-                )
-                .shadow(color: .black.opacity(0.34), radius: 12, x: 0, y: 8)
-                .shadow(color: .white.opacity(0.13), radius: 3, x: 0, y: -1)
+            PicoRaisedRoundedPanel(
+                cornerRadius: displayedCorner,
+                fill: Color.black,
+                outerStrokeOpacity: 0.92,
+                highlightOpacity: 0.16,
+                shadowOpacity: 0.36
+            )
 
             if !isSlotExpanded {
                 cameraPreviewWindow(previewCorner: layout.previewCorner)
@@ -350,7 +350,10 @@ struct CameraStyleView: View {
 
     @ViewBuilder
     private var captureSurface: some View {
-        PicoCameraPreviewView(position: cameraPosition == .front ? .front : .back) { snapshotter in
+        PicoCameraPreviewView(
+            position: cameraPosition == .front ? .front : .back,
+            isFlashEnabled: isFlashOn
+        ) { snapshotter in
             DispatchQueue.main.async {
                 takeBackgroundSnapshot = snapshotter
             }
@@ -369,18 +372,25 @@ struct CameraStyleView: View {
     private var controlsArea: some View {
         HStack(alignment: .center, spacing: 58) {
             Button {
-                // 見た目だけのフラッシュOFFボタン。実撮影は常に flashMode = .off。
+                guard !isCapturing, !isPrinting, !isClosing else { return }
+                isFlashOn.toggle()
             } label: {
                 PicoRoundControlButton(
-                    systemImage: "bolt.slash.fill",
+                    systemImage: isFlashOn ? "bolt.fill" : "bolt.slash.fill",
                     size: 58,
-                    fill: Color.black.opacity(0.08),
-                    foreground: Color.black.opacity(0.46),
+                    fill: isFlashOn
+                        ? Color(red: 0.34, green: 0.58, blue: 0.36).opacity(0.96)
+                        : Color.black.opacity(0.08),
+                    foreground: isFlashOn
+                        ? Color.white.opacity(0.94)
+                        : Color.black.opacity(0.46),
                     lineWidth: 0
                 )
             }
-            .disabled(true)
-            .opacity(0.90)
+            .buttonStyle(.plain)
+            .disabled(isCapturing || isPrinting || isClosing)
+            .opacity((isCapturing || isPrinting || isClosing) ? 0.42 : 1.0)
+            .accessibilityLabel(isFlashOn ? "フラッシュON" : "フラッシュOFF")
 
             Button {
                 captureAndPrint()
@@ -405,15 +415,19 @@ struct CameraStyleView: View {
 
             Button {
                 guard cameraRotateEnabled else { return }
-                cameraPosition = cameraPosition == .back ? .front : .back
+                let nextPosition: CameraPosition = cameraPosition == .back ? .front : .back
+                cameraPosition = nextPosition
+                if nextPosition == .front {
+                    isFlashOn = false
+                }
                 takeBackgroundSnapshot = nil
             } label: {
                 PicoRoundControlButton(
                     systemImage: "arrow.triangle.2.circlepath.camera",
                     size: 58,
-                    fill: .clear,
-                    foreground: Color.black.opacity(0.58),
-                    lineWidth: 3
+                    fill: Color(red: 0.30, green: 0.45, blue: 0.72).opacity(0.96),
+                    foreground: Color.white.opacity(0.94),
+                    lineWidth: 0
                 )
             }
             .disabled(!cameraRotateEnabled)
@@ -424,19 +438,13 @@ struct CameraStyleView: View {
 
     private var topCloseButton: some View {
         Button(action: requestClose) {
-            HStack(spacing: 8) {
-                Image(systemName: "xmark")
-                    .font(.system(size: 14, weight: .heavy))
-
-                Text("閉じる")
-                    .font(.system(size: 12, weight: .heavy, design: .rounded))
-            }
-            .foregroundStyle(.white.opacity(0.94))
-            .padding(.horizontal, 14)
-            .frame(height: 40)
-            .background(Color.black.opacity(0.24), in: Capsule())
-            .overlay(Capsule().stroke(Color.white.opacity(0.18), lineWidth: 1))
-            .shadow(color: .black.opacity(0.18), radius: 5, x: 0, y: 3)
+            PicoRoundControlButton(
+                systemImage: "xmark",
+                size: 50,
+                fill: Color(red: 0.16, green: 0.16, blue: 0.18).opacity(0.96),
+                foreground: Color.white.opacity(0.94),
+                lineWidth: 0
+            )
         }
         .buttonStyle(.plain)
         .opacity((isPrinting || isClosing) ? 0.35 : 1.0)
@@ -478,13 +486,13 @@ struct CameraStyleView: View {
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
         .background(
-            RoundedRectangle(cornerRadius: 18, style: .continuous)
-                .fill(Color(red: 0.13, green: 0.13, blue: 0.15).opacity(0.96))
-                .shadow(color: .black.opacity(0.42), radius: 8, x: 0, y: 4)
-        )
-        .overlay(
-            RoundedRectangle(cornerRadius: 18, style: .continuous)
-                .stroke(Color.black.opacity(0.40), lineWidth: 2)
+            PicoRaisedRoundedPanel(
+                cornerRadius: 18,
+                fill: Color(red: 0.13, green: 0.13, blue: 0.15).opacity(0.96),
+                outerStrokeOpacity: 0.82,
+                highlightOpacity: 0.12,
+                shadowOpacity: 0.42
+            )
         )
     }
 
@@ -674,6 +682,34 @@ private struct PicoPrintedPhoto: Identifiable, Equatable {
     }
 }
 
+private struct PicoRaisedRoundedPanel: View {
+    let cornerRadius: CGFloat
+    let fill: Color
+    let outerStrokeOpacity: Double
+    let highlightOpacity: Double
+    let shadowOpacity: Double
+
+    var body: some View {
+        RoundedRectangle(cornerRadius: cornerRadius, style: .continuous)
+            .fill(fill)
+            .background {
+                ZStack {
+                    RoundedRectangle(cornerRadius: cornerRadius + 4, style: .continuous)
+                        .stroke(Color.black.opacity(outerStrokeOpacity), lineWidth: 5)
+                        .padding(-3)
+
+                    RoundedRectangle(cornerRadius: cornerRadius + 5, style: .continuous)
+                        .stroke(Color.white.opacity(highlightOpacity), lineWidth: 1.2)
+                        .padding(-5)
+                        .offset(y: -1)
+                }
+                .allowsHitTesting(false)
+            }
+            .shadow(color: .black.opacity(shadowOpacity), radius: 10, x: 0, y: 7)
+            .shadow(color: .white.opacity(highlightOpacity * 0.52), radius: 3, x: 0, y: -1)
+    }
+}
+
 private struct PicoRoundControlButton: View {
     let systemImage: String
     let size: CGFloat
@@ -682,13 +718,31 @@ private struct PicoRoundControlButton: View {
     let lineWidth: CGFloat
 
     var body: some View {
-        Image(systemName: systemImage)
-            .font(.system(size: size * 0.34, weight: .heavy))
-            .foregroundStyle(foreground)
-            .frame(width: size, height: size)
-            .background(fill, in: Circle())
-            .overlay(Circle().stroke(foreground.opacity(0.82), lineWidth: lineWidth))
-            .shadow(color: .black.opacity(0.24), radius: 5, x: 0, y: 4)
+        ZStack {
+            Circle()
+                .fill(Color.black.opacity(0.16))
+                .frame(width: size, height: size)
+                .shadow(color: .black.opacity(0.28), radius: 8, x: 0, y: 7)
+
+            Circle()
+                .fill(fill)
+                .frame(width: size * 0.82, height: size * 0.82)
+                .overlay(
+                    Circle()
+                        .stroke(Color.black.opacity(0.72), lineWidth: max(2, lineWidth))
+                )
+                .overlay(
+                    Circle()
+                        .stroke(Color.white.opacity(0.18), lineWidth: 1.2)
+                        .padding(3)
+                )
+                .shadow(color: .white.opacity(0.22), radius: 3, x: 0, y: -2)
+
+            Image(systemName: systemImage)
+                .font(.system(size: size * 0.31, weight: .heavy))
+                .foregroundStyle(foreground)
+        }
+        .frame(width: size, height: size)
     }
 }
 
@@ -886,10 +940,11 @@ private struct PicoCameraPreviewView: UIViewRepresentable {
     }
 
     let position: Position
+    let isFlashEnabled: Bool
     let onSnapshotReady: (@escaping Snapshotter) -> Void
 
     func makeUIView(context: Context) -> PreviewUIView {
-        let view = PreviewUIView(position: position)
+        let view = PreviewUIView(position: position, isFlashEnabled: isFlashEnabled)
         view.isUserInteractionEnabled = false
         view.startRunning()
 
@@ -903,6 +958,7 @@ private struct PicoCameraPreviewView: UIViewRepresentable {
     }
 
     func updateUIView(_ uiView: PreviewUIView, context: Context) {
+        uiView.setFlashEnabled(isFlashEnabled)
         uiView.updatePreviewMirroring()
     }
 
@@ -916,21 +972,26 @@ private struct PicoCameraPreviewView: UIViewRepresentable {
         private let photoOutput = AVCapturePhotoOutput()
         private var photoCompletion: ((UIImage?) -> Void)?
         private let position: Position
+        private var isFlashEnabled: Bool
+        private var deviceHasFlash: Bool = false
 
-        init(position: Position) {
+        init(position: Position, isFlashEnabled: Bool) {
             self.position = position
+            self.isFlashEnabled = isFlashEnabled
             super.init(frame: .zero)
             setupSession()
         }
 
         override init(frame: CGRect) {
             self.position = .back
+            self.isFlashEnabled = false
             super.init(frame: frame)
             setupSession()
         }
 
         required init?(coder: NSCoder) {
             self.position = .back
+            self.isFlashEnabled = false
             super.init(coder: coder)
             setupSession()
         }
@@ -958,6 +1019,8 @@ private struct PicoCameraPreviewView: UIViewRepresentable {
                 session.canAddInput(input)
             else { return }
 
+            deviceHasFlash = device.hasFlash
+
             session.beginConfiguration()
             session.sessionPreset = .photo
             session.addInput(input)
@@ -967,6 +1030,10 @@ private struct PicoCameraPreviewView: UIViewRepresentable {
             session.commitConfiguration()
 
             updatePreviewMirroring()
+        }
+
+        func setFlashEnabled(_ isEnabled: Bool) {
+            isFlashEnabled = isEnabled
         }
 
         func updatePreviewMirroring() {
@@ -996,7 +1063,7 @@ private struct PicoCameraPreviewView: UIViewRepresentable {
         func capturePhoto(completion: @escaping (UIImage?) -> Void) {
             photoCompletion = completion
             let settings = AVCapturePhotoSettings()
-            settings.flashMode = .off
+            settings.flashMode = (isFlashEnabled && deviceHasFlash) ? .on : .off
             photoOutput.capturePhoto(with: settings, delegate: self)
         }
 
