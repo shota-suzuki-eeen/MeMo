@@ -5,9 +5,8 @@
 //  Updated for the multi-gacha specification.
 //  Adds フードガチャ using gatyaMachine_food and keeps いつでもガチャ as the initial machine.
 //  Pity counter is tracked independently for each gacha definition.
-//  2026/06 update:
-//  広告停止中の状態は維持しつつ、ガチャ画面表示時に rewardGacha の画面単位プリロードを行います。
-//  広告再開時は、広告準備中の無料10回ボタンに「↻ 広告を準備中」を表示します。
+//  2026/07 update: AdMob一時停止モード中だけ広告なし無料10回表示にし、
+//  通常モード中は広告視聴ボタン、赤色ボタン、ロード中スピナーを表示。
 //
 
 import SwiftUI
@@ -305,6 +304,7 @@ struct GachaView: View {
     @EnvironmentObject private var bgmManager: BGMManager
     @Query private var states: [AppState]
 
+    @ObservedObject private var adMobManager = AdMobManager.shared
     @ObservedObject private var rewardedAdManager = AdMobManager.shared.rewardGacha
 
     private let isTutorialMode: Bool
@@ -448,11 +448,30 @@ struct GachaView: View {
         return rewardedAdManager.isReady
     }
 
+    private var isFreeTenDrawAdBypassMode: Bool {
+        shouldRequireRewardGachaReadyForFreeTenDraw && rewardedAdManager.isAvailableWithoutAd
+    }
+
+    private var shouldShowFreeTenDrawLoadingIndicator: Bool {
+        shouldRequireRewardGachaReadyForFreeTenDraw
+        && !isFreeTenDrawAdBypassMode
+        && rewardedAdManager.isLoading
+    }
+
+    private var freeTenDrawButtonSystemImageName: String? {
+        guard shouldRequireRewardGachaReadyForFreeTenDraw else { return nil }
+        guard !isFreeTenDrawAdBypassMode else { return nil }
+        guard !rewardedAdManager.isLoading else { return nil }
+        return "play.rectangle.fill"
+    }
+
     private var freeTenDrawButtonTitle: String {
         if isTutorialMode { return tutorialFreeTenDrawStarted ? "無料10回（体験済み）" : "無料10回" }
         if isInitialIPadFreeTenDrawAvailable { return "初回無料10回（SR確定）" }
         guard isFreeTenDrawSlotAvailable else { return "無料10回（時間外 / 使用済み）" }
-        return rewardedAdManager.isReady ? "無料10回ガチャ" : "↻ 広告を準備中"
+        if isFreeTenDrawAdBypassMode { return "無料10回ガチャ" }
+        if rewardedAdManager.isLoading || !rewardedAdManager.isReady { return "広告を準備中" }
+        return "広告視聴で無料10回ガチャ"
     }
 
     var body: some View {
@@ -693,17 +712,54 @@ struct GachaView: View {
                 drawButton(title: "1回 / 500歩", accent: .white, isEnabled: canSingleDraw) { startPaidDraw(mode: .single) }
                 drawButton(title: "10回 / 5,000歩", accent: Color(red: 1.0, green: 0.86, blue: 0.24), isEnabled: canTenDraw) { startPaidDraw(mode: .ten) }
             }
-            drawButton(title: freeTenDrawButtonTitle, accent: Color(red: 0.45, green: 1.0, blue: 0.78), isEnabled: canFreeTenDraw, action: freeTenDrawAction)
+            drawButton(
+                title: freeTenDrawButtonTitle,
+                accent: .white,
+                isEnabled: canFreeTenDraw,
+                systemImageName: freeTenDrawButtonSystemImageName,
+                showsLoadingIndicator: shouldShowFreeTenDrawLoadingIndicator,
+                fillsAccent: shouldRequireRewardGachaReadyForFreeTenDraw,
+                action: freeTenDrawAction
+            )
         }
         .opacity(buttonsOpacity)
     }
 
-    private func drawButton(title: String, accent: Color, isEnabled: Bool, action: @escaping () -> Void) -> some View {
+    private func drawButton(
+        title: String,
+        accent: Color,
+        isEnabled: Bool,
+        systemImageName: String? = nil,
+        showsLoadingIndicator: Bool = false,
+        fillsAccent: Bool = false,
+        action: @escaping () -> Void
+    ) -> some View {
         Button(action: action) {
             ZStack {
-                RoundedRectangle(cornerRadius: Layout.buttonCornerRadius, style: .continuous).fill(Color.black.opacity(0.48))
+                let fillColor = fillsAccent ? Color(red: 0.92, green: 0.15, blue: 0.14) : Color.black.opacity(0.48)
+                RoundedRectangle(cornerRadius: Layout.buttonCornerRadius, style: .continuous).fill(fillColor)
                 RoundedRectangle(cornerRadius: Layout.buttonCornerRadius, style: .continuous).stroke(accent.opacity(0.95), lineWidth: 2)
-                Text(title).font(.system(size: 20, weight: .black)).foregroundStyle(accent).multilineTextAlignment(.center).padding(.horizontal, 10)
+                HStack(spacing: 7) {
+                    if showsLoadingIndicator {
+                        ProgressView()
+                            .progressViewStyle(.circular)
+                            .tint(accent)
+                            .scaleEffect(0.78)
+                            .frame(width: 17, height: 17)
+                    } else if let systemImageName {
+                        Image(systemName: systemImageName)
+                            .font(.system(size: 17, weight: .black))
+                    }
+
+                    Text(title)
+                        .font(.system(size: 20, weight: .black))
+                        .foregroundStyle(accent)
+                        .multilineTextAlignment(.center)
+                        .lineLimit(1)
+                        .minimumScaleFactor(0.68)
+                        .allowsTightening(true)
+                }
+                .padding(.horizontal, 10)
             }
             .frame(maxWidth: .infinity)
             .frame(height: Layout.buttonHeight)
@@ -740,7 +796,7 @@ struct GachaView: View {
 
         guard rewardedAdManager.isReady else {
             AdMobManager.shared.prepareRewardGacha()
-            showToast("広告を準備中です。少し待ってからもう一度お試しください")
+            showToast(adMobManager.rewardedUnavailableMessage)
             return
         }
 
@@ -748,7 +804,7 @@ struct GachaView: View {
             onReward: { beginFreeTenDraw() },
             onUnavailable: {
                 AdMobManager.shared.prepareRewardGacha()
-                showToast("広告を準備中です。少し待ってからもう一度お試しください")
+                showToast(adMobManager.rewardedUnavailableMessage)
             }
         )
     }

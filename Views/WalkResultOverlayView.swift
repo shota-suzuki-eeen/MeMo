@@ -3,8 +3,9 @@
 //  MeMo
 //
 //  お散歩終了時に中央表示するリザルトオーバーレイ。
-//  2026/06 update: 広告停止中のため、2倍獲得を広告なしで実行する表記に調整。
 //  2026/06 update: リザルト画面表示時点で rewardWalkDouble を画面単位プリロード。
+//  2026/07 update: AdMob一時停止モード中だけ広告なし2倍獲得表示にし、
+//  通常モード中は広告視聴ボタンとロード中スピナーを表示。
 //
 
 import SwiftUI
@@ -25,6 +26,7 @@ struct WalkResultOverlayView: View {
     }
 
     @EnvironmentObject private var bgmManager: BGMManager
+    @ObservedObject private var adMobManager = AdMobManager.shared
     @ObservedObject private var doubleRewardAd = AdMobManager.shared.rewardWalkDouble
 
     @State private var displayedSteps: Int = 0
@@ -33,12 +35,26 @@ struct WalkResultOverlayView: View {
     @State private var isClaiming: Bool = false
     @State private var messageText: String?
 
+    private var isTemporaryPauseMode: Bool {
+        adMobManager.isAdMobTemporaryPauseModeActive
+    }
+
     private var doubleRewardButtonTitle: String {
-        doubleRewardAd.isReady ? "2倍獲得" : "広告を準備中"
+        if isTemporaryPauseMode { return "2倍獲得" }
+        if doubleRewardAd.isLoading { return "広告を準備中" }
+        return "広告視聴で2倍獲得"
     }
 
     private var canUseDoubleRewardButton: Bool {
-        !isClaiming && !isAnimatingDoubleCountUp && doubleRewardAd.isReady
+        guard !isClaiming && !isAnimatingDoubleCountUp else { return false }
+        if isTemporaryPauseMode {
+            return adMobManager.canGrantRewardWithoutAdInTemporaryPause
+        }
+        return doubleRewardAd.isReady
+    }
+
+    private var shouldShowDoubleRewardLoadingIndicator: Bool {
+        !isTemporaryPauseMode && doubleRewardAd.isLoading
     }
 
     var body: some View {
@@ -89,6 +105,7 @@ struct WalkResultOverlayView: View {
                     WalkResultButton(
                         title: "OK",
                         systemImageName: nil,
+                        showsLoadingIndicator: false,
                         isPrimary: false,
                         isEnabled: !isClaiming && !isAnimatingDoubleCountUp,
                         action: claimNormal
@@ -96,7 +113,8 @@ struct WalkResultOverlayView: View {
 
                     WalkResultButton(
                         title: doubleRewardButtonTitle,
-                        systemImageName: doubleRewardAd.isReady ? nil : "arrow.triangle.2.circlepath",
+                        systemImageName: isTemporaryPauseMode ? nil : "play.rectangle.fill",
+                        showsLoadingIndicator: shouldShowDoubleRewardLoadingIndicator,
                         isPrimary: true,
                         isEnabled: canUseDoubleRewardButton,
                         action: claimDoubleWithAd
@@ -149,7 +167,7 @@ struct WalkResultOverlayView: View {
     private func claimDoubleWithAd() {
         guard !isClaiming else { return }
         guard doubleRewardAd.isReady else {
-            messageText = "広告を準備中です。少し待ってからもう一度お試しください。"
+            messageText = adMobManager.rewardedUnavailableMessage
             AdMobManager.shared.prepareRewardWalkDouble()
             return
         }
@@ -165,7 +183,7 @@ struct WalkResultOverlayView: View {
         } onUnavailable: {
             Task { @MainActor in
                 isClaiming = false
-                messageText = "現在利用できません。少し待ってからもう一度お試しください。"
+                messageText = adMobManager.rewardedUnavailableMessage
                 AdMobManager.shared.prepareRewardWalkDouble()
             }
         }
@@ -205,12 +223,19 @@ struct WalkResultOverlayView: View {
 private struct WalkResultButton: View {
     let title: String
     let systemImageName: String?
+    let showsLoadingIndicator: Bool
     let isPrimary: Bool
     let isEnabled: Bool
     let action: () -> Void
 
     private var buttonBackgroundColor: Color {
-        isPrimary
+        if !isEnabled {
+            return isPrimary
+            ? Color(red: 0.92, green: 0.15, blue: 0.14).opacity(0.58)
+            : Color.white.opacity(0.48)
+        }
+
+        return isPrimary
         ? Color(red: 0.92, green: 0.15, blue: 0.14)
         : Color.white.opacity(0.72)
     }
@@ -218,7 +243,13 @@ private struct WalkResultButton: View {
     var body: some View {
         Button(action: action) {
             HStack(spacing: 6) {
-                if let systemImageName {
+                if showsLoadingIndicator {
+                    ProgressView()
+                        .progressViewStyle(.circular)
+                        .tint(isPrimary ? .white : .primary)
+                        .scaleEffect(0.76)
+                        .frame(width: 16, height: 16)
+                } else if let systemImageName {
                     Image(systemName: systemImageName)
                         .font(.system(size: 15, weight: .black))
                 }
@@ -226,7 +257,8 @@ private struct WalkResultButton: View {
                 Text(title)
                     .font(.system(size: 15, weight: .black, design: .rounded))
                     .lineLimit(1)
-                    .minimumScaleFactor(0.75)
+                    .minimumScaleFactor(0.70)
+                    .allowsTightening(true)
             }
             .foregroundStyle(isPrimary ? .white : .primary)
             .frame(maxWidth: .infinity)
@@ -240,10 +272,10 @@ private struct WalkResultButton: View {
                     .stroke(Color.white.opacity(isPrimary ? 0.34 : 0.42), lineWidth: 1.5)
             )
             .clipShape(RoundedRectangle(cornerRadius: 18, style: .continuous))
-            .shadow(color: .black.opacity(0.14), radius: 8, x: 0, y: 5)
+            .shadow(color: .black.opacity(isEnabled ? 0.14 : 0.08), radius: 8, x: 0, y: 5)
         }
         .buttonStyle(.plain)
         .disabled(!isEnabled)
-        .opacity(isEnabled ? 1 : 0.55)
+        .opacity(isEnabled ? 1 : 0.68)
     }
 }

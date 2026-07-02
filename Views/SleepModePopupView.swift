@@ -3,7 +3,8 @@
 //  MeMo
 //
 //  おやすみモード開始確認・残り時間表示用ポップアップ。
-//  2026/06 update: 広告停止中のため、開始・リセット文言を広告なしの表記に調整。
+//  2026/07 update: AdMob一時停止モード中だけ広告なし開始/リセット表示にし、
+//  通常モード中は広告視聴ボタンとロード中スピナーを表示。
 //
 
 import SwiftUI
@@ -17,6 +18,8 @@ struct SleepModePopupView: View {
     let onLater: () -> Void
     let onStartWithAd: () -> Void
     let onResetWithAd: () -> Void
+
+    @ObservedObject private var adMobManager = AdMobManager.shared
 
     private var safeRemainingSeconds: Int {
         max(0, Int(ceil(remainingSeconds)))
@@ -34,17 +37,33 @@ struct SleepModePopupView: View {
         safeRemainingSeconds % 60
     }
 
+    private var isTemporaryPauseMode: Bool {
+        adMobManager.isAdMobTemporaryPauseModeActive
+    }
+
+    private var isRewardButtonEnabled: Bool {
+        if isTemporaryPauseMode {
+            return adMobManager.canGrantRewardWithoutAdInTemporaryPause
+        }
+        return isAdReady
+    }
+
     private var rewardedButtonTitle: String {
-        "時間リセット"
+        if isTemporaryPauseMode { return "リセット" }
+        return "広告視聴でリセット"
     }
 
     private var startButtonTitle: String {
-        "おやすみスタート"
+        if isTemporaryPauseMode { return "スタート" }
+        return "広告視聴でスタート"
     }
 
     private var rewardedButtonSystemImageName: String? {
-//        "play.rectangle.fill"
-        nil
+        isTemporaryPauseMode ? nil : "play.rectangle.fill"
+    }
+
+    private var shouldShowAdLoadingIndicator: Bool {
+        !isTemporaryPauseMode && isAdLoading
     }
 
     var body: some View {
@@ -95,6 +114,7 @@ struct SleepModePopupView: View {
                 SleepModePopupButton(
                     title: "もどる",
                     systemImageName: nil,
+                    showsLoadingIndicator: false,
                     isPrimary: false,
                     isEnabled: true,
                     action: onLater
@@ -104,16 +124,18 @@ struct SleepModePopupView: View {
                     SleepModePopupButton(
                         title: rewardedButtonTitle,
                         systemImageName: rewardedButtonSystemImageName,
+                        showsLoadingIndicator: shouldShowAdLoadingIndicator,
                         isPrimary: true,
-                        isEnabled: true,
+                        isEnabled: isRewardButtonEnabled,
                         action: onResetWithAd
                     )
                 } else {
                     SleepModePopupButton(
                         title: startButtonTitle,
                         systemImageName: rewardedButtonSystemImageName,
+                        showsLoadingIndicator: shouldShowAdLoadingIndicator,
                         isPrimary: true,
-                        isEnabled: true,
+                        isEnabled: isRewardButtonEnabled,
                         action: onStartWithAd
                     )
                 }
@@ -210,12 +232,19 @@ private struct TimeUnitSeparator: View {
 private struct SleepModePopupButton: View {
     let title: String
     let systemImageName: String?
+    let showsLoadingIndicator: Bool
     let isPrimary: Bool
     let isEnabled: Bool
     let action: () -> Void
 
     private var buttonBackgroundColor: Color {
-        isPrimary
+        if !isEnabled {
+            return isPrimary
+            ? Color(red: 0.92, green: 0.15, blue: 0.14).opacity(0.58)
+            : Color.white.opacity(0.48)
+        }
+
+        return isPrimary
         ? Color(red: 0.92, green: 0.15, blue: 0.14)
         : Color.white.opacity(0.72)
     }
@@ -223,7 +252,13 @@ private struct SleepModePopupButton: View {
     var body: some View {
         Button(action: action) {
             HStack(spacing: 6) {
-                if let systemImageName {
+                if showsLoadingIndicator {
+                    ProgressView()
+                        .progressViewStyle(.circular)
+                        .tint(isPrimary ? .white : .primary)
+                        .scaleEffect(0.76)
+                        .frame(width: 16, height: 16)
+                } else if let systemImageName {
                     Image(systemName: systemImageName)
                         .font(.system(size: 15, weight: .black))
                 }
@@ -231,7 +266,8 @@ private struct SleepModePopupButton: View {
                 Text(title)
                     .font(.system(size: 15, weight: .black, design: .rounded))
                     .lineLimit(1)
-                    .minimumScaleFactor(0.78)
+                    .minimumScaleFactor(0.72)
+                    .allowsTightening(true)
             }
             .foregroundStyle(isPrimary ? .white : .primary)
             .frame(maxWidth: .infinity)
@@ -245,10 +281,10 @@ private struct SleepModePopupButton: View {
                     .stroke(Color.white.opacity(isPrimary ? 0.34 : 0.42), lineWidth: 1.5)
             )
             .clipShape(RoundedRectangle(cornerRadius: 18, style: .continuous))
-            .shadow(color: .black.opacity(0.14), radius: 8, x: 0, y: 5)
+            .shadow(color: .black.opacity(isEnabled ? 0.14 : 0.08), radius: 8, x: 0, y: 5)
         }
         .buttonStyle(.plain)
         .disabled(!isEnabled)
-        .opacity(isEnabled ? 1 : 0.55)
+        .opacity(isEnabled ? 1 : 0.68)
     }
 }

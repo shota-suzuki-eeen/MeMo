@@ -3,7 +3,8 @@
 //  MeMo
 //
 //  HomeView の menu_button 内 walk_button から呼び出す開始確認ポップアップ。
-//  2026/06 update: 広告停止中のため、開始ボタン文言を広告なしの表記に調整。
+//  2026/07 update: AdMob一時停止モード中だけ広告なしスタート表示にし、
+//  通常モード中は広告視聴ボタンとロード中スピナーを表示。
 //
 
 import SwiftUI
@@ -18,21 +19,29 @@ struct WalkStartPopupView: View {
     let onStartWithAd: () -> Void
     let onStartRainFree: () -> Void
 
+    @ObservedObject private var adMobManager = AdMobManager.shared
+
+    private var isTemporaryPauseMode: Bool {
+        adMobManager.isAdMobTemporaryPauseModeActive
+    }
+
     private var shouldDisableAdStartButton: Bool {
-        false
+        if isTemporaryPauseMode {
+            return !adMobManager.canGrantRewardWithoutAdInTemporaryPause
+        }
+        return !isAdReady
     }
 
     private var adStartButtonTitle: String {
-        "スタート"
+        isTemporaryPauseMode ? "スタート" : "広告視聴でスタート"
     }
 
     private var adStartButtonSystemImageName: String? {
-//        "play.rectangle.fill"
-        nil
+        isTemporaryPauseMode ? nil : "play.rectangle.fill"
     }
 
     private var shouldShowAdStartLoadingIndicator: Bool {
-        false
+        !isTemporaryPauseMode && isAdLoading
     }
 
     var body: some View {
