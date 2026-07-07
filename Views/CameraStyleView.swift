@@ -2,13 +2,15 @@
 //  CameraStyleView.swift
 //  MeMo
 //
-//  Created for MeMo camera printing UI adjustment.
-//  BUILD_FIX_V12_OPAQUE_CAMERA_FRAME_APPLIED.
+//  Dynamic Island-connected camera printer animation.
+//  PHOTO_PRINT_DYNAMIC_ISLAND_CLOSE_SINK_V5_APPLIED.
 //
 
 import SwiftUI
 import UIKit
 import AVFoundation
+import Combine
+import Metal
 
 struct CameraStyleView: View {
     typealias Snapshotter = (@escaping (UIImage?) -> Void) -> Void
@@ -53,6 +55,14 @@ struct CameraStyleView: View {
         let topMargin: CGFloat
     }
 
+    private struct CameraPrinterLayout {
+        let width: CGFloat
+        let height: CGFloat
+        let corner: CGFloat
+        let slotWidth: CGFloat
+        let slotGlobalY: CGFloat
+    }
+
     let initialMode: Mode
     let todaySteps: Int
     let todayActiveKcal: Int
@@ -64,6 +74,9 @@ struct CameraStyleView: View {
     let onCapture: (UIImage) -> Void
     let onCaptureWithPlace: ((UIImage, String?, Double?, Double?) -> Void)?
 
+    @Environment(\.scenePhase) private var scenePhase
+    @Environment(\.accessibilityReduceMotion) private var accessibilityReduceMotion
+
     @State private var mode: Mode
     @State private var cameraPosition: CameraPosition = .back
     @State private var isFlashOn: Bool = false
@@ -72,16 +85,19 @@ struct CameraStyleView: View {
     @State private var lastPreviewSize: CGSize = .zero
     @State private var safeAreaInsets: UIEdgeInsets = .zero
 
-    @State private var isCapturing: Bool = false
-    @State private var isPrinting: Bool = false
-    @State private var isSlotExpanded: Bool = false
     @State private var isClosing: Bool = false
     @State private var cameraRevealProgress: CGFloat = 0
     @State private var chromeRevealProgress: CGFloat = 0
-    @State private var printProgress: CGFloat = 0
-    @State private var printingPhoto: UIImage?
+    @State private var closingIslandSinkProgress: CGFloat = 0
     @State private var recentPhotos: [PicoPrintedPhoto] = []
     @State private var selectedPhoto: PicoPrintedPhoto?
+    @State private var presentationTask: Task<Void, Never>?
+    @State private var printPresentationTask: Task<Void, Never>?
+    @State private var isPrintPresentationActive: Bool = false
+    @State private var isLowPowerModeEnabled = ProcessInfo.processInfo.isLowPowerModeEnabled
+
+    @StateObject private var printController = PhotoPrintAnimationController()
+    @Namespace private var photoTransitionNamespace
 
     init(
         initialMode: Mode = .plain,
@@ -122,16 +138,42 @@ struct CameraStyleView: View {
     }
 
     private var cameraRotateEnabled: Bool {
-        !isCapturing && !isPrinting && !isClosing
+        !printController.isBusy && !isClosing
     }
 
     private var backgroundRevealOpacity: CGFloat {
-        max(0, min(1, chromeRevealProgress))
+        if isPrintPresentationActive || printController.isBusy {
+            return 1
+        }
+        return max(0, min(1, chromeRevealProgress))
+    }
+
+    private var photoTrayRevealOpacity: CGFloat {
+        if isPrintPresentationActive || printController.isBusy {
+            return 1
+        }
+        return max(0, min(1, chromeRevealProgress))
+    }
+
+    private var shaderAllowed: Bool {
+        guard !accessibilityReduceMotion else { return false }
+        guard !isLowPowerModeEnabled else { return false }
+        guard !Self.isRunningForPreview else { return false }
+        guard PhotoPrintShaderSupport.isFunctionAvailable else { return false }
+        return true
     }
 
     var body: some View {
         GeometryReader { geometry in
-            let panelLayout = cameraPanelLayout(in: geometry.size, safeTop: geometry.safeAreaInsets.top)
+            let panelLayout = cameraPanelLayout(
+                in: geometry.size,
+                safeTop: geometry.safeAreaInsets.top
+            )
+            let printerLayout = cameraPrinterLayout(
+                base: panelLayout,
+                screenSize: geometry.size,
+                progress: printController.printerProgress
+            )
 
             ZStack {
                 backgroundBody
@@ -142,18 +184,30 @@ struct CameraStyleView: View {
                     Color.clear
                         .frame(height: panelLayout.topMargin)
 
-                    cameraPanel(layout: panelLayout, screenSize: geometry.size)
+                    cameraPanel(
+                        layout: panelLayout,
+                        printerLayout: printerLayout,
+                        screenSize: geometry.size
+                    )
 
                     closeButtonRow
                         .padding(.top, 12)
                         .padding(.horizontal, 26)
                         .opacity(chromeRevealProgress)
-                        .allowsHitTesting(chromeRevealProgress > 0.98 && !isClosing)
+                        .allowsHitTesting(
+                            chromeRevealProgress > 0.98
+                            && !isClosing
+                            && !printController.isBusy
+                        )
 
                     controlsArea
                         .padding(.top, 20)
                         .opacity(chromeRevealProgress)
-                        .allowsHitTesting(chromeRevealProgress > 0.98 && !isClosing)
+                        .allowsHitTesting(
+                            chromeRevealProgress > 0.98
+                            && !isClosing
+                            && !printController.isBusy
+                        )
 
                     Spacer(minLength: 22)
 
@@ -161,16 +215,35 @@ struct CameraStyleView: View {
                         .frame(height: max(230, geometry.size.height * 0.30))
                         .padding(.horizontal, 18)
                         .padding(.bottom, 18 + geometry.safeAreaInsets.bottom)
-                        .opacity(chromeRevealProgress)
-                        .allowsHitTesting(chromeRevealProgress > 0.98 && !isClosing)
+                        .opacity(photoTrayRevealOpacity)
+                        .allowsHitTesting(
+                            chromeRevealProgress > 0.98
+                            && !isClosing
+                            && !printController.isBusy
+                        )
                 }
                 .frame(width: geometry.size.width, height: geometry.size.height)
+                .zIndex(200)
 
-                if let printingPhoto {
-                    printingPhotoLayer(image: printingPhoto, screenSize: geometry.size)
-                        .zIndex(240)
-                        .allowsHitTesting(false)
+                if let payload = printController.payload {
+                    printingPhotoLayer(
+                        payload: payload,
+                        screenSize: geometry.size,
+                        slotY: printerLayout.slotGlobalY,
+                        slotWidth: printerLayout.slotWidth
+                    )
+                    .zIndex(printController.phase == .movingToTray ? 500 : 260)
+                    .allowsHitTesting(false)
+                    .accessibilityHidden(true)
                 }
+
+
+                Color.white
+                    .opacity(printController.flashOpacity)
+                    .ignoresSafeArea()
+                    .allowsHitTesting(false)
+                    .accessibilityHidden(true)
+                    .zIndex(700)
 
                 if let selectedPhoto {
                     PicoPrintedPhotoDetailOverlay(
@@ -184,28 +257,22 @@ struct CameraStyleView: View {
             }
             .background(FullScreenCoverClearBackground())
             .ignoresSafeArea()
+            .modifier(
+                PhotoPrintSensoryFeedbackModifier(
+                    shutterTrigger: printController.shutterHapticTrigger,
+                    printerTrigger: printController.printerHapticTrigger,
+                    feedTrigger: printController.feedHapticTrigger,
+                    settleTrigger: printController.settleHapticTrigger,
+                    trayTrigger: printController.trayHapticTrigger
+                )
+            )
             .onAppear {
-                safeAreaInsets = Self.currentWindowSafeAreaInsets()
-                mode = .plain
-                cameraPosition = .back
-                isFlashOn = false
-                isClosing = false
-                isSlotExpanded = false
-                cameraRevealProgress = 0
-                chromeRevealProgress = 0
-
-                DispatchQueue.main.async {
-                    withAnimation(.spring(response: 0.46, dampingFraction: 0.86)) {
-                        cameraRevealProgress = 1
-                    }
-                }
-
-                DispatchQueue.main.asyncAfter(deadline: .now() + 0.06) {
-                    guard !isClosing else { return }
-                    withAnimation(.easeOut(duration: 0.14)) {
-                        chromeRevealProgress = 1
-                    }
-                }
+                prepareForPresentation()
+            }
+            .onDisappear {
+                presentationTask?.cancel()
+                printPresentationTask?.cancel()
+                printController.finishImmediately(completePendingPhoto: true)
             }
             .onChange(of: geometry.size) { _, _ in
                 safeAreaInsets = Self.currentWindowSafeAreaInsets()
@@ -217,11 +284,66 @@ struct CameraStyleView: View {
             .onChange(of: cameraPosition) { _, _ in
                 takeBackgroundSnapshot = nil
             }
+            .onChange(of: scenePhase) { _, newPhase in
+                guard newPhase != .active else { return }
+                finishPrintPresentationImmediately()
+            }
+            .onChange(of: accessibilityReduceMotion) { _, reduceMotion in
+                guard reduceMotion, printController.isBusy else { return }
+                finishPrintPresentationImmediately()
+            }
+            .onReceive(
+                NotificationCenter.default.publisher(
+                    for: Notification.Name.NSProcessInfoPowerStateDidChange
+                )
+            ) { _ in
+                isLowPowerModeEnabled = ProcessInfo.processInfo.isLowPowerModeEnabled
+            }
+            .onReceive(
+                NotificationCenter.default.publisher(
+                    for: UIApplication.didReceiveMemoryWarningNotification
+                )
+            ) { _ in
+                finishPrintPresentationImmediately()
+            }
             .accessibilityElement(children: .contain)
             .accessibilityLabel("カメラ画面")
         }
         .statusBarHidden(true)
         .ignoresSafeArea()
+    }
+
+    private func prepareForPresentation() {
+        presentationTask?.cancel()
+        printPresentationTask?.cancel()
+        printController.resetToIdle()
+        safeAreaInsets = Self.currentWindowSafeAreaInsets()
+        mode = .plain
+        cameraPosition = .back
+        isFlashOn = false
+        isClosing = false
+        isPrintPresentationActive = false
+        cameraRevealProgress = 0
+        chromeRevealProgress = 0
+        closingIslandSinkProgress = 0
+        isLowPowerModeEnabled = ProcessInfo.processInfo.isLowPowerModeEnabled
+
+        presentationTask = Task { @MainActor in
+            withAnimation(.spring(response: 0.46, dampingFraction: 0.86)) {
+                cameraRevealProgress = 1
+            }
+
+            do {
+                try await Task<Never, Never>.sleep(nanoseconds: 60_000_000)
+            } catch {
+                return
+            }
+
+            guard !Task.isCancelled, !isClosing else { return }
+            withAnimation(.easeOut(duration: 0.14)) {
+                chromeRevealProgress = 1
+            }
+        }
     }
 
     private var backgroundBody: some View {
@@ -253,17 +375,24 @@ struct CameraStyleView: View {
         .ignoresSafeArea()
     }
 
-    private func cameraPanelLayout(in screenSize: CGSize, safeTop: CGFloat) -> CameraPanelLayout {
-        let horizontalMargin: CGFloat = 26
-        let expandedWidth = max(300, screenSize.width - (horizontalMargin * 2))
+    private func cameraPanelLayout(
+        in screenSize: CGSize,
+        safeTop: CGFloat
+    ) -> CameraPanelLayout {
+        let isWideLayout = screenSize.width >= 700
+        let horizontalMargin: CGFloat = isWideLayout ? 40 : 26
+        let proposedWidth = screenSize.width - (horizontalMargin * 2)
+        let expandedWidth: CGFloat
 
-        // ダイナミックアイランドの縦幅を黒枠の基準値として扱う。
-        // 左右・下もこの値に揃えて、外枠の厚みを均一化する。
+        if isWideLayout {
+            expandedWidth = min(max(420, screenSize.width * 0.64), 570)
+        } else {
+            expandedWidth = max(300, proposedWidth)
+        }
+
+        // Dynamic Island搭載有無を端末名で分岐せず、safe areaを黒枠厚の基準にする。
         let dynamicIslandHeight = max(38, min(54, safeTop + 2))
         let previewWidth = max(180, expandedWidth - (dynamicIslandHeight * 2))
-
-        // 撮影画面と外黒枠の上端・横位置は維持し、縦方向だけ下へ拡張する。
-        // 既存の撮影画面の横幅を基準に正方形化するため、外黒枠も結果的に正方形になる。
         let previewHeight = previewWidth
         let expandedHeight = previewHeight + (dynamicIslandHeight * 2)
 
@@ -287,64 +416,131 @@ struct CameraStyleView: View {
         )
     }
 
-    private func cameraPanel(layout: CameraPanelLayout, screenSize: CGSize) -> some View {
-        let compactWidth = min(screenSize.width * 0.72, 360)
-        let displayedWidth = isSlotExpanded ? compactWidth : layout.width
-        let displayedHeight: CGFloat = isSlotExpanded ? 74 : layout.height
-        let displayedCorner: CGFloat = isSlotExpanded ? 38 : layout.corner
+    private func cameraPrinterLayout(
+        base: CameraPanelLayout,
+        screenSize: CGSize,
+        progress: CGFloat
+    ) -> CameraPrinterLayout {
+        let clamped = max(0, min(1.04, progress))
+        let normalized = max(0, min(1, clamped))
+        let isWideLayout = screenSize.width >= 700
 
-        // アニメーション中の小さいカプセル状態では実寸の黒枠が入り切らないため、
-        // 最終状態では frameInset に一致し、途中だけ破綻しない範囲に丸める。
+        // カメラ表示中は base の大きさをそのまま使用する。
+        // 撮影後に cameraRevealProgress が 0 まで戻ると base は Dynamic Island 相当の
+        // コンパクト形状になるため、そこから横長プリンターへ変形させる。
+        let targetWidth = min(
+            max(isWideLayout ? 360 : 286, screenSize.width * (isWideLayout ? 0.52 : 0.76)),
+            isWideLayout ? 470 : 360
+        )
+        let targetHeight = min(
+            isWideLayout ? 92 : 78,
+            max(70, screenSize.height * 0.105)
+        )
+
+        let width = base.width.interpolated(to: targetWidth, progress: clamped)
+        let height = base.height.interpolated(to: targetHeight, progress: clamped)
+        let corner = base.corner.interpolated(
+            to: targetHeight * 0.48,
+            progress: normalized
+        )
+        // 排出口そのものは描画しない。黒いDynamic Island形状の下端を
+        // ポラロイドが現れ始める境界としてのみ使用する。
+        let slotWidth = max(84, width - (isWideLayout ? 44 : 34))
+        let slotGlobalY = base.topMargin + max(28, height - 4)
+
+        return CameraPrinterLayout(
+            width: width,
+            height: height,
+            corner: corner,
+            slotWidth: slotWidth,
+            slotGlobalY: slotGlobalY
+        )
+    }
+
+    private func cameraPanel(
+        layout: CameraPanelLayout,
+        printerLayout: CameraPrinterLayout,
+        screenSize: CGSize
+    ) -> some View {
         let effectiveFrameInset = min(
             layout.frameInset,
-            max(8, (displayedWidth - 26) * 0.5),
-            max(8, (displayedHeight - 26) * 0.5)
+            max(8, (layout.width - 26) * 0.5),
+            max(8, (layout.height - 26) * 0.5)
         )
+        let previewWidth = max(1, layout.width - (effectiveFrameInset * 2))
+        let previewHeight = max(1, layout.height - (effectiveFrameInset * 2))
+        let printerStrength = max(0, min(1, printController.printerProgress))
+        let sinkProgress = max(0, min(1, closingIslandSinkProgress))
+        let sinkScaleProgress = max(0, min(1, sinkProgress / 0.62))
+        let sinkFadeProgress = max(0, min(1, (sinkProgress - 0.24) / 0.76))
+        let exteriorFadeProgress = max(0, min(1, sinkProgress / 0.24))
+        let exteriorVisibility = Double(1 - exteriorFadeProgress)
+        let panelVisibility = Double(1 - sinkFadeProgress)
 
         return ZStack(alignment: .top) {
             PicoRaisedRoundedPanel(
-                cornerRadius: displayedCorner,
+                cornerRadius: printerLayout.corner,
                 fill: Color.black,
-                outerStrokeOpacity: 0.92,
-                highlightOpacity: 0.16,
-                shadowOpacity: 0.36
+                outerStrokeOpacity: 0.92 * exteriorVisibility,
+                highlightOpacity: (0.16 + (Double(printerStrength) * 0.05)) * exteriorVisibility,
+                shadowOpacity: (0.36 + (Double(printerStrength) * 0.15)) * exteriorVisibility,
+                shadowRadius: (10 + (printerStrength * 5)) * (1 - sinkScaleProgress),
+                shadowY: (7 + (printerStrength * 4)) * (1 - sinkScaleProgress)
             )
 
-            if !isSlotExpanded {
+            if cameraRevealProgress > 0.08 && !isClosing {
                 cameraPreviewWindow(previewCorner: layout.previewCorner)
-                    .padding(.horizontal, effectiveFrameInset)
-                    .padding(.vertical, effectiveFrameInset)
-                    .opacity(cameraRevealProgress > 0.08 ? 1 : 0)
-                    .transition(.opacity.combined(with: .scale(scale: 0.96, anchor: .top)))
+                    .frame(width: previewWidth, height: previewHeight)
+                    .position(
+                        x: printerLayout.width * 0.5,
+                        y: effectiveFrameInset + (previewHeight * 0.5)
+                    )
+                    .overlay {
+                        Color.black
+                            .opacity(Double(printerStrength) * 0.035)
+                            .clipShape(
+                                RoundedRectangle(
+                                    cornerRadius: layout.previewCorner,
+                                    style: .continuous
+                                )
+                            )
+                    }
             }
 
-            if isSlotExpanded {
-                RoundedRectangle(cornerRadius: 34, style: .continuous)
-                    .fill(Color.black)
-                    .frame(height: 50)
-                    .padding(.horizontal, 10)
-                    .padding(.top, 12)
-                    .shadow(color: .black.opacity(0.55), radius: 8, x: 0, y: 4)
-            }
         }
-        .frame(width: displayedWidth, height: displayedHeight)
-        .scaleEffect(0.92 + (cameraRevealProgress * 0.08), anchor: .top)
-        .animation(.spring(response: 0.36, dampingFraction: 0.82), value: isSlotExpanded)
+        .frame(width: printerLayout.width, height: printerLayout.height, alignment: .top)
+        .offset(x: printController.printerShakeX)
+        .scaleEffect(
+            (0.92 + (max(cameraRevealProgress, printerStrength) * 0.08))
+                * (1 - (sinkScaleProgress * 0.28)),
+            anchor: .center
+        )
+        .opacity(panelVisibility)
     }
 
     private func cameraPreviewWindow(previewCorner: CGFloat) -> some View {
         GeometryReader { proxy in
             ZStack {
                 captureSurface
+
+                if let freezeImage = printController.freezeImage {
+                    Image(uiImage: freezeImage)
+                        .resizable()
+                        .scaledToFill()
+                        .frame(width: proxy.size.width, height: proxy.size.height)
+                        .clipped()
+                        .allowsHitTesting(false)
+                        .accessibilityHidden(true)
+                }
             }
             .frame(width: proxy.size.width, height: proxy.size.height)
             .clipShape(RoundedRectangle(cornerRadius: previewCorner, style: .continuous))
-            .overlay {
-                RoundedRectangle(cornerRadius: previewCorner, style: .continuous)
-                    .stroke(Color.white.opacity(0.10), lineWidth: 1)
+            .onAppear {
+                lastPreviewSize = proxy.size
             }
-            .onAppear { lastPreviewSize = proxy.size }
-            .onChange(of: proxy.size) { _, newSize in lastPreviewSize = newSize }
+            .onChange(of: proxy.size) { _, newSize in
+                lastPreviewSize = newSize
+            }
         }
     }
 
@@ -364,7 +560,6 @@ struct CameraStyleView: View {
     private var closeButtonRow: some View {
         HStack {
             topCloseButton
-
             Spacer()
         }
     }
@@ -372,7 +567,7 @@ struct CameraStyleView: View {
     private var controlsArea: some View {
         HStack(alignment: .center, spacing: 58) {
             Button {
-                guard !isCapturing, !isPrinting, !isClosing else { return }
+                guard !printController.isBusy, !isClosing else { return }
                 isFlashOn.toggle()
             } label: {
                 PicoRoundControlButton(
@@ -388,8 +583,8 @@ struct CameraStyleView: View {
                 )
             }
             .buttonStyle(.plain)
-            .disabled(isCapturing || isPrinting || isClosing)
-            .opacity((isCapturing || isPrinting || isClosing) ? 0.42 : 1.0)
+            .disabled(printController.isBusy || isClosing)
+            .opacity((printController.isBusy || isClosing) ? 0.42 : 1.0)
             .accessibilityLabel(isFlashOn ? "フラッシュON" : "フラッシュOFF")
 
             Button {
@@ -409,9 +604,18 @@ struct CameraStyleView: View {
                 }
             }
             .buttonStyle(.plain)
-            .disabled(isCapturing || isPrinting || takeBackgroundSnapshot == nil || isClosing)
-            .opacity((isCapturing || isPrinting || takeBackgroundSnapshot == nil || isClosing) ? 0.58 : 1.0)
+            .disabled(
+                printController.isBusy
+                || takeBackgroundSnapshot == nil
+                || isClosing
+            )
+            .opacity(
+                (printController.isBusy || takeBackgroundSnapshot == nil || isClosing)
+                ? 0.58
+                : 1.0
+            )
             .accessibilityLabel("撮影")
+            .accessibilityHint(printController.isBusy ? "写真を処理中です" : "")
 
             Button {
                 guard cameraRotateEnabled else { return }
@@ -447,8 +651,8 @@ struct CameraStyleView: View {
             )
         }
         .buttonStyle(.plain)
-        .opacity((isPrinting || isClosing) ? 0.35 : 1.0)
-        .disabled(isPrinting || isClosing)
+        .opacity((printController.isBusy || isClosing) ? 0.35 : 1.0)
+        .disabled(printController.isBusy || isClosing)
         .accessibilityLabel("閉じる")
     }
 
@@ -470,13 +674,24 @@ struct CameraStyleView: View {
                                     selectedPhoto = photo
                                 }
                             } label: {
-                                Image(uiImage: photo.image)
-                                    .resizable()
-                                    .scaledToFit()
+                                PolaroidPaperView(sceneImage: photo.displaySceneImage)
                                     .frame(width: 112)
-                                    .shadow(color: .black.opacity(0.22), radius: 5, x: 0, y: 4)
+                                    .matchedGeometryEffect(
+                                        id: photo.id,
+                                        in: photoTransitionNamespace,
+                                        properties: .frame,
+                                        anchor: .center,
+                                        isSource: false
+                                    )
+                                    .shadow(
+                                        color: .black.opacity(0.22),
+                                        radius: 5,
+                                        x: 0,
+                                        y: 4
+                                    )
                             }
                             .buttonStyle(.plain)
+                            .accessibilityLabel("撮影した写真")
                         }
                     }
                 }
@@ -491,68 +706,179 @@ struct CameraStyleView: View {
                 fill: Color(red: 0.13, green: 0.13, blue: 0.15).opacity(0.96),
                 outerStrokeOpacity: 0.82,
                 highlightOpacity: 0.12,
-                shadowOpacity: 0.42
+                shadowOpacity: 0.42,
+                shadowRadius: 10,
+                shadowY: 7
             )
         )
     }
 
-    private func printingPhotoLayer(image: UIImage, screenSize: CGSize) -> some View {
-        let width = min(screenSize.width * 0.64, 315)
-        let startY = safeAreaInsets.top + 48
-        let endY = min(screenSize.height * 0.40, 360)
-        let y = startY + ((endY - startY) * printProgress)
+    @ViewBuilder
+    private func printingPhotoLayer(
+        payload: PhotoPrintPayload,
+        screenSize: CGSize,
+        slotY: CGFloat,
+        slotWidth: CGFloat
+    ) -> some View {
+        let validSize = CGSize(
+            width: max(1, screenSize.width),
+            height: max(1, screenSize.height)
+        )
+        let photoWidth = min(
+            validSize.width * (validSize.width >= 700 ? 0.46 : 0.64),
+            validSize.width >= 700 ? 340 : 315
+        )
+        let useShader = shaderAllowed && printController.phase.allowsPaperShader
+        let shouldMaskAtSlot = printController.phase.requiresSlotMask
+        // 目に見える排出口は描画しない。黒いDynamic Island内部の有効幅を
+        // 左右方向のマスクに使いつつ、下端より少し上まで表示を許可することで、
+        // ポラロイドが黒い本体の前面を通って排出されるように見せる。
+        let visibleSlotWidth = max(52, min(validSize.width - 24, slotWidth - 16))
+        let frontOverlap = max(20, min(34, slotWidth * 0.10))
 
-        return Image(uiImage: image)
-            .resizable()
-            .scaledToFit()
-            .frame(width: width)
-            .rotationEffect(.degrees(Double(-2.0 + (printProgress * 2.0))))
-            .opacity(printProgress < 0.03 ? 0 : 1)
-            .shadow(color: .black.opacity(0.28), radius: 16, x: 0, y: 10)
-            .position(x: screenSize.width * 0.5, y: y)
+        ZStack {
+            if accessibilityReduceMotion {
+                if printController.phase.hasStartedEjection {
+                    ReducedMotionEjectingPolaroidView(
+                        image: payload.photo.displaySceneImage,
+                        photoID: payload.photo.id,
+                        namespace: photoTransitionNamespace,
+                        trigger: printController.animationID,
+                        photoWidth: photoWidth,
+                        screenSize: validSize,
+                        slotY: slotY
+                    )
+                } else {
+                    InitialEjectingPolaroidView(
+                        image: payload.photo.displaySceneImage,
+                        photoID: payload.photo.id,
+                        namespace: photoTransitionNamespace,
+                        photoWidth: photoWidth,
+                        screenSize: validSize,
+                        slotY: slotY,
+                        reduceMotion: true
+                    )
+                }
+            } else if #available(iOS 17.0, *) {
+                KeyframedEjectingPolaroidView(
+                    image: payload.photo.displaySceneImage,
+                    photoID: payload.photo.id,
+                    namespace: photoTransitionNamespace,
+                    trigger: printController.animationID,
+                    photoWidth: photoWidth,
+                    screenSize: validSize,
+                    slotY: slotY,
+                    configuration: printController.configuration,
+                    shaderEnabled: useShader
+                )
+            } else if printController.phase.hasStartedEjection {
+                LegacyEjectingPolaroidView(
+                    image: payload.photo.displaySceneImage,
+                    photoID: payload.photo.id,
+                    namespace: photoTransitionNamespace,
+                    trigger: printController.animationID,
+                    photoWidth: photoWidth,
+                    screenSize: validSize,
+                    slotY: slotY,
+                    configuration: printController.configuration
+                )
+            } else {
+                InitialEjectingPolaroidView(
+                    image: payload.photo.displaySceneImage,
+                    photoID: payload.photo.id,
+                    namespace: photoTransitionNamespace,
+                    photoWidth: photoWidth,
+                    screenSize: validSize,
+                    slotY: slotY,
+                    reduceMotion: false
+                )
+            }
+        }
+        .frame(width: validSize.width, height: validSize.height)
+        .mask {
+            if shouldMaskAtSlot {
+                HStack(spacing: 0) {
+                    Spacer(minLength: 0)
+
+                    VStack(spacing: 0) {
+                        Color.clear
+                            .frame(height: max(0, slotY - frontOverlap))
+
+                        Rectangle()
+                            .fill(Color.white)
+                    }
+                    .frame(width: visibleSlotWidth)
+
+                    Spacer(minLength: 0)
+                }
+            } else {
+                Rectangle().fill(Color.white)
+            }
+        }
     }
 
     private func requestClose() {
-        guard !isPrinting, !isClosing else { return }
+        guard !printController.isBusy, !isClosing else { return }
+        presentationTask?.cancel()
+        printPresentationTask?.cancel()
         isClosing = true
         selectedPhoto = nil
+        closingIslandSinkProgress = 0
 
-        // 閉じる時は開く時の逆順にする。
-        // 先に背景・操作UI・写真トレイをフェードアウトし、その後で撮影画面だけを
-        // ダイナミックアイランド方向へ畳むことで、ホーム画面へシームレスに戻す。
-        withAnimation(.easeInOut(duration: 0.12)) {
-            chromeRevealProgress = 0
-        }
+        presentationTask = Task { @MainActor in
+            withAnimation(.easeInOut(duration: 0.12)) {
+                chromeRevealProgress = 0
+            }
 
-        DispatchQueue.main.asyncAfter(deadline: .now() + 0.06) {
+            do {
+                try await Task<Never, Never>.sleep(nanoseconds: 60_000_000)
+            } catch {
+                return
+            }
+
+            guard !Task.isCancelled else { return }
             withAnimation(.easeInOut(duration: 0.30)) {
                 cameraRevealProgress = 0
             }
-        }
 
-        DispatchQueue.main.asyncAfter(deadline: .now() + 0.54) {
+            do {
+                try await Task<Never, Never>.sleep(nanoseconds: 300_000_000)
+            } catch {
+                return
+            }
+
+            guard !Task.isCancelled else { return }
+            withAnimation(.easeInOut(duration: 0.20)) {
+                closingIslandSinkProgress = 1
+            }
+
+            do {
+                try await Task<Never, Never>.sleep(nanoseconds: 220_000_000)
+            } catch {
+                return
+            }
+
+            guard !Task.isCancelled else { return }
             onCancel()
         }
     }
 
     private func captureAndPrint() {
-        guard !isCapturing, !isPrinting, !isClosing else { return }
+        guard !isClosing else { return }
         guard let takeBackgroundSnapshot else { return }
         guard lastPreviewSize.width > 1, lastPreviewSize.height > 1 else { return }
-
-        isCapturing = true
+        guard printController.beginCapture() else { return }
 
         let fixedPreviewSize = lastPreviewSize
         let fixedMetrics = currentMetricValues
 
         takeBackgroundSnapshot { background in
-            defer {
-                DispatchQueue.main.async {
-                    isCapturing = false
+            guard let background else {
+                Task { @MainActor in
+                    printController.failCapture()
                 }
+                return
             }
-
-            guard let background else { return }
 
             let normalizedBackground = background
                 .picoFixedOrientation()
@@ -564,70 +890,168 @@ struct CameraStyleView: View {
                 previewSize: fixedPreviewSize,
                 steps: fixedMetrics.steps
             )
-
-            let polaroid = PicoCameraImageComposer.makePolaroid(from: composed)
+            let finalPolaroid = PicoCameraImageComposer.makePolaroid(from: composed)
+            let displayScene = finalPolaroid.picoPolaroidSceneImage()
+                ?? composed.picoDownsampled(maxPixelDimension: 900)
+            let displayFreeze = normalizedBackground.picoDownsampled(maxPixelDimension: 1_200)
+            let photo = PicoPrintedPhoto(
+                image: finalPolaroid,
+                displaySceneImage: displayScene,
+                date: Date()
+            )
+            let payload = PhotoPrintPayload(
+                photo: photo,
+                freezeImage: displayFreeze,
+                placeName: nil,
+                latitude: nil,
+                longitude: nil
+            )
 
             Task { @MainActor in
-                startPrintAnimation(
-                    finalImage: polaroid,
-                    placeName: nil,
-                    latitude: nil,
-                    longitude: nil
-                )
+                startPrintAnimation(payload: payload)
             }
         }
     }
 
     @MainActor
-    private func startPrintAnimation(
-        finalImage: UIImage,
-        placeName: String?,
-        latitude: Double?,
-        longitude: Double?
-    ) {
-        guard !isPrinting else { return }
-
-        printingPhoto = finalImage
-        printProgress = 0
-        isPrinting = true
-
-        withAnimation(.spring(response: 0.30, dampingFraction: 0.82)) {
-            isSlotExpanded = true
-        }
-
-        Task { @MainActor in
-            try? await Task.sleep(nanoseconds: 180_000_000)
-
-            withAnimation(.easeOut(duration: 1.05)) {
-                printProgress = 1
-            }
-
-            try? await Task.sleep(nanoseconds: 1_120_000_000)
-
-            let printed = PicoPrintedPhoto(image: finalImage, date: Date())
-            withAnimation(.spring(response: 0.36, dampingFraction: 0.82)) {
-                recentPhotos.insert(printed, at: 0)
-                if recentPhotos.count > 20 {
-                    recentPhotos = Array(recentPhotos.prefix(20))
+    private func startPrintAnimation(payload: PhotoPrintPayload) {
+        let didStage = printController.stageCapture(
+            payload: payload,
+            reduceMotion: accessibilityReduceMotion,
+            onPersist: { persistedPayload in
+                if let onCaptureWithPlace {
+                    onCaptureWithPlace(
+                        persistedPayload.photo.image,
+                        persistedPayload.placeName,
+                        persistedPayload.latitude,
+                        persistedPayload.longitude
+                    )
+                } else {
+                    onCapture(persistedPayload.photo.image)
                 }
+            },
+            onInsertIntoTray: { printedPhoto in
+                insertPhotoIfNeeded(printedPhoto)
+            },
+            onComplete: {
+                restoreCameraAfterPrint()
+            }
+        )
+
+        guard didStage else { return }
+
+        presentationTask?.cancel()
+        printPresentationTask?.cancel()
+        isPrintPresentationActive = true
+
+        let collapseDuration = accessibilityReduceMotion ? 0.18 : 0.48
+        let chromeDuration = accessibilityReduceMotion ? 0.08 : 0.16
+        let settleNanoseconds: UInt64 = accessibilityReduceMotion
+            ? 210_000_000
+            : 610_000_000
+
+        printPresentationTask = Task { @MainActor in
+            withAnimation(.easeInOut(duration: chromeDuration)) {
+                chromeRevealProgress = 0
             }
 
-            if let onCaptureWithPlace {
-                onCaptureWithPlace(finalImage, placeName, latitude, longitude)
-            } else {
-                onCapture(finalImage)
+            do {
+                try await Task<Never, Never>.sleep(nanoseconds: 70_000_000)
+            } catch {
+                return
             }
 
-            try? await Task.sleep(nanoseconds: 160_000_000)
-
-            withAnimation(.spring(response: 0.34, dampingFraction: 0.86)) {
-                isSlotExpanded = false
+            guard !Task.isCancelled else { return }
+            withAnimation(
+                .spring(
+                    response: collapseDuration,
+                    dampingFraction: accessibilityReduceMotion ? 1.0 : 0.90
+                )
+            ) {
+                cameraRevealProgress = 0
             }
 
-            try? await Task.sleep(nanoseconds: 220_000_000)
-            printingPhoto = nil
-            printProgress = 0
-            isPrinting = false
+            do {
+                try await Task<Never, Never>.sleep(nanoseconds: settleNanoseconds)
+            } catch {
+                return
+            }
+
+            guard !Task.isCancelled else { return }
+            printController.startStagedAnimation(
+                reduceMotion: accessibilityReduceMotion
+            )
+        }
+    }
+
+    @MainActor
+    private func restoreCameraAfterPrint() {
+        printPresentationTask?.cancel()
+
+        printPresentationTask = Task { @MainActor in
+            withAnimation(
+                .spring(
+                    response: accessibilityReduceMotion ? 0.22 : 0.48,
+                    dampingFraction: accessibilityReduceMotion ? 1.0 : 0.86
+                )
+            ) {
+                cameraRevealProgress = 1
+            }
+
+            do {
+                try await Task<Never, Never>.sleep(
+                    nanoseconds: accessibilityReduceMotion
+                        ? 40_000_000
+                        : 90_000_000
+                )
+            } catch {
+                return
+            }
+
+            guard !Task.isCancelled else { return }
+            withAnimation(.easeOut(duration: accessibilityReduceMotion ? 0.08 : 0.16)) {
+                chromeRevealProgress = 1
+            }
+
+            do {
+                try await Task<Never, Never>.sleep(nanoseconds: 180_000_000)
+            } catch {
+                return
+            }
+
+            guard !Task.isCancelled else { return }
+            isPrintPresentationActive = false
+            UIAccessibility.post(
+                notification: .announcement,
+                argument: "写真を撮影しました"
+            )
+        }
+    }
+
+    @MainActor
+    private func finishPrintPresentationImmediately() {
+        printPresentationTask?.cancel()
+        printPresentationTask = nil
+        printController.finishImmediately(completePendingPhoto: true)
+        cameraRevealProgress = 1
+        chromeRevealProgress = 1
+        isPrintPresentationActive = false
+    }
+
+    @MainActor
+    private func insertPhotoIfNeeded(_ photo: PicoPrintedPhoto) {
+        guard !recentPhotos.contains(where: { $0.id == photo.id }) else { return }
+
+        withAnimation(
+            .spring(
+                response: printController.configuration.trayMovementDuration,
+                dampingFraction: 0.86
+            )
+        ) {
+            recentPhotos.insert(photo, at: 0)
+            if recentPhotos.count > 20 {
+                recentPhotos = Array(recentPhotos.prefix(20))
+            }
         }
     }
 
@@ -638,11 +1062,1143 @@ struct CameraStyleView: View {
         }
     }
 
+    private static var isRunningForPreview: Bool {
+        ProcessInfo.processInfo.environment["XCODE_RUNNING_FOR_PREVIEWS"] == "1"
+    }
+
     private static func currentWindowSafeAreaInsets() -> UIEdgeInsets {
         let scenes = UIApplication.shared.connectedScenes
         let windowScene = scenes.compactMap { $0 as? UIWindowScene }.first
-        let window = windowScene?.windows.first(where: { $0.isKeyWindow }) ?? windowScene?.windows.first
+        let window = windowScene?.windows.first(where: { $0.isKeyWindow })
+            ?? windowScene?.windows.first
         return window?.safeAreaInsets ?? .zero
+    }
+}
+
+private enum PhotoPrintPhase: Equatable {
+    case idle
+    case capturing
+    case shutter
+    case expandingPrinter
+    case feeding
+    case ejecting
+    case releasing
+    case settling
+    case movingToTray
+    case completed
+    case retracting
+    case cancelled
+    case failed
+
+    var isBusy: Bool {
+        switch self {
+        case .idle, .cancelled, .failed:
+            return false
+        default:
+            return true
+        }
+    }
+
+    var allowsPaperShader: Bool {
+        switch self {
+        case .feeding, .ejecting, .releasing, .settling:
+            return true
+        default:
+            return false
+        }
+    }
+
+    var requiresSlotMask: Bool {
+        switch self {
+        case .shutter, .expandingPrinter, .feeding, .ejecting, .releasing, .settling:
+            return true
+        default:
+            return false
+        }
+    }
+
+    var hasStartedEjection: Bool {
+        switch self {
+        case .feeding, .ejecting, .releasing, .settling, .movingToTray, .completed:
+            return true
+        default:
+            return false
+        }
+    }
+}
+
+private struct PhotoPrintAnimationConfiguration {
+    let shutterDuration: Double
+    let printerExpansionDuration: Double
+    let feedingDuration: Double
+    let releaseDuration: Double
+    let settleDuration: Double
+    let trayMovementDuration: Double
+    let retractionDuration: Double
+
+    static let standard = PhotoPrintAnimationConfiguration(
+        shutterDuration: 0.12,
+        printerExpansionDuration: 0.34,
+        feedingDuration: 1.55,
+        releaseDuration: 0.22,
+        settleDuration: 0.20,
+        trayMovementDuration: 0.60,
+        retractionDuration: 0.30
+    )
+
+    static let reducedMotion = PhotoPrintAnimationConfiguration(
+        shutterDuration: 0.08,
+        printerExpansionDuration: 0.18,
+        feedingDuration: 0.44,
+        releaseDuration: 0.06,
+        settleDuration: 0.08,
+        trayMovementDuration: 0.32,
+        retractionDuration: 0.18
+    )
+
+    var ejectTimelineDuration: Double {
+        feedingDuration + releaseDuration + settleDuration
+    }
+}
+
+private struct PhotoPrintAnimationValues {
+    var verticalProgress: CGFloat = 0
+    var scale: CGFloat = 0.46
+    var rotationX: Double = 65
+    var rotationY: Double = 0.8
+    var rotationZ: Double = -0.35
+    var perspective: CGFloat = 0.24
+    var shadowRadius: CGFloat = 2
+    var shadowY: CGFloat = 1
+    var shadowOpacity: Double = 0.08
+    var paperBend: CGFloat = 0.04
+    var paperRelease: CGFloat = 0
+    var lateralVibration: CGFloat = 0
+}
+
+private struct PhotoPrintPayload {
+    let photo: PicoPrintedPhoto
+    let freezeImage: UIImage
+    let placeName: String?
+    let latitude: Double?
+    let longitude: Double?
+}
+
+private final class PhotoPrintAnimationController: ObservableObject {
+    @Published private(set) var phase: PhotoPrintPhase = .idle
+    @Published private(set) var payload: PhotoPrintPayload?
+    @Published private(set) var freezeImage: UIImage?
+    @Published private(set) var animationID = UUID()
+    @Published private(set) var printerProgress: CGFloat = 0
+    @Published private(set) var printerShakeX: CGFloat = 0
+    @Published private(set) var flashOpacity: Double = 0
+
+    @Published private(set) var shutterHapticTrigger: Int = 0
+    @Published private(set) var printerHapticTrigger: Int = 0
+    @Published private(set) var feedHapticTrigger: Int = 0
+    @Published private(set) var settleHapticTrigger: Int = 0
+    @Published private(set) var trayHapticTrigger: Int = 0
+
+    private(set) var configuration = PhotoPrintAnimationConfiguration.standard
+
+    private var animationTask: Task<Void, Never>?
+    private var flashTask: Task<Void, Never>?
+    private var stagedPayload: PhotoPrintPayload?
+    private var onInsertIntoTray: ((PicoPrintedPhoto) -> Void)?
+    private var onComplete: (() -> Void)?
+    private var didPersist = false
+    private var didInsertIntoTray = false
+    private var didComplete = false
+
+    var isBusy: Bool {
+        phase.isBusy
+    }
+
+    @MainActor
+    func beginCapture() -> Bool {
+        guard !phase.isBusy else { return false }
+
+        cancelTasks()
+        clearCompletionState()
+        phase = .capturing
+        flashOpacity = 0.94
+        emitHaptic(.shutter)
+
+        flashTask = Task { @MainActor [weak self] in
+            await Task.yield()
+            guard let self, !Task.isCancelled else { return }
+            withAnimation(.easeOut(duration: 0.12)) {
+                self.flashOpacity = 0
+            }
+        }
+
+        return true
+    }
+
+    @MainActor
+    func stageCapture(
+        payload: PhotoPrintPayload,
+        reduceMotion: Bool,
+        onPersist: (PhotoPrintPayload) -> Void,
+        onInsertIntoTray: @escaping (PicoPrintedPhoto) -> Void,
+        onComplete: @escaping () -> Void
+    ) -> Bool {
+        guard phase == .capturing else { return false }
+
+        configuration = reduceMotion ? .reducedMotion : .standard
+        stagedPayload = payload
+        freezeImage = payload.freezeImage
+        self.onInsertIntoTray = onInsertIntoTray
+        self.onComplete = onComplete
+
+        if !didPersist {
+            didPersist = true
+            onPersist(payload)
+        }
+
+        return true
+    }
+
+    @MainActor
+    func startStagedAnimation(reduceMotion: Bool) {
+        guard phase == .capturing, let stagedPayload else { return }
+
+        payload = stagedPayload
+        self.stagedPayload = nil
+        phase = .shutter
+
+        animationTask?.cancel()
+        animationTask = Task { @MainActor [weak self] in
+            guard let self else { return }
+            await self.runAnimation(reduceMotion: reduceMotion)
+        }
+    }
+
+    @MainActor
+    func failCapture() {
+        guard phase == .capturing else { return }
+        phase = .failed
+        flashOpacity = 0
+        emitUIKitFallbackHaptic(.failure)
+
+        animationTask?.cancel()
+        animationTask = Task { @MainActor [weak self] in
+            do {
+                try await Task<Never, Never>.sleep(nanoseconds: 180_000_000)
+            } catch {
+                return
+            }
+            self?.resetToIdle()
+        }
+    }
+
+    @MainActor
+    func finishImmediately(completePendingPhoto: Bool) {
+        if completePendingPhoto {
+            insertIntoTrayOnce()
+        }
+
+        cancelTasks()
+        payload = nil
+        stagedPayload = nil
+        freezeImage = nil
+        flashOpacity = 0
+        printerShakeX = 0
+        printerProgress = 0
+        phase = .cancelled
+        clearCompletionState()
+        phase = .idle
+    }
+
+    @MainActor
+    func resetToIdle() {
+        cancelTasks()
+        payload = nil
+        stagedPayload = nil
+        freezeImage = nil
+        flashOpacity = 0
+        printerShakeX = 0
+        printerProgress = 0
+        phase = .idle
+        clearCompletionState()
+    }
+
+    @MainActor
+    private func runAnimation(reduceMotion: Bool) async {
+        do {
+            try await sleep(seconds: configuration.shutterDuration)
+            try Task.checkCancellation()
+
+            phase = .expandingPrinter
+            emitHaptic(.printer)
+
+            withAnimation(
+                .spring(
+                    response: configuration.printerExpansionDuration * 0.78,
+                    dampingFraction: reduceMotion ? 0.95 : 0.74
+                )
+            ) {
+                printerProgress = reduceMotion ? 1.0 : 1.03
+            }
+
+            try await sleep(seconds: configuration.printerExpansionDuration * 0.72)
+            try Task.checkCancellation()
+
+            withAnimation(.easeOut(duration: configuration.printerExpansionDuration * 0.28)) {
+                printerProgress = 1.0
+            }
+
+            phase = .feeding
+            animationID = UUID()
+            emitHaptic(.feed)
+
+            if !reduceMotion {
+                try await playDeterministicPrinterVibration()
+            }
+
+            let vibrationBudget = reduceMotion ? 0 : 0.25
+            let remainingFeed = max(0, configuration.feedingDuration - vibrationBudget)
+            phase = .ejecting
+            try await sleep(seconds: remainingFeed)
+            try Task.checkCancellation()
+
+            phase = .releasing
+            try await sleep(seconds: configuration.releaseDuration)
+            try Task.checkCancellation()
+
+            phase = .settling
+            emitHaptic(.settle)
+            try await sleep(seconds: configuration.settleDuration)
+            try Task.checkCancellation()
+
+            phase = .movingToTray
+            insertIntoTrayOnce()
+            try await sleep(seconds: configuration.trayMovementDuration)
+            try Task.checkCancellation()
+
+            phase = .completed
+            payload = nil
+            emitHaptic(.tray)
+
+            try await sleep(seconds: 0.10)
+            try Task.checkCancellation()
+
+            phase = .retracting
+            withAnimation(
+                .spring(
+                    response: configuration.retractionDuration,
+                    dampingFraction: 0.88
+                )
+            ) {
+                printerProgress = 0
+            }
+
+            try await sleep(seconds: configuration.retractionDuration)
+            try Task.checkCancellation()
+
+            freezeImage = nil
+            printerShakeX = 0
+            flashOpacity = 0
+            phase = .idle
+            completeOnce()
+            clearCompletionState()
+        } catch is CancellationError {
+            payload = nil
+            stagedPayload = nil
+            freezeImage = nil
+            flashOpacity = 0
+            printerShakeX = 0
+            printerProgress = 0
+            phase = .cancelled
+            clearCompletionState()
+            phase = .idle
+        } catch {
+            payload = nil
+            stagedPayload = nil
+            freezeImage = nil
+            flashOpacity = 0
+            printerShakeX = 0
+            printerProgress = 0
+            phase = .failed
+            clearCompletionState()
+            phase = .idle
+        }
+    }
+
+    @MainActor
+    private func playDeterministicPrinterVibration() async throws {
+        let values: [CGFloat] = [-0.9, 0.75, -0.62, 0.48, -0.34, 0.22, 0]
+        let stepDuration = 0.035
+
+        for value in values {
+            try Task.checkCancellation()
+            withAnimation(.linear(duration: stepDuration)) {
+                printerShakeX = value
+            }
+            try await sleep(seconds: stepDuration)
+        }
+    }
+
+    @MainActor
+    private func insertIntoTrayOnce() {
+        guard !didInsertIntoTray else { return }
+        guard let photo = payload?.photo ?? stagedPayload?.photo else { return }
+        didInsertIntoTray = true
+        onInsertIntoTray?(photo)
+    }
+
+    @MainActor
+    private func completeOnce() {
+        guard !didComplete else { return }
+        didComplete = true
+        onComplete?()
+    }
+
+    @MainActor
+    private func emitHaptic(_ event: PhotoPrintHapticEvent) {
+        switch event {
+        case .shutter:
+            shutterHapticTrigger &+= 1
+        case .printer:
+            printerHapticTrigger &+= 1
+        case .feed:
+            feedHapticTrigger &+= 1
+        case .settle:
+            settleHapticTrigger &+= 1
+        case .tray:
+            trayHapticTrigger &+= 1
+        case .failure:
+            break
+        }
+
+        if #available(iOS 17.0, *) {
+            return
+        }
+        emitUIKitFallbackHaptic(event)
+    }
+
+    private func emitUIKitFallbackHaptic(_ event: PhotoPrintHapticEvent) {
+        PhotoPrintUIKitHaptics.play(event)
+    }
+
+    @MainActor
+    private func sleep(seconds: Double) async throws {
+        let clamped = max(0, seconds)
+        let nanoseconds = UInt64(clamped * 1_000_000_000)
+        try await Task<Never, Never>.sleep(nanoseconds: nanoseconds)
+    }
+
+    @MainActor
+    private func cancelTasks() {
+        animationTask?.cancel()
+        animationTask = nil
+        flashTask?.cancel()
+        flashTask = nil
+    }
+
+    @MainActor
+    private func clearCompletionState() {
+        stagedPayload = nil
+        onInsertIntoTray = nil
+        onComplete = nil
+        didPersist = false
+        didInsertIntoTray = false
+        didComplete = false
+    }
+
+    deinit {
+        animationTask?.cancel()
+        flashTask?.cancel()
+    }
+}
+
+private enum PhotoPrintHapticEvent {
+    case shutter
+    case printer
+    case feed
+    case settle
+    case tray
+    case failure
+}
+
+private enum PhotoPrintUIKitHaptics {
+    static func play(_ event: PhotoPrintHapticEvent) {
+        switch event {
+        case .shutter:
+            UIImpactFeedbackGenerator(style: .medium).impactOccurred(intensity: 0.75)
+        case .printer:
+            UIImpactFeedbackGenerator(style: .soft).impactOccurred(intensity: 0.55)
+        case .feed:
+            UIImpactFeedbackGenerator(style: .light).impactOccurred(intensity: 0.35)
+        case .settle:
+            UIImpactFeedbackGenerator(style: .soft).impactOccurred(intensity: 0.48)
+        case .tray:
+            UIImpactFeedbackGenerator(style: .rigid).impactOccurred(intensity: 0.52)
+        case .failure:
+            UINotificationFeedbackGenerator().notificationOccurred(.error)
+        }
+    }
+}
+
+private struct PhotoPrintSensoryFeedbackModifier: ViewModifier {
+    let shutterTrigger: Int
+    let printerTrigger: Int
+    let feedTrigger: Int
+    let settleTrigger: Int
+    let trayTrigger: Int
+
+    @ViewBuilder
+    func body(content: Content) -> some View {
+        if #available(iOS 17.0, *) {
+            content
+                .sensoryFeedback(
+                    .impact(weight: .medium, intensity: 0.75),
+                    trigger: shutterTrigger
+                )
+                .sensoryFeedback(
+                    .impact(weight: .light, intensity: 0.48),
+                    trigger: printerTrigger
+                )
+                .sensoryFeedback(
+                    .impact(weight: .light, intensity: 0.28),
+                    trigger: feedTrigger
+                )
+                .sensoryFeedback(
+                    .impact(weight: .light, intensity: 0.42),
+                    trigger: settleTrigger
+                )
+                .sensoryFeedback(
+                    .impact(weight: .medium, intensity: 0.48),
+                    trigger: trayTrigger
+                )
+        } else {
+            content
+        }
+    }
+}
+
+private struct InitialEjectingPolaroidView: View {
+    let image: UIImage
+    let photoID: UUID
+    let namespace: Namespace.ID
+    let photoWidth: CGFloat
+    let screenSize: CGSize
+    let slotY: CGFloat
+    let reduceMotion: Bool
+
+    private var photoHeight: CGFloat {
+        photoWidth / PolaroidPaperView.aspectRatio
+    }
+
+    var body: some View {
+        let values = PhotoPrintAnimationValues(
+            verticalProgress: 0,
+            scale: reduceMotion ? 0.62 : 0.46,
+            rotationX: reduceMotion ? 8 : 65,
+            rotationY: reduceMotion ? 0 : 0.8,
+            rotationZ: reduceMotion ? 0 : -0.35,
+            perspective: reduceMotion ? 0.08 : 0.24,
+            shadowRadius: 2,
+            shadowY: 1,
+            shadowOpacity: 0.08,
+            paperBend: 0.04,
+            paperRelease: 0,
+            lateralVibration: 0
+        )
+
+        PolaroidPaperView(sceneImage: image)
+            .frame(width: photoWidth)
+            .matchedGeometryEffect(
+                id: photoID,
+                in: namespace,
+                properties: .frame,
+                anchor: .center,
+                isSource: true
+            )
+            .modifier(
+                PhotoPrintTransformModifier(
+                    values: values,
+                    photoSize: CGSize(width: photoWidth, height: photoHeight),
+                    screenSize: screenSize,
+                    slotY: slotY
+                )
+            )
+    }
+}
+
+@available(iOS 17.0, *)
+private struct KeyframedEjectingPolaroidView: View {
+    let image: UIImage
+    let photoID: UUID
+    let namespace: Namespace.ID
+    let trigger: UUID
+    let photoWidth: CGFloat
+    let screenSize: CGSize
+    let slotY: CGFloat
+    let configuration: PhotoPrintAnimationConfiguration
+    let shaderEnabled: Bool
+
+    private var photoHeight: CGFloat {
+        photoWidth / PolaroidPaperView.aspectRatio
+    }
+
+    var body: some View {
+        PolaroidPaperView(sceneImage: image)
+            .frame(width: photoWidth)
+            .matchedGeometryEffect(
+                id: photoID,
+                in: namespace,
+                properties: .frame,
+                anchor: .center,
+                isSource: true
+            )
+            .keyframeAnimator(
+                initialValue: PhotoPrintAnimationValues(),
+                trigger: trigger
+            ) { content, values in
+                content
+                    .modifier(
+                        PhotoPrintShaderModifier(
+                            size: CGSize(width: photoWidth, height: photoHeight),
+                            progress: values.verticalProgress,
+                            bendAmount: values.paperBend,
+                            releaseAmount: values.paperRelease,
+                            isEnabled: shaderEnabled
+                        )
+                    )
+                    .modifier(
+                        PhotoPrintTransformModifier(
+                            values: values,
+                            photoSize: CGSize(width: photoWidth, height: photoHeight),
+                            screenSize: screenSize,
+                            slotY: slotY
+                        )
+                    )
+            } keyframes: { _ in
+                KeyframeTrack(\.verticalProgress) {
+                    CubicKeyframe(0.10, duration: 0.18)
+                    LinearKeyframe(0.78, duration: 1.10)
+                    CubicKeyframe(1.00, duration: 0.27)
+                    CubicKeyframe(1.04, duration: 0.10)
+                    CubicKeyframe(0.985, duration: 0.12)
+                    CubicKeyframe(1.00, duration: 0.20)
+                }
+
+                KeyframeTrack(\.scale) {
+                    CubicKeyframe(0.58, duration: 0.35)
+                    CubicKeyframe(1.02, duration: 1.20)
+                    CubicKeyframe(1.035, duration: 0.10)
+                    CubicKeyframe(0.995, duration: 0.12)
+                    CubicKeyframe(1.00, duration: 0.20)
+                }
+
+                KeyframeTrack(\.rotationX) {
+                    CubicKeyframe(50, duration: 0.30)
+                    CubicKeyframe(29, duration: 0.72)
+                    CubicKeyframe(4.5, duration: 0.53)
+                    CubicKeyframe(0.8, duration: 0.10)
+                    CubicKeyframe(3.2, duration: 0.12)
+                    CubicKeyframe(1.2, duration: 0.20)
+                }
+
+                KeyframeTrack(\.rotationY) {
+                    LinearKeyframe(-0.7, duration: 0.42)
+                    LinearKeyframe(0.55, duration: 0.44)
+                    LinearKeyframe(-0.25, duration: 0.43)
+                    LinearKeyframe(0.12, duration: 0.26)
+                    LinearKeyframe(0, duration: 0.42)
+                }
+
+                KeyframeTrack(\.rotationZ) {
+                    LinearKeyframe(0.48, duration: 0.155)
+                    LinearKeyframe(-0.55, duration: 0.155)
+                    LinearKeyframe(0.42, duration: 0.155)
+                    LinearKeyframe(-0.36, duration: 0.155)
+                    LinearKeyframe(0.30, duration: 0.155)
+                    LinearKeyframe(-0.24, duration: 0.155)
+                    LinearKeyframe(0.18, duration: 0.155)
+                    LinearKeyframe(-0.12, duration: 0.155)
+                    LinearKeyframe(0.08, duration: 0.155)
+                    LinearKeyframe(0, duration: 0.155)
+                    CubicKeyframe(0.12, duration: 0.10)
+                    CubicKeyframe(-0.08, duration: 0.12)
+                    CubicKeyframe(0, duration: 0.20)
+                }
+
+                KeyframeTrack(\.perspective) {
+                    CubicKeyframe(0.30, duration: 0.55)
+                    CubicKeyframe(0.34, duration: 0.70)
+                    CubicKeyframe(0.18, duration: 0.30)
+                    CubicKeyframe(0.12, duration: 0.42)
+                }
+
+                KeyframeTrack(\.shadowRadius) {
+                    CubicKeyframe(5, duration: 0.35)
+                    CubicKeyframe(13, duration: 0.75)
+                    CubicKeyframe(20, duration: 0.45)
+                    CubicKeyframe(17, duration: 0.42)
+                }
+
+                KeyframeTrack(\.shadowY) {
+                    CubicKeyframe(3, duration: 0.35)
+                    CubicKeyframe(10, duration: 0.75)
+                    CubicKeyframe(17, duration: 0.45)
+                    CubicKeyframe(12, duration: 0.42)
+                }
+
+                KeyframeTrack(\.shadowOpacity) {
+                    CubicKeyframe(0.14, duration: 0.35)
+                    CubicKeyframe(0.27, duration: 0.75)
+                    CubicKeyframe(0.34, duration: 0.45)
+                    CubicKeyframe(0.24, duration: 0.42)
+                }
+
+                KeyframeTrack(\.paperBend) {
+                    CubicKeyframe(0.22, duration: 0.25)
+                    CubicKeyframe(1.00, duration: 0.80)
+                    CubicKeyframe(0.38, duration: 0.50)
+                    CubicKeyframe(-0.16, duration: 0.10)
+                    CubicKeyframe(0.08, duration: 0.12)
+                    CubicKeyframe(0, duration: 0.20)
+                }
+
+                KeyframeTrack(\.paperRelease) {
+                    LinearKeyframe(0, duration: 1.55)
+                    CubicKeyframe(1.00, duration: 0.10)
+                    CubicKeyframe(0.10, duration: 0.12)
+                    CubicKeyframe(0, duration: 0.20)
+                }
+
+                KeyframeTrack(\.lateralVibration) {
+                    LinearKeyframe(0.9, duration: 0.155)
+                    LinearKeyframe(-1.1, duration: 0.155)
+                    LinearKeyframe(0.8, duration: 0.155)
+                    LinearKeyframe(-0.75, duration: 0.155)
+                    LinearKeyframe(0.65, duration: 0.155)
+                    LinearKeyframe(-0.55, duration: 0.155)
+                    LinearKeyframe(0.45, duration: 0.155)
+                    LinearKeyframe(-0.35, duration: 0.155)
+                    LinearKeyframe(0.22, duration: 0.155)
+                    LinearKeyframe(0, duration: 0.155)
+                    LinearKeyframe(0, duration: 0.42)
+                }
+            }
+    }
+}
+
+private struct LegacyEjectingPolaroidView: View {
+    let image: UIImage
+    let photoID: UUID
+    let namespace: Namespace.ID
+    let trigger: UUID
+    let photoWidth: CGFloat
+    let screenSize: CGSize
+    let slotY: CGFloat
+    let configuration: PhotoPrintAnimationConfiguration
+
+    @State private var verticalProgress: CGFloat = 0
+    @State private var scale: CGFloat = 0.46
+    @State private var rotationX: Double = 65
+    @State private var rotationY: Double = 0.8
+    @State private var rotationZ: Double = -0.35
+    @State private var shadowRadius: CGFloat = 2
+    @State private var shadowY: CGFloat = 1
+    @State private var shadowOpacity: Double = 0.08
+    @State private var vibrationX: CGFloat = 0
+
+    private var photoHeight: CGFloat {
+        photoWidth / PolaroidPaperView.aspectRatio
+    }
+
+    var body: some View {
+        PolaroidPaperView(sceneImage: image)
+            .frame(width: photoWidth)
+            .matchedGeometryEffect(
+                id: photoID,
+                in: namespace,
+                properties: .frame,
+                anchor: .center,
+                isSource: true
+            )
+            .rotation3DEffect(
+                .degrees(rotationX),
+                axis: (x: 1, y: 0, z: 0),
+                anchor: .top,
+                perspective: 0.48
+            )
+            .rotation3DEffect(
+                .degrees(rotationY),
+                axis: (x: 0, y: 1, z: 0),
+                anchor: .center,
+                perspective: 0.20
+            )
+            .rotationEffect(.degrees(rotationZ))
+            .scaleEffect(scale, anchor: .top)
+            .shadow(
+                color: .black.opacity(shadowOpacity),
+                radius: shadowRadius,
+                x: 0,
+                y: shadowY
+            )
+            .position(
+                x: screenSize.width * 0.5 + vibrationX,
+                y: PhotoPrintGeometry.centerY(
+                    slotY: slotY,
+                    photoHeight: photoHeight,
+                    screenHeight: screenSize.height,
+                    progress: verticalProgress
+                )
+            )
+            .task(id: trigger) {
+                await runFallbackAnimation()
+            }
+    }
+
+    @MainActor
+    private func runFallbackAnimation() async {
+        verticalProgress = 0
+        scale = 0.46
+        rotationX = 65
+        rotationY = 0.8
+        rotationZ = -0.35
+        shadowRadius = 2
+        shadowY = 1
+        shadowOpacity = 0.08
+        vibrationX = 0
+
+        withAnimation(
+            .timingCurve(
+                0.16,
+                0.78,
+                0.20,
+                1.0,
+                duration: configuration.feedingDuration
+            )
+        ) {
+            verticalProgress = 1
+            scale = 1.02
+            rotationX = 4
+            rotationY = 0
+            rotationZ = 0.12
+            shadowRadius = 20
+            shadowY = 17
+            shadowOpacity = 0.32
+        }
+
+        let vibrationValues: [CGFloat] = [0.9, -1.1, 0.8, -0.7, 0.55, -0.4, 0.25, 0]
+        let vibrationDuration = min(0.10, configuration.feedingDuration / 10)
+
+        for value in vibrationValues {
+            guard !Task.isCancelled else { return }
+            withAnimation(.linear(duration: vibrationDuration)) {
+                vibrationX = value
+            }
+            try? await Task<Never, Never>.sleep(
+                nanoseconds: UInt64(vibrationDuration * 1_000_000_000)
+            )
+        }
+
+        let used = vibrationDuration * Double(vibrationValues.count)
+        let remaining = max(0, configuration.feedingDuration - used)
+        try? await Task<Never, Never>.sleep(
+            nanoseconds: UInt64(remaining * 1_000_000_000)
+        )
+        guard !Task.isCancelled else { return }
+
+        withAnimation(.spring(response: configuration.releaseDuration, dampingFraction: 0.68)) {
+            verticalProgress = 1.04
+            scale = 1.035
+            rotationX = 0.8
+            rotationZ = -0.08
+        }
+
+        try? await Task<Never, Never>.sleep(
+            nanoseconds: UInt64(configuration.releaseDuration * 1_000_000_000)
+        )
+        guard !Task.isCancelled else { return }
+
+        withAnimation(.spring(response: configuration.settleDuration, dampingFraction: 0.78)) {
+            verticalProgress = 1
+            scale = 1
+            rotationX = 1.2
+            rotationZ = 0
+            shadowRadius = 17
+            shadowY = 12
+            shadowOpacity = 0.24
+        }
+    }
+}
+
+private struct ReducedMotionEjectingPolaroidView: View {
+    let image: UIImage
+    let photoID: UUID
+    let namespace: Namespace.ID
+    let trigger: UUID
+    let photoWidth: CGFloat
+    let screenSize: CGSize
+    let slotY: CGFloat
+
+    @State private var progress: CGFloat = 0
+    @State private var opacity: Double = 0.88
+
+    private var photoHeight: CGFloat {
+        photoWidth / PolaroidPaperView.aspectRatio
+    }
+
+    var body: some View {
+        PolaroidPaperView(sceneImage: image)
+            .frame(width: photoWidth)
+            .matchedGeometryEffect(
+                id: photoID,
+                in: namespace,
+                properties: .frame,
+                anchor: .center,
+                isSource: true
+            )
+            .scaleEffect(0.62 + (progress * 0.38), anchor: .top)
+            .rotation3DEffect(
+                .degrees(Double(8 * (1 - progress))),
+                axis: (x: 1, y: 0, z: 0),
+                anchor: .top,
+                perspective: 0.08
+            )
+            .opacity(opacity)
+            .shadow(
+                color: .black.opacity(0.18 + (Double(progress) * 0.08)),
+                radius: 6 + (progress * 6),
+                x: 0,
+                y: 4 + (progress * 5)
+            )
+            .position(
+                x: screenSize.width * 0.5,
+                y: PhotoPrintGeometry.centerY(
+                    slotY: slotY,
+                    photoHeight: photoHeight,
+                    screenHeight: screenSize.height,
+                    progress: progress
+                )
+            )
+            .task(id: trigger) {
+                progress = 0
+                opacity = 0.88
+                withAnimation(.easeOut(duration: 0.44)) {
+                    progress = 1
+                    opacity = 1
+                }
+            }
+    }
+}
+
+private enum PhotoPrintGeometry {
+    static func centerY(
+        slotY: CGFloat,
+        photoHeight: CGFloat,
+        screenHeight: CGFloat,
+        progress: CGFloat
+    ) -> CGFloat {
+        let safeHeight = max(1, photoHeight)
+        // 初期状態では写真全体をDynamic Island／排出口の背面へ完全に隠す。
+        // 最終位置は従来とほぼ同じになるよう、開始位置を上げた分だけ移動量を増やす。
+        let startCenter = slotY - (safeHeight * 0.56)
+        let additionalTravel = min(max(28, screenHeight * 0.065), 58)
+        let travel = (safeHeight * 1.06) + additionalTravel
+        return startCenter + (travel * progress)
+    }
+}
+
+private struct PhotoPrintTransformModifier: ViewModifier {
+    let values: PhotoPrintAnimationValues
+    let photoSize: CGSize
+    let screenSize: CGSize
+    let slotY: CGFloat
+
+    func body(content: Content) -> some View {
+        content
+            .overlay {
+                LinearGradient(
+                    colors: [
+                        .white.opacity(0.20),
+                        .clear,
+                        .black.opacity(0.05)
+                    ],
+                    startPoint: .topLeading,
+                    endPoint: .bottomTrailing
+                )
+                .opacity(
+                    min(
+                        0.22,
+                        0.04 + (Double(abs(values.paperBend)) * 0.14)
+                    )
+                )
+                .blendMode(.screen)
+                .allowsHitTesting(false)
+            }
+            .rotation3DEffect(
+                .degrees(values.rotationX),
+                axis: (x: 1, y: 0, z: 0),
+                anchor: .top,
+                perspective: values.perspective
+            )
+            .rotation3DEffect(
+                .degrees(values.rotationY),
+                axis: (x: 0, y: 1, z: 0),
+                anchor: .center,
+                perspective: max(0.08, values.perspective * 0.38)
+            )
+            .rotationEffect(.degrees(values.rotationZ))
+            .scaleEffect(values.scale, anchor: .top)
+            .shadow(
+                color: .black.opacity(values.shadowOpacity),
+                radius: values.shadowRadius,
+                x: 0,
+                y: values.shadowY
+            )
+            .position(
+                x: screenSize.width * 0.5 + values.lateralVibration,
+                y: PhotoPrintGeometry.centerY(
+                    slotY: slotY,
+                    photoHeight: photoSize.height,
+                    screenHeight: screenSize.height,
+                    progress: values.verticalProgress
+                )
+            )
+    }
+}
+
+private enum PhotoPrintShaderSupport {
+    static let isFunctionAvailable: Bool = {
+        guard let device = MTLCreateSystemDefaultDevice() else { return false }
+        guard let library = device.makeDefaultLibrary() else { return false }
+        return library.makeFunction(name: "polaroidPaperBend") != nil
+    }()
+}
+
+private struct PhotoPrintShaderModifier: ViewModifier {
+    let size: CGSize
+    let progress: CGFloat
+    let bendAmount: CGFloat
+    let releaseAmount: CGFloat
+    let isEnabled: Bool
+
+    @ViewBuilder
+    func body(content: Content) -> some View {
+        if #available(iOS 17.0, *), isEnabled, size.width > 1, size.height > 1 {
+            let maxOffset = CGSize(
+                width: min(8, max(2, size.width * 0.024)),
+                height: min(20, max(4, size.height * 0.052))
+            )
+
+            content.distortionEffect(
+                ShaderLibrary.default.polaroidPaperBend(
+                    .float2(Float(size.width), Float(size.height)),
+                    .float(Float(progress)),
+                    .float(Float(bendAmount)),
+                    .float(Float(releaseAmount))
+                ),
+                maxSampleOffset: maxOffset,
+                isEnabled: true
+            )
+        } else {
+            content
+        }
+    }
+}
+
+private struct PolaroidPaperView: View {
+    static let aspectRatio: CGFloat = 1200.0 / 1380.0
+
+    let sceneImage: UIImage
+
+    var body: some View {
+        GeometryReader { proxy in
+            let width = max(1, proxy.size.width)
+            let height = max(1, proxy.size.height)
+            let sideInset = width * (92.0 / 1200.0)
+            let topInset = height * (126.0 / 1380.0)
+            let photoSide = width * (1016.0 / 1200.0)
+            let corner = max(1.5, width * 0.008)
+
+            ZStack(alignment: .topLeading) {
+                RoundedRectangle(cornerRadius: corner, style: .continuous)
+                    .fill(
+                        LinearGradient(
+                            colors: [
+                                Color(red: 0.995, green: 0.992, blue: 0.972),
+                                Color(red: 0.955, green: 0.955, blue: 0.925),
+                                Color(red: 0.925, green: 0.935, blue: 0.915)
+                            ],
+                            startPoint: .topLeading,
+                            endPoint: .bottomTrailing
+                        )
+                    )
+
+                RadialGradient(
+                    colors: [
+                        Color.white.opacity(0.20),
+                        Color.clear,
+                        Color.black.opacity(0.035)
+                    ],
+                    center: .topLeading,
+                    startRadius: 0,
+                    endRadius: max(width, height)
+                )
+                .clipShape(RoundedRectangle(cornerRadius: corner, style: .continuous))
+
+                Image(uiImage: sceneImage)
+                    .resizable()
+                    .scaledToFill()
+                    .frame(width: photoSide, height: photoSide)
+                    .clipShape(
+                        RoundedRectangle(
+                            cornerRadius: max(1, corner * 0.75),
+                            style: .continuous
+                        )
+                    )
+                    .overlay {
+                        RoundedRectangle(
+                            cornerRadius: max(1, corner * 0.75),
+                            style: .continuous
+                        )
+                        .stroke(Color.black.opacity(0.12), lineWidth: max(0.5, width * 0.0012))
+                    }
+                    .offset(x: sideInset, y: topInset)
+
+                LinearGradient(
+                    colors: [
+                        Color.white.opacity(0.13),
+                        Color.clear,
+                        Color.black.opacity(0.045)
+                    ],
+                    startPoint: .top,
+                    endPoint: .bottom
+                )
+                .blendMode(.softLight)
+                .clipShape(RoundedRectangle(cornerRadius: corner, style: .continuous))
+
+                RoundedRectangle(cornerRadius: corner, style: .continuous)
+                    .stroke(
+                        LinearGradient(
+                            colors: [
+                                Color.white.opacity(0.72),
+                                Color.gray.opacity(0.18),
+                                Color.black.opacity(0.14)
+                            ],
+                            startPoint: .topLeading,
+                            endPoint: .bottomTrailing
+                        ),
+                        lineWidth: max(0.6, width * 0.003)
+                    )
+
+                Rectangle()
+                    .fill(Color.black.opacity(0.08))
+                    .frame(height: max(0.7, height * 0.004))
+                    .frame(maxHeight: .infinity, alignment: .bottom)
+                    .clipShape(RoundedRectangle(cornerRadius: corner, style: .continuous))
+            }
+            .compositingGroup()
+        }
+        .aspectRatio(Self.aspectRatio, contentMode: .fit)
+        .accessibilityHidden(true)
     }
 }
 
@@ -673,9 +2229,22 @@ private struct FullScreenCoverClearBackground: UIViewRepresentable {
 }
 
 private struct PicoPrintedPhoto: Identifiable, Equatable {
-    let id = UUID()
+    let id: UUID
     let image: UIImage
+    let displaySceneImage: UIImage
     let date: Date
+
+    init(
+        id: UUID = UUID(),
+        image: UIImage,
+        displaySceneImage: UIImage,
+        date: Date
+    ) {
+        self.id = id
+        self.image = image
+        self.displaySceneImage = displaySceneImage
+        self.date = date
+    }
 
     static func == (lhs: PicoPrintedPhoto, rhs: PicoPrintedPhoto) -> Bool {
         lhs.id == rhs.id
@@ -688,6 +2257,8 @@ private struct PicoRaisedRoundedPanel: View {
     let outerStrokeOpacity: Double
     let highlightOpacity: Double
     let shadowOpacity: Double
+    let shadowRadius: CGFloat
+    let shadowY: CGFloat
 
     var body: some View {
         RoundedRectangle(cornerRadius: cornerRadius, style: .continuous)
@@ -705,8 +2276,18 @@ private struct PicoRaisedRoundedPanel: View {
                 }
                 .allowsHitTesting(false)
             }
-            .shadow(color: .black.opacity(shadowOpacity), radius: 10, x: 0, y: 7)
-            .shadow(color: .white.opacity(highlightOpacity * 0.52), radius: 3, x: 0, y: -1)
+            .shadow(
+                color: .black.opacity(shadowOpacity),
+                radius: shadowRadius,
+                x: 0,
+                y: shadowY
+            )
+            .shadow(
+                color: .white.opacity(highlightOpacity * 0.52),
+                radius: 3,
+                x: 0,
+                y: -1
+            )
     }
 }
 
@@ -891,7 +2472,12 @@ private enum PicoCameraImageComposer {
             UIColor.black.withAlphaComponent(0.15).setStroke()
             UIBezierPath(roundedRect: photoRect, cornerRadius: 7).stroke()
 
-            let bottomGloss = CGRect(x: 0, y: outputSize.height - 82, width: outputSize.width, height: 82)
+            let bottomGloss = CGRect(
+                x: 0,
+                y: outputSize.height - 82,
+                width: outputSize.width,
+                height: 82
+            )
             UIColor.black.withAlphaComponent(0.08).setFill()
             cg.fill(bottomGloss)
         }
@@ -902,7 +2488,10 @@ private enum PicoCameraImageComposer {
 
         let text = "\(steps) steps"
         let attributes: [NSAttributedString.Key: Any] = [
-            .font: UIFont.systemFont(ofSize: max(20, canvasSize.width * 0.035), weight: .heavy),
+            .font: UIFont.systemFont(
+                ofSize: max(20, canvasSize.width * 0.035),
+                weight: .heavy
+            ),
             .foregroundColor: UIColor.white.withAlphaComponent(0.82),
             .strokeColor: UIColor.black.withAlphaComponent(0.30),
             .strokeWidth: -2
@@ -917,7 +2506,10 @@ private enum PicoCameraImageComposer {
         text.draw(in: rect, withAttributes: attributes)
     }
 
-    private static func addPaperTexture(context: UIGraphicsImageRendererContext, size: CGSize) {
+    private static func addPaperTexture(
+        context: UIGraphicsImageRendererContext,
+        size: CGSize
+    ) {
         let cg = context.cgContext
         cg.saveGState()
         for index in 0..<900 {
@@ -970,6 +2562,10 @@ private struct PicoCameraPreviewView: UIViewRepresentable {
         private let session = AVCaptureSession()
         private let previewLayer = AVCaptureVideoPreviewLayer()
         private let photoOutput = AVCapturePhotoOutput()
+        private let sessionQueue = DispatchQueue(
+            label: "com.memo.camera.session",
+            qos: .userInitiated
+        )
         private var photoCompletion: ((UIImage?) -> Void)?
         private let position: Position
         private var isFlashEnabled: Bool
@@ -1017,7 +2613,9 @@ private struct PicoCameraPreviewView: UIViewRepresentable {
                 ),
                 let input = try? AVCaptureDeviceInput(device: device),
                 session.canAddInput(input)
-            else { return }
+            else {
+                return
+            }
 
             deviceHasFlash = device.hasFlash
 
@@ -1044,18 +2642,20 @@ private struct PicoCameraPreviewView: UIViewRepresentable {
         }
 
         func startRunning() {
-            DispatchQueue.global(qos: .userInitiated).async {
+            sessionQueue.async { [weak self] in
+                guard let self else { return }
                 guard AVCaptureDevice.authorizationStatus(for: .video) != .denied else { return }
-                if !self.session.isRunning {
-                    self.session.startRunning()
+                if !session.isRunning {
+                    session.startRunning()
                 }
             }
         }
 
         func stopRunning() {
-            DispatchQueue.global(qos: .userInitiated).async {
-                if self.session.isRunning {
-                    self.session.stopRunning()
+            sessionQueue.async { [weak self] in
+                guard let self else { return }
+                if session.isRunning {
+                    session.stopRunning()
                 }
             }
         }
@@ -1072,8 +2672,17 @@ private struct PicoCameraPreviewView: UIViewRepresentable {
             didFinishProcessingPhoto photo: AVCapturePhoto,
             error: Error?
         ) {
+            guard error == nil else {
+                DispatchQueue.main.async {
+                    self.photoCompletion?(nil)
+                    self.photoCompletion = nil
+                }
+                return
+            }
+
             let image: UIImage?
-            if let data = photo.fileDataRepresentation(), let captured = UIImage(data: data) {
+            if let data = photo.fileDataRepresentation(),
+               let captured = UIImage(data: data) {
                 if position == .front {
                     image = captured.picoMirroredHorizontally() ?? captured
                 } else {
@@ -1128,14 +2737,75 @@ private extension UIImage {
         let cropRect: CGRect
         if imageAspect > targetAspect {
             let newWidth = imageHeight * targetAspect
-            cropRect = CGRect(x: (imageWidth - newWidth) * 0.5, y: 0, width: newWidth, height: imageHeight)
+            cropRect = CGRect(
+                x: (imageWidth - newWidth) * 0.5,
+                y: 0,
+                width: newWidth,
+                height: imageHeight
+            )
         } else {
             let newHeight = imageWidth / targetAspect
-            cropRect = CGRect(x: 0, y: (imageHeight - newHeight) * 0.5, width: imageWidth, height: newHeight)
+            cropRect = CGRect(
+                x: 0,
+                y: (imageHeight - newHeight) * 0.5,
+                width: imageWidth,
+                height: newHeight
+            )
         }
 
         guard let cropped = cgImage.cropping(to: cropRect.integral) else { return nil }
         return UIImage(cgImage: cropped, scale: scale, orientation: .up)
+    }
+
+    func picoPolaroidSceneImage() -> UIImage? {
+        let source = picoFixedOrientation()
+        guard let cgImage = source.cgImage else { return nil }
+
+        let pixelWidth = CGFloat(cgImage.width)
+        let pixelHeight = CGFloat(cgImage.height)
+        guard pixelWidth > 0, pixelHeight > 0 else { return nil }
+
+        let cropRect = CGRect(
+            x: pixelWidth * (92.0 / 1200.0),
+            y: pixelHeight * (126.0 / 1380.0),
+            width: pixelWidth * (1016.0 / 1200.0),
+            height: pixelHeight * (1016.0 / 1380.0)
+        ).integral.intersection(
+            CGRect(x: 0, y: 0, width: pixelWidth, height: pixelHeight)
+        )
+
+        guard cropRect.width > 1, cropRect.height > 1 else { return nil }
+        guard let cropped = cgImage.cropping(to: cropRect) else { return nil }
+        return UIImage(cgImage: cropped, scale: source.scale, orientation: .up)
+    }
+
+    func picoDownsampled(maxPixelDimension: CGFloat) -> UIImage {
+        let fixed = picoFixedOrientation()
+        guard maxPixelDimension > 1 else { return fixed }
+        guard let cgImage = fixed.cgImage else { return fixed }
+
+        let pixelWidth = CGFloat(cgImage.width)
+        let pixelHeight = CGFloat(cgImage.height)
+        let longest = max(pixelWidth, pixelHeight)
+        guard longest > maxPixelDimension else { return fixed }
+
+        let ratio = maxPixelDimension / longest
+        let outputPixelSize = CGSize(
+            width: max(1, floor(pixelWidth * ratio)),
+            height: max(1, floor(pixelHeight * ratio))
+        )
+        let outputPointSize = CGSize(
+            width: outputPixelSize.width,
+            height: outputPixelSize.height
+        )
+
+        let format = UIGraphicsImageRendererFormat.default()
+        format.scale = 1
+        format.opaque = true
+        let renderer = UIGraphicsImageRenderer(size: outputPointSize, format: format)
+        return renderer.image { _ in
+            fixed.draw(in: CGRect(origin: .zero, size: outputPointSize))
+        }
     }
 }
 
@@ -1143,4 +2813,60 @@ private extension CGFloat {
     func interpolated(to target: CGFloat, progress: CGFloat) -> CGFloat {
         self + ((target - self) * progress)
     }
+
+    func clamped(to range: ClosedRange<CGFloat>) -> CGFloat {
+        if self < range.lowerBound {
+            return range.lowerBound
+        }
+        if self > range.upperBound {
+            return range.upperBound
+        }
+        return self
+    }
 }
+
+#if DEBUG
+private struct PhotoPrintComponentPreview: View {
+    private let image: UIImage = {
+        let size = CGSize(width: 800, height: 800)
+        let renderer = UIGraphicsImageRenderer(size: size)
+        return renderer.image { context in
+            UIColor(red: 0.20, green: 0.48, blue: 0.72, alpha: 1).setFill()
+            context.cgContext.fill(CGRect(origin: .zero, size: size))
+
+            let text = "MeMo"
+            let attributes: [NSAttributedString.Key: Any] = [
+                .font: UIFont.systemFont(ofSize: 120, weight: .heavy),
+                .foregroundColor: UIColor.white
+            ]
+            let textSize = text.size(withAttributes: attributes)
+            text.draw(
+                at: CGPoint(
+                    x: (size.width - textSize.width) * 0.5,
+                    y: (size.height - textSize.height) * 0.5
+                ),
+                withAttributes: attributes
+            )
+        }
+    }()
+
+    var body: some View {
+        ZStack {
+            Color.gray.opacity(0.35).ignoresSafeArea()
+            PolaroidPaperView(sceneImage: image)
+                .frame(width: 260)
+                .rotation3DEffect(
+                    .degrees(22),
+                    axis: (x: 1, y: 0, z: 0),
+                    anchor: .top,
+                    perspective: 0.35
+                )
+                .shadow(color: .black.opacity(0.28), radius: 16, x: 0, y: 12)
+        }
+    }
+}
+
+#Preview("Polaroid Paper") {
+    PhotoPrintComponentPreview()
+}
+#endif
