@@ -3,7 +3,7 @@
 //  MeMo
 //
 //  Dynamic Island-connected camera printer animation.
-//  PHOTO_PRINT_DYNAMIC_ISLAND_CLOSE_SINK_V5_APPLIED.
+//  PHOTO_PRINT_DYNAMIC_ISLAND_CLOSE_SINK_V11_HAPTIC_BOOST_APPLIED.
 //
 
 import SwiftUI
@@ -11,6 +11,8 @@ import UIKit
 import AVFoundation
 import Combine
 import Metal
+import CoreImage
+import CoreImage.CIFilterBuiltins
 
 struct CameraStyleView: View {
     typealias Snapshotter = (@escaping (UIImage?) -> Void) -> Void
@@ -89,6 +91,9 @@ struct CameraStyleView: View {
     @State private var cameraRevealProgress: CGFloat = 0
     @State private var chromeRevealProgress: CGFloat = 0
     @State private var closingIslandSinkProgress: CGFloat = 0
+    @State private var isPreviewFadingAfterCapture: Bool = false
+    @State private var previewFadeOpacity: CGFloat = 1
+    @State private var capturedPreviewSize: CGSize = .zero
     @State private var recentPhotos: [PicoPrintedPhoto] = []
     @State private var selectedPhoto: PicoPrintedPhoto?
     @State private var presentationTask: Task<Void, Never>?
@@ -237,7 +242,6 @@ struct CameraStyleView: View {
                     .accessibilityHidden(true)
                 }
 
-
                 Color.white
                     .opacity(printController.flashOpacity)
                     .ignoresSafeArea()
@@ -261,7 +265,6 @@ struct CameraStyleView: View {
                 PhotoPrintSensoryFeedbackModifier(
                     shutterTrigger: printController.shutterHapticTrigger,
                     printerTrigger: printController.printerHapticTrigger,
-                    feedTrigger: printController.feedHapticTrigger,
                     settleTrigger: printController.settleHapticTrigger,
                     trayTrigger: printController.trayHapticTrigger
                 )
@@ -326,6 +329,9 @@ struct CameraStyleView: View {
         cameraRevealProgress = 0
         chromeRevealProgress = 0
         closingIslandSinkProgress = 0
+        isPreviewFadingAfterCapture = false
+        previewFadeOpacity = 1
+        capturedPreviewSize = .zero
         isLowPowerModeEnabled = ProcessInfo.processInfo.isLowPowerModeEnabled
 
         presentationTask = Task { @MainActor in
@@ -469,6 +475,20 @@ struct CameraStyleView: View {
         )
         let previewWidth = max(1, layout.width - (effectiveFrameInset * 2))
         let previewHeight = max(1, layout.height - (effectiveFrameInset * 2))
+        let hasCapturedPreviewSize = capturedPreviewSize.width > 1 && capturedPreviewSize.height > 1
+        let shouldFreezePreviewGeometry = isPreviewFadingAfterCapture && hasCapturedPreviewSize
+        let renderedPreviewWidth = shouldFreezePreviewGeometry
+            ? capturedPreviewSize.width
+            : previewWidth
+        let renderedPreviewHeight = shouldFreezePreviewGeometry
+            ? capturedPreviewSize.height
+            : previewHeight
+        let renderedPreviewCorner = shouldFreezePreviewGeometry
+            ? CGFloat(34)
+            : layout.previewCorner
+        let renderedPreviewInset = shouldFreezePreviewGeometry
+            ? layout.frameInset
+            : effectiveFrameInset
         let printerStrength = max(0, min(1, printController.printerProgress))
         let sinkProgress = max(0, min(1, closingIslandSinkProgress))
         let sinkScaleProgress = max(0, min(1, sinkProgress / 0.62))
@@ -476,6 +496,9 @@ struct CameraStyleView: View {
         let exteriorFadeProgress = max(0, min(1, sinkProgress / 0.24))
         let exteriorVisibility = Double(1 - exteriorFadeProgress)
         let panelVisibility = Double(1 - sinkFadeProgress)
+        let panelScale = (
+            0.92 + (max(cameraRevealProgress, printerStrength) * 0.08)
+        ) * (1 - (sinkScaleProgress * 0.28))
 
         return ZStack(alignment: .top) {
             PicoRaisedRoundedPanel(
@@ -487,20 +510,33 @@ struct CameraStyleView: View {
                 shadowRadius: (10 + (printerStrength * 5)) * (1 - sinkScaleProgress),
                 shadowY: (7 + (printerStrength * 4)) * (1 - sinkScaleProgress)
             )
+            .scaleEffect(panelScale, anchor: .center)
 
-            if cameraRevealProgress > 0.08 && !isClosing {
-                cameraPreviewWindow(previewCorner: layout.previewCorner)
-                    .frame(width: previewWidth, height: previewHeight)
+            if (cameraRevealProgress > 0.001 || isPreviewFadingAfterCapture) && !isClosing {
+                cameraPreviewWindow(previewCorner: renderedPreviewCorner)
+                    // 撮影直後だけは撮影時のフレームを固定する。
+                    // 黒い外枠がDynamic Island形状へ変形しても、映像自体は縮小・横移動せず
+                    // 元の位置で透明になるため、画面内容が右へ流れて見えない。
+                    .frame(width: renderedPreviewWidth, height: renderedPreviewHeight)
                     .position(
                         x: printerLayout.width * 0.5,
-                        y: effectiveFrameInset + (previewHeight * 0.5)
+                        y: renderedPreviewInset + (renderedPreviewHeight * 0.5)
+                    )
+                    .opacity(
+                        isPreviewFadingAfterCapture
+                            ? Double(previewFadeOpacity)
+                            : 1
+                    )
+                    .scaleEffect(
+                        isPreviewFadingAfterCapture ? 1 : panelScale,
+                        anchor: .center
                     )
                     .overlay {
                         Color.black
                             .opacity(Double(printerStrength) * 0.035)
                             .clipShape(
                                 RoundedRectangle(
-                                    cornerRadius: layout.previewCorner,
+                                    cornerRadius: renderedPreviewCorner,
                                     style: .continuous
                                 )
                             )
@@ -510,11 +546,6 @@ struct CameraStyleView: View {
         }
         .frame(width: printerLayout.width, height: printerLayout.height, alignment: .top)
         .offset(x: printController.printerShakeX)
-        .scaleEffect(
-            (0.92 + (max(cameraRevealProgress, printerStrength) * 0.08))
-                * (1 - (sinkScaleProgress * 0.28)),
-            anchor: .center
-        )
         .opacity(panelVisibility)
     }
 
@@ -730,10 +761,10 @@ struct CameraStyleView: View {
         )
         let useShader = shaderAllowed && printController.phase.allowsPaperShader
         let shouldMaskAtSlot = printController.phase.requiresSlotMask
-        // 目に見える排出口は描画しない。黒いDynamic Island内部の有効幅を
-        // 左右方向のマスクに使いつつ、下端より少し上まで表示を許可することで、
-        // ポラロイドが黒い本体の前面を通って排出されるように見せる。
-        let visibleSlotWidth = max(52, min(validSize.width - 24, slotWidth - 16))
+
+        // 左右方向は常に写真全幅を描画する。排出途中にスロット幅で横方向を
+        // 切り取ると、マスク解除時に写真幅が突然広がって見えるため、
+        // Dynamic Island下端だけを縦方向の排出境界として使用する。
         let frontOverlap = max(20, min(34, slotWidth * 0.10))
 
         ZStack {
@@ -797,19 +828,12 @@ struct CameraStyleView: View {
         .frame(width: validSize.width, height: validSize.height)
         .mask {
             if shouldMaskAtSlot {
-                HStack(spacing: 0) {
-                    Spacer(minLength: 0)
+                VStack(spacing: 0) {
+                    Color.clear
+                        .frame(height: max(0, slotY - frontOverlap))
 
-                    VStack(spacing: 0) {
-                        Color.clear
-                            .frame(height: max(0, slotY - frontOverlap))
-
-                        Rectangle()
-                            .fill(Color.white)
-                    }
-                    .frame(width: visibleSlotWidth)
-
-                    Spacer(minLength: 0)
+                    Rectangle()
+                        .fill(Color.white)
                 }
             } else {
                 Rectangle().fill(Color.white)
@@ -870,6 +894,7 @@ struct CameraStyleView: View {
         guard printController.beginCapture() else { return }
 
         let fixedPreviewSize = lastPreviewSize
+        capturedPreviewSize = fixedPreviewSize
         let fixedMetrics = currentMetricValues
 
         takeBackgroundSnapshot { background in
@@ -943,6 +968,8 @@ struct CameraStyleView: View {
         presentationTask?.cancel()
         printPresentationTask?.cancel()
         isPrintPresentationActive = true
+        isPreviewFadingAfterCapture = true
+        previewFadeOpacity = 1
 
         let collapseDuration = accessibilityReduceMotion ? 0.18 : 0.48
         let chromeDuration = accessibilityReduceMotion ? 0.08 : 0.16
@@ -962,6 +989,12 @@ struct CameraStyleView: View {
             }
 
             guard !Task.isCancelled else { return }
+
+            // 映像は独立した不透明度アニメーションだけでその場から消す。
+            // 黒い外枠のスプリング変形には追従させない。
+            withAnimation(.easeOut(duration: collapseDuration * 0.82)) {
+                previewFadeOpacity = 0
+            }
             withAnimation(
                 .spring(
                     response: collapseDuration,
@@ -978,6 +1011,7 @@ struct CameraStyleView: View {
             }
 
             guard !Task.isCancelled else { return }
+            isPreviewFadingAfterCapture = false
             printController.startStagedAnimation(
                 reduceMotion: accessibilityReduceMotion
             )
@@ -987,6 +1021,8 @@ struct CameraStyleView: View {
     @MainActor
     private func restoreCameraAfterPrint() {
         printPresentationTask?.cancel()
+        isPreviewFadingAfterCapture = false
+        previewFadeOpacity = 1
 
         printPresentationTask = Task { @MainActor in
             withAnimation(
@@ -1035,6 +1071,9 @@ struct CameraStyleView: View {
         printController.finishImmediately(completePendingPhoto: true)
         cameraRevealProgress = 1
         chromeRevealProgress = 1
+        isPreviewFadingAfterCapture = false
+        previewFadeOpacity = 1
+        capturedPreviewSize = .zero
         isPrintPresentationActive = false
     }
 
@@ -1074,6 +1113,7 @@ struct CameraStyleView: View {
         return window?.safeAreaInsets ?? .zero
     }
 }
+
 
 private enum PhotoPrintPhase: Equatable {
     case idle
@@ -1136,6 +1176,7 @@ private struct PhotoPrintAnimationConfiguration {
     let trayMovementDuration: Double
     let retractionDuration: Double
 
+    // 既存の現像・排出速度を維持するため、各値は変更しない。
     static let standard = PhotoPrintAnimationConfiguration(
         shutterDuration: 0.12,
         printerExpansionDuration: 0.34,
@@ -1195,7 +1236,6 @@ private final class PhotoPrintAnimationController: ObservableObject {
 
     @Published private(set) var shutterHapticTrigger: Int = 0
     @Published private(set) var printerHapticTrigger: Int = 0
-    @Published private(set) var feedHapticTrigger: Int = 0
     @Published private(set) var settleHapticTrigger: Int = 0
     @Published private(set) var trayHapticTrigger: Int = 0
 
@@ -1203,6 +1243,7 @@ private final class PhotoPrintAnimationController: ObservableObject {
 
     private var animationTask: Task<Void, Never>?
     private var flashTask: Task<Void, Never>?
+    private var feedEffectsTask: Task<Void, Never>?
     private var stagedPayload: PhotoPrintPayload?
     private var onInsertIntoTray: ((PicoPrintedPhoto) -> Void)?
     private var onComplete: (() -> Void)?
@@ -1223,6 +1264,11 @@ private final class PhotoPrintAnimationController: ObservableObject {
         phase = .capturing
         flashOpacity = 0.94
         emitHaptic(.shutter)
+
+        // 撮影から紙送り開始までの間にエンジンとジェネレーターを準備し、
+        // 実際の排出開始時に音や触覚が遅れて立ち上がらないようにする。
+        PhotoPrintMotorSoundDriver.shared.prepare()
+        PhotoPrintUIKitHaptics.prepareFeedRattle()
 
         flashTask = Task { @MainActor [weak self] in
             await Task.yield()
@@ -1350,7 +1396,23 @@ private final class PhotoPrintAnimationController: ObservableObject {
 
             phase = .feeding
             animationID = UUID()
-            emitHaptic(.feed)
+
+            // 紙送り開始と同時に、細かな「ダラララ」触覚と
+            // 小型プリンターのモーターを模した「ウィーーーン」音を開始する。
+            // どちらもfeedingDuration内で並行再生するため、既存の現像時間は変化しない。
+            PhotoPrintUIKitHaptics.prepareFeedRattle()
+            PhotoPrintMotorSoundDriver.shared.play(
+                duration: configuration.feedingDuration,
+                reduceMotion: reduceMotion
+            )
+            feedEffectsTask?.cancel()
+            feedEffectsTask = Task { @MainActor [weak self] in
+                guard let self else { return }
+                try? await self.playFeedHapticRattle(
+                    duration: self.configuration.feedingDuration,
+                    reduceMotion: reduceMotion
+                )
+            }
 
             if !reduceMotion {
                 try await playDeterministicPrinterVibration()
@@ -1362,6 +1424,7 @@ private final class PhotoPrintAnimationController: ObservableObject {
             try await sleep(seconds: remainingFeed)
             try Task.checkCancellation()
 
+            stopFeedEffects()
             phase = .releasing
             try await sleep(seconds: configuration.releaseDuration)
             try Task.checkCancellation()
@@ -1403,6 +1466,7 @@ private final class PhotoPrintAnimationController: ObservableObject {
             completeOnce()
             clearCompletionState()
         } catch is CancellationError {
+            stopFeedEffects()
             payload = nil
             stagedPayload = nil
             freezeImage = nil
@@ -1413,6 +1477,7 @@ private final class PhotoPrintAnimationController: ObservableObject {
             clearCompletionState()
             phase = .idle
         } catch {
+            stopFeedEffects()
             payload = nil
             stagedPayload = nil
             freezeImage = nil
@@ -1440,6 +1505,57 @@ private final class PhotoPrintAnimationController: ObservableObject {
     }
 
     @MainActor
+    private func playFeedHapticRattle(
+        duration: Double,
+        reduceMotion: Bool
+    ) async throws {
+        let totalDuration = max(0, duration)
+        guard totalDuration > 0 else { return }
+
+        // 約40ms前後の細かな間隔で連続パルスを鳴らし、
+        // 送りローラーが高速で回る「ダラララ」感をより強くする。
+        // 触覚タスクは紙送りの待機処理と並行するため、現像時間には加算されない。
+        let baseInterval = reduceMotion ? 0.072 : 0.038
+        let intervalOffsets: [Double] = [0.000, -0.004, 0.003, -0.002, 0.005, -0.003, 0.002, -0.001]
+        let intensityPattern: [CGFloat] = reduceMotion
+            ? [0.36, 0.42, 0.38, 0.44]
+            : [0.62, 0.76, 0.68, 0.82, 0.72, 0.88, 0.74, 0.80]
+
+        var elapsed: Double = 0
+        var index = 0
+
+        while elapsed < totalDuration {
+            try Task.checkCancellation()
+
+            let progress = min(1, elapsed / max(0.001, totalDuration))
+            let edgeEnvelope = min(1, min(progress / 0.08, (1 - progress) / 0.10))
+            let baseIntensity = intensityPattern[index % intensityPattern.count]
+            let intensity = min(1.0, max(0.30, baseIntensity * CGFloat(0.86 + (0.22 * edgeEnvelope))))
+
+            PhotoPrintUIKitHaptics.playFeedRattlePulse(
+                index: index,
+                intensity: intensity
+            )
+
+            let requestedInterval = max(0.032, baseInterval + intervalOffsets[index % intervalOffsets.count])
+            let remaining = totalDuration - elapsed
+            let actualInterval = min(requestedInterval, remaining)
+            guard actualInterval > 0 else { break }
+
+            try await sleep(seconds: actualInterval)
+            elapsed += actualInterval
+            index += 1
+        }
+    }
+
+    @MainActor
+    private func stopFeedEffects() {
+        feedEffectsTask?.cancel()
+        feedEffectsTask = nil
+        PhotoPrintMotorSoundDriver.shared.stop()
+    }
+
+    @MainActor
     private func insertIntoTrayOnce() {
         guard !didInsertIntoTray else { return }
         guard let photo = payload?.photo ?? stagedPayload?.photo else { return }
@@ -1461,8 +1577,6 @@ private final class PhotoPrintAnimationController: ObservableObject {
             shutterHapticTrigger &+= 1
         case .printer:
             printerHapticTrigger &+= 1
-        case .feed:
-            feedHapticTrigger &+= 1
         case .settle:
             settleHapticTrigger &+= 1
         case .tray:
@@ -1477,6 +1591,7 @@ private final class PhotoPrintAnimationController: ObservableObject {
         emitUIKitFallbackHaptic(event)
     }
 
+    @MainActor
     private func emitUIKitFallbackHaptic(_ event: PhotoPrintHapticEvent) {
         PhotoPrintUIKitHaptics.play(event)
     }
@@ -1494,6 +1609,7 @@ private final class PhotoPrintAnimationController: ObservableObject {
         animationTask = nil
         flashTask?.cancel()
         flashTask = nil
+        stopFeedEffects()
     }
 
     @MainActor
@@ -1509,27 +1625,333 @@ private final class PhotoPrintAnimationController: ObservableObject {
     deinit {
         animationTask?.cancel()
         flashTask?.cancel()
+        feedEffectsTask?.cancel()
     }
 }
 
 private enum PhotoPrintHapticEvent {
     case shutter
     case printer
-    case feed
     case settle
     case tray
     case failure
 }
 
+@MainActor
+private final class PhotoPrintFeedHapticDriver {
+    static let shared = PhotoPrintFeedHapticDriver()
+
+    private let softGenerator = UIImpactFeedbackGenerator(style: .soft)
+    private let lightGenerator = UIImpactFeedbackGenerator(style: .light)
+    private let mediumGenerator = UIImpactFeedbackGenerator(style: .medium)
+
+    private init() {}
+
+    func prepare() {
+        softGenerator.prepare()
+        lightGenerator.prepare()
+        mediumGenerator.prepare()
+    }
+
+    func pulse(index: Int, intensity: CGFloat) {
+        let clampedIntensity = intensity.clamped(to: 0...1)
+
+        // 柔らかいベースにlight/mediumを交互に混ぜ、
+        // 送りローラーが細かく強く噛む感触を作る。
+        if index.isMultiple(of: 4) {
+            mediumGenerator.impactOccurred(intensity: min(1.0, clampedIntensity * 0.96))
+            mediumGenerator.prepare()
+        } else if index.isMultiple(of: 2) {
+            lightGenerator.impactOccurred(intensity: min(1.0, clampedIntensity * 0.92))
+            lightGenerator.prepare()
+        } else {
+            softGenerator.impactOccurred(intensity: min(1.0, clampedIntensity * 0.88))
+            softGenerator.prepare()
+        }
+    }
+}
+
+@MainActor
+private final class PhotoPrintMotorSoundDriver {
+    static let shared = PhotoPrintMotorSoundDriver()
+
+    private struct AudioSessionState {
+        let category: AVAudioSession.Category
+        let mode: AVAudioSession.Mode
+        let options: AVAudioSession.CategoryOptions
+    }
+
+    private var player: AVAudioPlayer?
+    private var retainedAudioData: Data?
+    private var cachedAudioData: [Int: Data] = [:]
+    private var previousAudioSessionState: AudioSessionState?
+
+    private init() {}
+
+    func prepare() {
+        // AVAudioEngineのグラフ起動は行わず、再生に使うWAVデータだけを先に生成する。
+        // これにより撮影後の紙送り開始時にデコード待ちが発生しにくくなる。
+        _ = audioData(duration: 1.55, reduceMotion: false)
+        _ = audioData(duration: 0.44, reduceMotion: true)
+    }
+
+    func play(duration: Double, reduceMotion: Bool) {
+        let resolvedDuration = max(0.08, duration)
+        stopPlayerOnly()
+
+        // .ambientは端末の消音スイッチを尊重するカテゴリー。
+        // セッション設定に失敗しても、現在のアプリ側セッションで再生できる可能性があるため、
+        // エラーを記録したうえでAVAudioPlayerの生成・再生は続行する。
+        do {
+            try activateAmbientAudioSession()
+        } catch {
+            log("audio session activation failed: \(error.localizedDescription)")
+        }
+
+        let data = audioData(
+            duration: resolvedDuration,
+            reduceMotion: reduceMotion
+        )
+        retainedAudioData = data
+
+        do {
+            let audioPlayer = try AVAudioPlayer(data: data)
+            audioPlayer.numberOfLoops = 0
+            audioPlayer.volume = reduceMotion ? 0.72 : 0.92
+            audioPlayer.enableRate = false
+
+            let prepared = audioPlayer.prepareToPlay()
+            player = audioPlayer
+
+            guard prepared else {
+                log("AVAudioPlayer.prepareToPlay returned false")
+                return
+            }
+
+            guard audioPlayer.play() else {
+                log("AVAudioPlayer.play returned false")
+                return
+            }
+
+            log(
+                "playback started: duration=\(resolvedDuration), "
+                + "volume=\(audioPlayer.volume), "
+                + "session=\(AVAudioSession.sharedInstance().category.rawValue)"
+            )
+        } catch {
+            player = nil
+            retainedAudioData = nil
+            log("AVAudioPlayer creation failed: \(error.localizedDescription)")
+        }
+    }
+
+    func stop() {
+        stopPlayerOnly()
+        retainedAudioData = nil
+        restorePreviousAudioSession()
+    }
+
+    private func stopPlayerOnly() {
+        guard let player else { return }
+        if player.isPlaying {
+            player.stop()
+        }
+        self.player = nil
+    }
+
+    private func activateAmbientAudioSession() throws {
+        let session = AVAudioSession.sharedInstance()
+
+        if previousAudioSessionState == nil {
+            previousAudioSessionState = AudioSessionState(
+                category: session.category,
+                mode: session.mode,
+                options: session.categoryOptions
+            )
+        }
+
+        try session.setCategory(
+            .ambient,
+            mode: .default,
+            options: [.mixWithOthers]
+        )
+        try session.setActive(true)
+    }
+
+    private func restorePreviousAudioSession() {
+        guard let previousAudioSessionState else { return }
+        self.previousAudioSessionState = nil
+
+        let session = AVAudioSession.sharedInstance()
+        do {
+            try session.setCategory(
+                previousAudioSessionState.category,
+                mode: previousAudioSessionState.mode,
+                options: previousAudioSessionState.options
+            )
+            try session.setActive(true)
+        } catch {
+            log("audio session restoration failed: \(error.localizedDescription)")
+        }
+    }
+
+    private func audioData(
+        duration: Double,
+        reduceMotion: Bool
+    ) -> Data {
+        let durationMilliseconds = Int((duration * 1_000).rounded())
+        let cacheKey = (durationMilliseconds * 10) + (reduceMotion ? 1 : 0)
+
+        if let cached = cachedAudioData[cacheKey] {
+            return cached
+        }
+
+        let generated = makeMotorWAVData(
+            duration: duration,
+            reduceMotion: reduceMotion
+        )
+        cachedAudioData[cacheKey] = generated
+        return generated
+    }
+
+    private func makeMotorWAVData(
+        duration: Double,
+        reduceMotion: Bool
+    ) -> Data {
+        let sampleRate: UInt32 = 44_100
+        let channelCount: UInt16 = 1
+        let bitsPerSample: UInt16 = 16
+        let bytesPerSample = Int(bitsPerSample / 8)
+        let frameCount = max(1, Int(Double(sampleRate) * duration))
+
+        var pcmData = Data()
+        pcmData.reserveCapacity(frameCount * bytesPerSample)
+
+        var motorPhase: Double = 0
+        var whinePhase: Double = 0
+        var upperWhinePhase: Double = 0
+        var noiseState: UInt32 = 0x73A9_51C3
+        let twoPi = Double.pi * 2
+        let amplitude = reduceMotion ? 0.34 : 0.48
+
+        for frame in 0..<frameCount {
+            let time = Double(frame) / Double(sampleRate)
+            let remaining = max(0, duration - time)
+
+            let fadeIn = min(1, time / 0.045)
+            let fadeOut = min(1, remaining / 0.085)
+            let envelope = max(0, min(fadeIn, fadeOut))
+
+            let spinUp = 1 - exp(-time * 9.5)
+            let flutter = sin(twoPi * 5.8 * time) * 3.2
+            let motorFrequency = 126 + (48 * spinUp) + flutter
+            motorPhase += twoPi * motorFrequency / Double(sampleRate)
+
+            let whineFrequency = 590
+                + (118 * spinUp)
+                + (14 * sin(twoPi * 1.9 * time))
+            whinePhase += twoPi * whineFrequency / Double(sampleRate)
+
+            let upperWhineFrequency = 1_120
+                + (90 * spinUp)
+                + (22 * sin(twoPi * 2.4 * time))
+            upperWhinePhase += twoPi * upperWhineFrequency / Double(sampleRate)
+
+            noiseState = noiseState &* 1_664_525 &+ 1_013_904_223
+            let noise = (Double(noiseState) / Double(UInt32.max) * 2) - 1
+
+            let rollerModulation = 0.79 + (0.21 * sin(twoPi * 28 * time))
+            let motor = (
+                0.50 * sin(motorPhase)
+                + 0.20 * sin(motorPhase * 2.01)
+                + 0.07 * sin(motorPhase * 3.98)
+            )
+            let whine = 0.22 * sin(whinePhase)
+            let upperWhine = 0.075 * sin(upperWhinePhase)
+            let mechanicalNoise = noise * 0.052 * rollerModulation
+
+            let rawSample = (
+                motor * rollerModulation
+                + whine
+                + upperWhine
+                + mechanicalNoise
+            ) * amplitude * envelope
+
+            // 軽いソフトクリップで音量を確保しながら、整数PCM変換時の歪みを防ぐ。
+            let clipped = tanh(rawSample * 1.18) * 0.94
+            let integerSample = Int16(
+                max(-1, min(1, clipped)) * Double(Int16.max)
+            )
+            appendLittleEndian(integerSample, to: &pcmData)
+        }
+
+        let dataSize = UInt32(pcmData.count)
+        let byteRate = sampleRate
+            * UInt32(channelCount)
+            * UInt32(bitsPerSample / 8)
+        let blockAlign = channelCount * (bitsPerSample / 8)
+
+        var wavData = Data()
+        wavData.reserveCapacity(44 + pcmData.count)
+        appendASCII("RIFF", to: &wavData)
+        appendLittleEndian(UInt32(36) + dataSize, to: &wavData)
+        appendASCII("WAVE", to: &wavData)
+        appendASCII("fmt ", to: &wavData)
+        appendLittleEndian(UInt32(16), to: &wavData)
+        appendLittleEndian(UInt16(1), to: &wavData)
+        appendLittleEndian(channelCount, to: &wavData)
+        appendLittleEndian(sampleRate, to: &wavData)
+        appendLittleEndian(byteRate, to: &wavData)
+        appendLittleEndian(blockAlign, to: &wavData)
+        appendLittleEndian(bitsPerSample, to: &wavData)
+        appendASCII("data", to: &wavData)
+        appendLittleEndian(dataSize, to: &wavData)
+        wavData.append(pcmData)
+        return wavData
+    }
+
+    private func appendASCII(_ string: String, to data: inout Data) {
+        data.append(contentsOf: string.utf8)
+    }
+
+    private func appendLittleEndian<T: FixedWidthInteger>(
+        _ value: T,
+        to data: inout Data
+    ) {
+        var littleEndianValue = value.littleEndian
+        Swift.withUnsafeBytes(of: &littleEndianValue) { bytes in
+            data.append(contentsOf: bytes)
+        }
+    }
+
+    private func log(_ message: String) {
+        #if DEBUG
+        print("[PhotoPrintMotorSound] \(message)")
+        #endif
+    }
+}
+
 private enum PhotoPrintUIKitHaptics {
+    @MainActor
+    static func prepareFeedRattle() {
+        PhotoPrintFeedHapticDriver.shared.prepare()
+    }
+
+    @MainActor
+    static func playFeedRattlePulse(index: Int, intensity: CGFloat) {
+        PhotoPrintFeedHapticDriver.shared.pulse(
+            index: index,
+            intensity: intensity
+        )
+    }
+
+    @MainActor
     static func play(_ event: PhotoPrintHapticEvent) {
         switch event {
         case .shutter:
             UIImpactFeedbackGenerator(style: .medium).impactOccurred(intensity: 0.75)
         case .printer:
             UIImpactFeedbackGenerator(style: .soft).impactOccurred(intensity: 0.55)
-        case .feed:
-            UIImpactFeedbackGenerator(style: .light).impactOccurred(intensity: 0.35)
         case .settle:
             UIImpactFeedbackGenerator(style: .soft).impactOccurred(intensity: 0.48)
         case .tray:
@@ -1543,7 +1965,6 @@ private enum PhotoPrintUIKitHaptics {
 private struct PhotoPrintSensoryFeedbackModifier: ViewModifier {
     let shutterTrigger: Int
     let printerTrigger: Int
-    let feedTrigger: Int
     let settleTrigger: Int
     let trayTrigger: Int
 
@@ -1558,10 +1979,6 @@ private struct PhotoPrintSensoryFeedbackModifier: ViewModifier {
                 .sensoryFeedback(
                     .impact(weight: .light, intensity: 0.48),
                     trigger: printerTrigger
-                )
-                .sensoryFeedback(
-                    .impact(weight: .light, intensity: 0.28),
-                    trigger: feedTrigger
                 )
                 .sensoryFeedback(
                     .impact(weight: .light, intensity: 0.42),
@@ -2104,8 +2521,17 @@ private struct PhotoPrintShaderModifier: ViewModifier {
     }
 }
 
+
+private enum PicoPolaroidLayout {
+    static let canvasSize = CGSize(width: 1200, height: 1500)
+    static let photoRect = CGRect(x: 92, y: 108, width: 1016, height: 1016)
+    static let paperCornerRadius: CGFloat = 29
+    static let photoCornerRadius: CGFloat = 14
+    static let aspectRatio: CGFloat = canvasSize.width / canvasSize.height
+}
+
 private struct PolaroidPaperView: View {
-    static let aspectRatio: CGFloat = 1200.0 / 1380.0
+    static let aspectRatio: CGFloat = PicoPolaroidLayout.aspectRatio
 
     let sceneImage: UIImage
 
@@ -2113,19 +2539,56 @@ private struct PolaroidPaperView: View {
         GeometryReader { proxy in
             let width = max(1, proxy.size.width)
             let height = max(1, proxy.size.height)
-            let sideInset = width * (92.0 / 1200.0)
-            let topInset = height * (126.0 / 1380.0)
-            let photoSide = width * (1016.0 / 1200.0)
-            let corner = max(1.5, width * 0.008)
+            let sideInset = width * (
+                PicoPolaroidLayout.photoRect.minX / PicoPolaroidLayout.canvasSize.width
+            )
+            let topInset = height * (
+                PicoPolaroidLayout.photoRect.minY / PicoPolaroidLayout.canvasSize.height
+            )
+            let photoSide = width * (
+                PicoPolaroidLayout.photoRect.width / PicoPolaroidLayout.canvasSize.width
+            )
+            let paperCorner = max(3, width * 0.022)
+            let photoCorner = max(2, width * 0.014)
+            let edgeWidth = max(0.65, width * 0.0024)
+            let paperShape = RoundedRectangle(
+                cornerRadius: paperCorner,
+                style: .continuous
+            )
+            let photoShape = RoundedRectangle(
+                cornerRadius: photoCorner,
+                style: .continuous
+            )
 
             ZStack(alignment: .topLeading) {
-                RoundedRectangle(cornerRadius: corner, style: .continuous)
+                paperShape
                     .fill(
                         LinearGradient(
-                            colors: [
-                                Color(red: 0.995, green: 0.992, blue: 0.972),
-                                Color(red: 0.955, green: 0.955, blue: 0.925),
-                                Color(red: 0.925, green: 0.935, blue: 0.915)
+                            stops: [
+                                .init(
+                                    color: Color(
+                                        red: 0.995,
+                                        green: 0.991,
+                                        blue: 0.965
+                                    ),
+                                    location: 0
+                                ),
+                                .init(
+                                    color: Color(
+                                        red: 0.974,
+                                        green: 0.968,
+                                        blue: 0.938
+                                    ),
+                                    location: 0.48
+                                ),
+                                .init(
+                                    color: Color(
+                                        red: 0.935,
+                                        green: 0.930,
+                                        blue: 0.900
+                                    ),
+                                    location: 1
+                                )
                             ],
                             startPoint: .topLeading,
                             endPoint: .bottomTrailing
@@ -2134,70 +2597,192 @@ private struct PolaroidPaperView: View {
 
                 RadialGradient(
                     colors: [
-                        Color.white.opacity(0.20),
-                        Color.clear,
-                        Color.black.opacity(0.035)
+                        Color.white.opacity(0.34),
+                        Color.white.opacity(0.06),
+                        Color.clear
                     ],
-                    center: .topLeading,
+                    center: UnitPoint(x: 0.16, y: 0.08),
                     startRadius: 0,
-                    endRadius: max(width, height)
+                    endRadius: max(width, height) * 0.78
                 )
-                .clipShape(RoundedRectangle(cornerRadius: corner, style: .continuous))
+                .clipShape(paperShape)
+                .blendMode(.screen)
+
+                PolaroidPaperTextureView()
+                    .clipShape(paperShape)
+                    .blendMode(.multiply)
+                    .opacity(0.92)
+
+                // 写真面を紙よりわずかに沈ませ、乳剤層が台紙に載っている厚みを表現する。
+                photoShape
+                    .fill(Color.black.opacity(0.16))
+                    .frame(width: photoSide, height: photoSide)
+                    .offset(
+                        x: sideInset,
+                        y: topInset + max(0.5, width * 0.002)
+                    )
+                    .blur(radius: max(0.25, width * 0.0012))
 
                 Image(uiImage: sceneImage)
                     .resizable()
                     .scaledToFill()
                     .frame(width: photoSide, height: photoSide)
-                    .clipShape(
-                        RoundedRectangle(
-                            cornerRadius: max(1, corner * 0.75),
-                            style: .continuous
-                        )
-                    )
+                    .clipShape(photoShape)
                     .overlay {
-                        RoundedRectangle(
-                            cornerRadius: max(1, corner * 0.75),
-                            style: .continuous
+                        LinearGradient(
+                            colors: [
+                                Color.white.opacity(0.095),
+                                Color.clear,
+                                Color.black.opacity(0.055)
+                            ],
+                            startPoint: .topLeading,
+                            endPoint: .bottomTrailing
                         )
-                        .stroke(Color.black.opacity(0.12), lineWidth: max(0.5, width * 0.0012))
+                        .blendMode(.softLight)
+                        .clipShape(photoShape)
+                    }
+                    .overlay {
+                        photoShape
+                            .strokeBorder(
+                                Color.black.opacity(0.16),
+                                lineWidth: max(0.5, width * 0.0014)
+                            )
                     }
                     .offset(x: sideInset, y: topInset)
 
+                // 実物のインスタント写真にある下部の薬剤ポッド／厚みを、
+                // 帯ではなくごく弱い濃度差として表現する。
                 LinearGradient(
-                    colors: [
-                        Color.white.opacity(0.13),
-                        Color.clear,
-                        Color.black.opacity(0.045)
+                    stops: [
+                        .init(color: Color.clear, location: 0),
+                        .init(color: Color.black.opacity(0.018), location: 0.62),
+                        .init(color: Color.white.opacity(0.14), location: 1)
                     ],
                     startPoint: .top,
                     endPoint: .bottom
                 )
+                .frame(height: height * 0.19)
+                .frame(maxHeight: .infinity, alignment: .bottom)
+                .clipShape(paperShape)
                 .blendMode(.softLight)
-                .clipShape(RoundedRectangle(cornerRadius: corner, style: .continuous))
 
-                RoundedRectangle(cornerRadius: corner, style: .continuous)
-                    .stroke(
+                LinearGradient(
+                    colors: [
+                        Color.white.opacity(0.18),
+                        Color.clear,
+                        Color.black.opacity(0.035)
+                    ],
+                    startPoint: .top,
+                    endPoint: .bottom
+                )
+                .clipShape(paperShape)
+                .blendMode(.softLight)
+
+                paperShape
+                    .strokeBorder(
                         LinearGradient(
                             colors: [
-                                Color.white.opacity(0.72),
-                                Color.gray.opacity(0.18),
-                                Color.black.opacity(0.14)
+                                Color.white.opacity(0.86),
+                                Color.white.opacity(0.24),
+                                Color.black.opacity(0.17)
                             ],
                             startPoint: .topLeading,
                             endPoint: .bottomTrailing
                         ),
-                        lineWidth: max(0.6, width * 0.003)
+                        lineWidth: edgeWidth
                     )
 
-                Rectangle()
-                    .fill(Color.black.opacity(0.08))
-                    .frame(height: max(0.7, height * 0.004))
-                    .frame(maxHeight: .infinity, alignment: .bottom)
-                    .clipShape(RoundedRectangle(cornerRadius: corner, style: .continuous))
+                paperShape
+                    .inset(by: max(0.8, width * 0.004))
+                    .strokeBorder(
+                        Color.black.opacity(0.035),
+                        lineWidth: max(0.45, width * 0.0012)
+                    )
             }
+            .clipShape(paperShape)
             .compositingGroup()
         }
         .aspectRatio(Self.aspectRatio, contentMode: .fit)
+        .accessibilityHidden(true)
+    }
+}
+
+private struct PolaroidPaperTextureView: View {
+    var body: some View {
+        Canvas { context, size in
+            let width = max(1, size.width)
+            let height = max(1, size.height)
+
+            // 決定的な座標を使い、アニメーション中にテクスチャがちらつかないようにする。
+            for index in 0..<320 {
+                let x = CGFloat((index * 47 + 19) % 997) / 997 * width
+                let y = CGFloat((index * 83 + 31) % 991) / 991 * height
+                let diameter = max(
+                    0.35,
+                    min(width, height) * CGFloat(0.0011 + Double(index % 3) * 0.00035)
+                )
+                let opacity = 0.022 + (Double(index % 6) * 0.0045)
+
+                var dot = Path()
+                dot.addEllipse(
+                    in: CGRect(
+                        x: x,
+                        y: y,
+                        width: diameter,
+                        height: diameter
+                    )
+                )
+                context.fill(
+                    dot,
+                    with: .color(Color.black.opacity(opacity))
+                )
+            }
+
+            for index in 0..<96 {
+                let x = CGFloat((index * 61 + 7) % 983) / 983 * width
+                let y = CGFloat((index * 97 + 13) % 977) / 977 * height
+                let length = width * CGFloat(0.018 + Double(index % 4) * 0.007)
+                let rise = height * CGFloat(Double((index % 3) - 1) * 0.0012)
+
+                var fiber = Path()
+                fiber.move(to: CGPoint(x: x, y: y))
+                fiber.addLine(
+                    to: CGPoint(
+                        x: min(width, x + length),
+                        y: max(0, min(height, y + rise))
+                    )
+                )
+                context.stroke(
+                    fiber,
+                    with: .color(Color.white.opacity(0.075)),
+                    lineWidth: max(0.25, width * 0.00072)
+                )
+            }
+
+            // 紙の浅い凹凸を短い暗線として重ね、均一なデジタルノイズではなく
+            // 実際の台紙表面に近いざらつきを作る。
+            for index in 0..<88 {
+                let x = CGFloat((index * 109 + 23) % 971) / 971 * width
+                let y = CGFloat((index * 71 + 41) % 967) / 967 * height
+                let length = width * CGFloat(0.006 + Double(index % 5) * 0.0035)
+                let fall = height * CGFloat(Double((index % 5) - 2) * 0.00055)
+
+                var relief = Path()
+                relief.move(to: CGPoint(x: x, y: y))
+                relief.addLine(
+                    to: CGPoint(
+                        x: min(width, x + length),
+                        y: max(0, min(height, y + fall))
+                    )
+                )
+                context.stroke(
+                    relief,
+                    with: .color(Color.black.opacity(0.032)),
+                    lineWidth: max(0.2, width * 0.00050)
+                )
+            }
+        }
+        .allowsHitTesting(false)
         .accessibilityHidden(true)
     }
 }
@@ -2404,45 +2989,80 @@ private struct PicoPrintedPhotoDetailOverlay: View {
 }
 
 private enum PicoCameraImageComposer {
+    private static let disposableCameraContext = CIContext(
+        options: [
+            .cacheIntermediates: false
+        ]
+    )
+
     static func composeScene(
         background: UIImage,
         previewSize: CGSize,
         steps: Int
     ) -> UIImage {
-        let backgroundSize = background.size
+        let filteredBackground = applyDisposableCameraLook(to: background)
+        let backgroundSize = filteredBackground.size
 
         let format = UIGraphicsImageRendererFormat.default()
-        format.scale = background.scale
+        format.scale = filteredBackground.scale
         format.opaque = true
 
         let renderer = UIGraphicsImageRenderer(size: backgroundSize, format: format)
         return renderer.image { _ in
-            background.draw(in: CGRect(origin: .zero, size: backgroundSize))
+            filteredBackground.draw(in: CGRect(origin: .zero, size: backgroundSize))
             drawTinyStepStamp(steps: steps, canvasSize: backgroundSize)
         }
     }
 
     static func makePolaroid(from image: UIImage) -> UIImage {
-        let outputSize = CGSize(width: 1200, height: 1380)
-        let photoRect = CGRect(x: 92, y: 126, width: 1016, height: 1016)
+        let outputSize = PicoPolaroidLayout.canvasSize
+        let photoRect = PicoPolaroidLayout.photoRect
         let paperRect = CGRect(origin: .zero, size: outputSize)
+        let paperPath = UIBezierPath(
+            roundedRect: paperRect.insetBy(dx: 2, dy: 2),
+            cornerRadius: PicoPolaroidLayout.paperCornerRadius
+        )
+        let photoPath = UIBezierPath(
+            roundedRect: photoRect,
+            cornerRadius: PicoPolaroidLayout.photoCornerRadius
+        )
 
         let format = UIGraphicsImageRendererFormat.default()
         format.scale = 1
-        format.opaque = true
+        format.opaque = false
 
         let renderer = UIGraphicsImageRenderer(size: outputSize, format: format)
         return renderer.image { context in
             let cg = context.cgContext
+            cg.clear(paperRect)
 
-            UIColor(red: 0.94, green: 0.96, blue: 0.95, alpha: 1).setFill()
+            cg.saveGState()
+            cg.addPath(paperPath.cgPath)
+            cg.clip()
+
+            UIColor(
+                red: 0.974,
+                green: 0.968,
+                blue: 0.936,
+                alpha: 1
+            ).setFill()
             cg.fill(paperRect)
 
             let paperGradient = CGGradient(
                 colorsSpace: CGColorSpaceCreateDeviceRGB(),
                 colors: [
-                    UIColor.white.withAlphaComponent(0.78).cgColor,
-                    UIColor(red: 0.90, green: 0.93, blue: 0.92, alpha: 1).cgColor
+                    UIColor(
+                        red: 1.0,
+                        green: 0.995,
+                        blue: 0.974,
+                        alpha: 1
+                    ).cgColor,
+                    UIColor(
+                        red: 0.948,
+                        green: 0.942,
+                        blue: 0.910,
+                        alpha: 1
+                    ).cgColor
                 ] as CFArray,
                 locations: [0, 1]
             )
@@ -2455,31 +3075,221 @@ private enum PicoCameraImageComposer {
                 )
             }
 
+            let highlightGradient = CGGradient(
+                colorsSpace: CGColorSpaceCreateDeviceRGB(),
+                colors: [
+                    UIColor.white.withAlphaComponent(0.26).cgColor,
+                    UIColor.white.withAlphaComponent(0.0).cgColor
+                ] as CFArray,
+                locations: [0, 1]
+            )
+            if let highlightGradient {
+                cg.drawRadialGradient(
+                    highlightGradient,
+                    startCenter: CGPoint(x: 170, y: 110),
+                    startRadius: 0,
+                    endCenter: CGPoint(x: 170, y: 110),
+                    endRadius: 940,
+                    options: []
+                )
+            }
+
             addPaperTexture(context: context, size: outputSize)
+
+            let lowerDensityRect = CGRect(
+                x: 0,
+                y: outputSize.height * 0.80,
+                width: outputSize.width,
+                height: outputSize.height * 0.20
+            )
+            let lowerDensityGradient = CGGradient(
+                colorsSpace: CGColorSpaceCreateDeviceRGB(),
+                colors: [
+                    UIColor.clear.cgColor,
+                    UIColor.black.withAlphaComponent(0.018).cgColor,
+                    UIColor.white.withAlphaComponent(0.12).cgColor
+                ] as CFArray,
+                locations: [0, 0.65, 1]
+            )
+            if let lowerDensityGradient {
+                cg.drawLinearGradient(
+                    lowerDensityGradient,
+                    start: CGPoint(x: lowerDensityRect.midX, y: lowerDensityRect.minY),
+                    end: CGPoint(x: lowerDensityRect.midX, y: lowerDensityRect.maxY),
+                    options: []
+                )
+            }
 
             let fixed = image.picoFixedOrientation()
             let cropped = fixed.picoCroppedToAspectFill(of: photoRect.size) ?? fixed
 
             cg.saveGState()
-            cg.addPath(UIBezierPath(roundedRect: photoRect, cornerRadius: 7).cgPath)
+            cg.addPath(photoPath.cgPath)
             cg.clip()
             cropped.draw(in: photoRect)
 
-            UIColor(red: 1.0, green: 0.96, blue: 0.78, alpha: 0.05).setFill()
+            UIColor(
+                red: 1.0,
+                green: 0.94,
+                blue: 0.76,
+                alpha: 0.025
+            ).setFill()
             cg.fill(photoRect)
             cg.restoreGState()
 
-            UIColor.black.withAlphaComponent(0.15).setStroke()
-            UIBezierPath(roundedRect: photoRect, cornerRadius: 7).stroke()
+            UIColor.black.withAlphaComponent(0.14).setStroke()
+            cg.setLineWidth(2)
+            cg.addPath(photoPath.cgPath)
+            cg.strokePath()
 
-            let bottomGloss = CGRect(
-                x: 0,
-                y: outputSize.height - 82,
-                width: outputSize.width,
-                height: 82
+            cg.restoreGState()
+
+            UIColor.white.withAlphaComponent(0.72).setStroke()
+            cg.setLineWidth(2.2)
+            cg.addPath(paperPath.cgPath)
+            cg.strokePath()
+
+            let insetPaperPath = UIBezierPath(
+                roundedRect: paperRect.insetBy(dx: 7, dy: 7),
+                cornerRadius: 23
             )
-            UIColor.black.withAlphaComponent(0.08).setFill()
-            cg.fill(bottomGloss)
+            UIColor.black.withAlphaComponent(0.035).setStroke()
+            cg.setLineWidth(1.1)
+            cg.addPath(insetPaperPath.cgPath)
+            cg.strokePath()
+        }
+    }
+
+    private static func applyDisposableCameraLook(to image: UIImage) -> UIImage {
+        let fixed = image.picoFixedOrientation()
+        guard let inputImage = CIImage(image: fixed) else {
+            return fixed
+        }
+
+        var outputImage = inputImage
+
+        // V9では色調補正、暖色化、周辺減光、粒状感を全体的に弱め、
+        // 元のカメラ映像を主体にしながら、ごく薄い使い捨てカメラ感だけを残す。
+        let colorControls = CIFilter.colorControls()
+        colorControls.inputImage = outputImage
+        colorControls.saturation = 0.98
+        colorControls.contrast = 1.025
+        colorControls.brightness = 0.001
+        outputImage = colorControls.outputImage ?? outputImage
+
+        let temperature = CIFilter.temperatureAndTint()
+        temperature.inputImage = outputImage
+        temperature.neutral = CIVector(x: 6500, y: 0)
+        temperature.targetNeutral = CIVector(x: 6425, y: 0.8)
+        outputImage = temperature.outputImage ?? outputImage
+
+        let highlightShadow = CIFilter.highlightShadowAdjust()
+        highlightShadow.inputImage = outputImage
+        highlightShadow.highlightAmount = 0.96
+        highlightShadow.shadowAmount = 0.05
+        outputImage = highlightShadow.outputImage ?? outputImage
+
+        let vignette = CIFilter.vignette()
+        vignette.inputImage = outputImage
+        vignette.intensity = 0.07
+        vignette.radius = Float(
+            min(inputImage.extent.width, inputImage.extent.height) * 1.05
+        )
+        outputImage = vignette.outputImage ?? outputImage
+
+        guard let rendered = disposableCameraContext.createCGImage(
+            outputImage.cropped(to: inputImage.extent),
+            from: inputImage.extent
+        ) else {
+            return fixed
+        }
+
+        let colorAdjusted = UIImage(
+            cgImage: rendered,
+            scale: fixed.scale,
+            orientation: .up
+        )
+        return addSubtleDisposableCameraSurface(to: colorAdjusted)
+    }
+
+    private static func addSubtleDisposableCameraSurface(
+        to image: UIImage
+    ) -> UIImage {
+        let size = image.size
+        guard size.width > 1, size.height > 1 else { return image }
+
+        let format = UIGraphicsImageRendererFormat.default()
+        format.scale = image.scale
+        format.opaque = true
+
+        let renderer = UIGraphicsImageRenderer(size: size, format: format)
+        return renderer.image { context in
+            let cg = context.cgContext
+            image.draw(in: CGRect(origin: .zero, size: size))
+
+            // 使い捨てカメラの直射フラッシュを連想させる、非常に弱い暖色の光だまり。
+            let flashGradient = CGGradient(
+                colorsSpace: CGColorSpaceCreateDeviceRGB(),
+                colors: [
+                    UIColor(
+                        red: 1.0,
+                        green: 0.89,
+                        blue: 0.68,
+                        alpha: 0.018
+                    ).cgColor,
+                    UIColor.clear.cgColor
+                ] as CFArray,
+                locations: [0, 1]
+            )
+            if let flashGradient {
+                cg.drawRadialGradient(
+                    flashGradient,
+                    startCenter: CGPoint(
+                        x: size.width * 0.22,
+                        y: size.height * 0.16
+                    ),
+                    startRadius: 0,
+                    endCenter: CGPoint(
+                        x: size.width * 0.22,
+                        y: size.height * 0.16
+                    ),
+                    endRadius: max(size.width, size.height) * 0.72,
+                    options: []
+                )
+            }
+
+            cg.saveGState()
+            cg.setBlendMode(.softLight)
+
+            let dotCount = 900
+            let baseDiameter = max(
+                0.45,
+                min(size.width, size.height) * 0.00024
+            )
+
+            for index in 0..<dotCount {
+                let x = CGFloat((index * 149 + 37) % 4093) / 4093 * size.width
+                let y = CGFloat((index * 233 + 71) % 4091) / 4091 * size.height
+                let diameter = baseDiameter * CGFloat(0.75 + Double(index % 4) * 0.20)
+                let alpha = CGFloat(0.004 + Double(index % 6) * 0.0012)
+
+                if index.isMultiple(of: 3) {
+                    UIColor.white.withAlphaComponent(alpha).setFill()
+                } else {
+                    UIColor.black.withAlphaComponent(alpha).setFill()
+                }
+
+                cg.fillEllipse(
+                    in: CGRect(
+                        x: x,
+                        y: y,
+                        width: diameter,
+                        height: diameter
+                    )
+                )
+            }
+
+            cg.restoreGState()
         }
     }
 
@@ -2512,13 +3322,66 @@ private enum PicoCameraImageComposer {
     ) {
         let cg = context.cgContext
         cg.saveGState()
-        for index in 0..<900 {
-            let x = CGFloat((index * 37) % Int(size.width))
-            let y = CGFloat((index * 71) % Int(size.height))
-            let alpha = CGFloat(0.012 + (Double(index % 7) * 0.003))
-            UIColor.black.withAlphaComponent(alpha).setFill()
-            cg.fill(CGRect(x: x, y: y, width: 1, height: 1))
+
+        for index in 0..<3_400 {
+            let x = CGFloat((index * 37 + 11) % Int(size.width))
+            let y = CGFloat((index * 71 + 23) % Int(size.height))
+            let diameter = CGFloat(0.7 + Double(index % 3) * 0.35)
+            let alpha = CGFloat(0.010 + (Double(index % 8) * 0.0023))
+
+            if index.isMultiple(of: 4) {
+                UIColor.white.withAlphaComponent(alpha * 1.25).setFill()
+            } else {
+                UIColor.black.withAlphaComponent(alpha).setFill()
+            }
+
+            cg.fillEllipse(
+                in: CGRect(
+                    x: x,
+                    y: y,
+                    width: diameter,
+                    height: diameter
+                )
+            )
         }
+
+        cg.setLineCap(.round)
+        for index in 0..<360 {
+            let x = CGFloat((index * 89 + 17) % Int(size.width))
+            let y = CGFloat((index * 53 + 29) % Int(size.height))
+            let length = CGFloat(8 + (index % 5) * 5)
+            let rise = CGFloat((index % 3) - 1) * 0.7
+
+            UIColor.white.withAlphaComponent(0.038).setStroke()
+            cg.setLineWidth(0.62)
+            cg.move(to: CGPoint(x: x, y: y))
+            cg.addLine(
+                to: CGPoint(
+                    x: min(size.width, x + length),
+                    y: max(0, min(size.height, y + rise))
+                )
+            )
+            cg.strokePath()
+        }
+
+        for index in 0..<260 {
+            let x = CGFloat((index * 127 + 31) % Int(size.width))
+            let y = CGFloat((index * 101 + 47) % Int(size.height))
+            let length = CGFloat(5 + (index % 7) * 3)
+            let fall = CGFloat((index % 5) - 2) * 0.48
+
+            UIColor.black.withAlphaComponent(0.024).setStroke()
+            cg.setLineWidth(0.42)
+            cg.move(to: CGPoint(x: x, y: y))
+            cg.addLine(
+                to: CGPoint(
+                    x: min(size.width, x + length),
+                    y: max(0, min(size.height, y + fall))
+                )
+            )
+            cg.strokePath()
+        }
+
         cg.restoreGState()
     }
 }
@@ -2766,10 +3629,18 @@ private extension UIImage {
         guard pixelWidth > 0, pixelHeight > 0 else { return nil }
 
         let cropRect = CGRect(
-            x: pixelWidth * (92.0 / 1200.0),
-            y: pixelHeight * (126.0 / 1380.0),
-            width: pixelWidth * (1016.0 / 1200.0),
-            height: pixelHeight * (1016.0 / 1380.0)
+            x: pixelWidth * (
+                PicoPolaroidLayout.photoRect.minX / PicoPolaroidLayout.canvasSize.width
+            ),
+            y: pixelHeight * (
+                PicoPolaroidLayout.photoRect.minY / PicoPolaroidLayout.canvasSize.height
+            ),
+            width: pixelWidth * (
+                PicoPolaroidLayout.photoRect.width / PicoPolaroidLayout.canvasSize.width
+            ),
+            height: pixelHeight * (
+                PicoPolaroidLayout.photoRect.height / PicoPolaroidLayout.canvasSize.height
+            )
         ).integral.intersection(
             CGRect(x: 0, y: 0, width: pixelWidth, height: pixelHeight)
         )
