@@ -14,7 +14,7 @@ private enum HappinessNotificationName {
 
 extension AppState {
     static let happinessMaxPointsPerLevel: Int = 100
-    static let happinessMaxLevel: Int = 20
+    static let happinessMaxLevel: Int = 40
     static let happinessTouchesPerPoint: Int = 5
     static let happinessDailyPettingPointLimit: Int = 100
     static let happinessDecayIntervalSeconds: TimeInterval = 5 * 60
@@ -36,7 +36,11 @@ extension AppState {
         .init(level: 5, petID: "reward_000", assetName: "girl_A", characterName: "ガール（A）"),
         .init(level: 10, petID: "reward_001", assetName: "boy_A", characterName: "ボーイ（A）"),
         .init(level: 15, petID: "reward_002", assetName: "girl_B", characterName: "ガール（B）"),
-        .init(level: 20, petID: "reward_003", assetName: "boy_B", characterName: "ボーイ（B）")
+        .init(level: 20, petID: "reward_003", assetName: "boy_B", characterName: "ボーイ（B）"),
+        .init(level: 25, petID: "reward_004", assetName: "girl_C", characterName: "ガール（C）"),
+        .init(level: 30, petID: "reward_005", assetName: "boy_C", characterName: "ボーイ（C）"),
+        .init(level: 35, petID: "reward_006", assetName: "girl_D", characterName: "ガール（D）"),
+        .init(level: 40, petID: "reward_007", assetName: "boy_D", characterName: "ボーイ（D）")
     ]
 
     static let happinessRewardDefinitions: [HappinessRewardDefinition] = standardHappinessRewardDefinitions
@@ -55,6 +59,18 @@ extension AppState {
         ],
         "reward_003": [
             .init(level: 10, petID: "reward_003_casual", assetName: "boy_B_casual", characterName: "ボーイ / カジュアル（B）")
+        ],
+        "reward_004": [
+            .init(level: 10, petID: "reward_004_casual", assetName: "girl_C_casual", characterName: "ガール / カジュアル（C）")
+        ],
+        "reward_005": [
+            .init(level: 10, petID: "reward_005_casual", assetName: "boy_C_casual", characterName: "ボーイ / カジュアル（C）")
+        ],
+        "reward_006": [
+            .init(level: 10, petID: "reward_006_casual", assetName: "girl_D_casual", characterName: "ガール / カジュアル（D）")
+        ],
+        "reward_007": [
+            .init(level: 10, petID: "reward_007_casual", assetName: "boy_D_casual", characterName: "ボーイ / カジュアル（D）")
         ]
     ]
 

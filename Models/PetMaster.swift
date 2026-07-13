@@ -22,14 +22,22 @@ enum PetMaster {
         "reward_000",
         "reward_001",
         "reward_002",
-        "reward_003"
+        "reward_003",
+        "reward_004",
+        "reward_005",
+        "reward_006",
+        "reward_007"
     ]
 
     static let happinessRewardCasualPetIDs: [String] = [
         "reward_000_casual",
         "reward_001_casual",
         "reward_002_casual",
-        "reward_003_casual"
+        "reward_003_casual",
+        "reward_004_casual",
+        "reward_005_casual",
+        "reward_006_casual",
+        "reward_007_casual"
     ]
 
     /// 幸せ報酬でのみ獲得できるキャラクターID。
@@ -65,6 +73,10 @@ enum PetMaster {
         case "reward_001", "reward_001_casual": return "reward_001"
         case "reward_002", "reward_002_casual": return "reward_002"
         case "reward_003", "reward_003_casual": return "reward_003"
+        case "reward_004", "reward_004_casual": return "reward_004"
+        case "reward_005", "reward_005_casual": return "reward_005"
+        case "reward_006", "reward_006_casual": return "reward_006"
+        case "reward_007", "reward_007_casual": return "reward_007"
         default: return nil
         }
     }
@@ -126,10 +138,18 @@ enum PetMaster {
         .init(id: "reward_001", name: "ボーイ（A）"),
         .init(id: "reward_002", name: "ガール（B）"),
         .init(id: "reward_003", name: "ボーイ（B）"),
+        .init(id: "reward_004", name: "ガール（C）"),
+        .init(id: "reward_005", name: "ボーイ（C）"),
+        .init(id: "reward_006", name: "ガール（D）"),
+        .init(id: "reward_007", name: "ボーイ（D）"),
         .init(id: "reward_000_casual", name: "ガール / カジュアル（A）"),
         .init(id: "reward_001_casual", name: "ボーイ / カジュアル（A）"),
         .init(id: "reward_002_casual", name: "ガール / カジュアル（B）"),
         .init(id: "reward_003_casual", name: "ボーイ / カジュアル（B）"),
+        .init(id: "reward_004_casual", name: "ガール / カジュアル（C）"),
+        .init(id: "reward_005_casual", name: "ボーイ / カジュアル（C）"),
+        .init(id: "reward_006_casual", name: "ガール / カジュアル（D）"),
+        .init(id: "reward_007_casual", name: "ボーイ / カジュアル（D）"),
         .init(id: "food_taiyaki", name: "たい焼き"),
         .init(id: "food_soft_cream", name: "ソフトクリーム"),
         .init(id: "food_hotdog", name: "ホットドッグ"),
@@ -217,10 +237,18 @@ enum PetMaster {
         case "reward_001": return "boy_A"
         case "reward_002": return "girl_B"
         case "reward_003": return "boy_B"
+        case "reward_004": return "girl_C"
+        case "reward_005": return "boy_C"
+        case "reward_006": return "girl_D"
+        case "reward_007": return "boy_D"
         case "reward_000_casual": return "girl_A_casual"
         case "reward_001_casual": return "boy_A_casual"
         case "reward_002_casual": return "girl_B_casual"
         case "reward_003_casual": return "boy_B_casual"
+        case "reward_004_casual": return "girl_C_casual"
+        case "reward_005_casual": return "boy_C_casual"
+        case "reward_006_casual": return "girl_D_casual"
+        case "reward_007_casual": return "boy_D_casual"
         case "food_taiyaki": return "taiyaki"
         case "food_soft_cream": return "soft_cream"
         case "food_hotdog": return "hotdog"
@@ -338,10 +366,18 @@ enum PetMaster {
         case "reward_001": return "幸せLv.10の報酬で仲間になる特別なキャラクター。"
         case "reward_002": return "幸せLv.15の報酬で仲間になる特別なキャラクター。"
         case "reward_003": return "幸せLv.20の報酬で仲間になる特別なキャラクター。"
+        case "reward_004": return "幸せLv.25の報酬で仲間になる特別なキャラクター。"
+        case "reward_005": return "幸せLv.30の報酬で仲間になる特別なキャラクター。"
+        case "reward_006": return "幸せLv.35の報酬で仲間になる特別なキャラクター。"
+        case "reward_007": return "幸せLv.40の報酬で仲間になる特別なキャラクター。"
         case "reward_000_casual": return "ガール（A）の幸せLv.10到達報酬でのみ獲得できる特別なカジュアル衣装。幸せ度メーターはガール（A）と共通。"
         case "reward_001_casual": return "ボーイ（A）の幸せLv.10到達報酬でのみ獲得できる特別なカジュアル衣装。幸せ度メーターはボーイ（A）と共通。"
         case "reward_002_casual": return "ガール（B）の幸せLv.10到達報酬でのみ獲得できる特別なカジュアル衣装。幸せ度メーターはガール（B）と共通。"
         case "reward_003_casual": return "ボーイ（B）の幸せLv.10到達報酬でのみ獲得できる特別なカジュアル衣装。幸せ度メーターはボーイ（B）と共通。"
+        case "reward_004_casual": return "ガール（C）の幸せLv.10到達報酬でのみ獲得できる特別なカジュアル衣装。幸せ度メーターはガール（C）と共通。"
+        case "reward_005_casual": return "ボーイ（C）の幸せLv.10到達報酬でのみ獲得できる特別なカジュアル衣装。幸せ度メーターはボーイ（C）と共通。"
+        case "reward_006_casual": return "ガール（D）の幸せLv.10到達報酬でのみ獲得できる特別なカジュアル衣装。幸せ度メーターはガール（D）と共通。"
+        case "reward_007_casual": return "ボーイ（D）の幸せLv.10到達報酬でのみ獲得できる特別なカジュアル衣装。幸せ度メーターはボーイ（D）と共通。"
         case "moja_purpor": return "紫のもじゃ界では王道のスタンダード。派手な色なのに、本人はいたって普通のつもり。"
         case "moja_beat": return "特技はブレイクダンス。回り始めると、もじゃまで遠心力で少し伸びる。"
         case "moja_biniki": return "ビキニ姿でセクシー担当を自称している。季節は問わないし、寒さにも強いらしい。"
