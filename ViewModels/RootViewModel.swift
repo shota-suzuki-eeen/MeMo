@@ -31,6 +31,7 @@ final class RootViewModel: ObservableObject {
         try? modelContext.save()
 
         await startAuthorizationIfNeeded(hk: hk)
+        bgmManager.setDefaultBackground(for: state.normalizedCurrentPetID)
         bgmManager.startIfNeeded()
     }
 

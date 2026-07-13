@@ -3,7 +3,7 @@
 //  MeMo
 //
 //  Updated for the multi-gacha specification.
-//  Adds フードガチャ using gatyaMachine_food and keeps いつでもガチャ as the initial machine.
+//  Adds フードガチャ / もじゃガチャ and keeps いつでもガチャ as the initial machine.
 //  Pity counter is tracked independently for each gacha definition.
 //  2026/07 update: AdMob一時停止モード中だけ広告なし無料10回表示にし、
 //  通常モード中は広告視聴ボタン、赤色ボタン、ロード中スピナーを表示。
@@ -55,7 +55,7 @@ fileprivate enum GachaRarity: String, CaseIterable, Identifiable {
     }
 
     /// 仕様: N 66%, R 30%, SR 3%。
-    /// フードガチャでも N/R はいつでもガチャと同じ内容、キャラクターは SR のみで排出する。
+    /// フードガチャ / もじゃガチャでも N/R はいつでもガチャと同じ内容、キャラクターは SR のみで排出する。
     var baseWeight: Double {
         switch self {
         case .blue: return 66
@@ -103,9 +103,17 @@ fileprivate struct GachaEmissionCharacter: Identifiable, Hashable {
 fileprivate enum GachaRewardPool: Hashable {
     case normalCharacters
     case foodCharacters
+    case mojaCharacters
 }
 
 fileprivate struct FoodGachaCharacter: Identifiable, Hashable {
+    let id: String
+    let name: String
+    let assetName: String
+    let rarity: GachaRarity
+}
+
+fileprivate struct MojaGachaCharacter: Identifiable, Hashable {
     let id: String
     let name: String
     let assetName: String
@@ -133,6 +141,11 @@ fileprivate struct GachaDefinition: Identifiable, Hashable {
 
         case .foodCharacters:
             return GachaCatalog.foodCharacters.map {
+                GachaEmissionCharacter(id: $0.id, name: $0.name, imageName: $0.assetName)
+            }
+
+        case .mojaCharacters:
+            return GachaCatalog.mojaCharacters.map {
                 GachaEmissionCharacter(id: $0.id, name: $0.name, imageName: $0.assetName)
             }
         }
@@ -175,6 +188,20 @@ fileprivate enum GachaCatalog {
         .init(id: "food_takoyaki", name: "たこ焼き", assetName: "takoyaki", rarity: .gold)
     ]
 
+    static let mojaCharacters: [MojaGachaCharacter] = [
+        .init(id: "moja_purpor", name: "パーポー", assetName: "purpor", rarity: .gold),
+        .init(id: "moja_beat", name: "ビート", assetName: "beat", rarity: .gold),
+        .init(id: "moja_biniki", name: "ビニキ", assetName: "biniki", rarity: .gold),
+        .init(id: "moja_himei", name: "ヒメイ", assetName: "himei", rarity: .gold),
+        .init(id: "moja_kakke", name: "カッケ", assetName: "kakke", rarity: .gold),
+        .init(id: "moja_kepyon", name: "ケピョン", assetName: "kepyon", rarity: .gold),
+        .init(id: "moja_ninjin", name: "ニンジン", assetName: "ninjin", rarity: .gold),
+        .init(id: "moja_obaoru", name: "オバオル", assetName: "obaoru", rarity: .gold),
+        .init(id: "moja_sun", name: "スン", assetName: "sun", rarity: .gold),
+        .init(id: "moja_wanigeeta", name: "ワニゲータ", assetName: "wanigeeta", rarity: .gold),
+        .init(id: "moja_wareware", name: "ワレワレ", assetName: "wareware", rarity: .gold)
+    ]
+
     static let gachas: [GachaDefinition] = [
         GachaDefinition(
             id: "always",
@@ -187,6 +214,12 @@ fileprivate enum GachaCatalog {
             title: "フードガチャ",
             machineAssetName: "gatyaMachine_food",
             rewardPool: .foodCharacters
+        ),
+        GachaDefinition(
+            id: "moja",
+            title: "もじゃガチャ",
+            machineAssetName: "gatyaMachine_moja",
+            rewardPool: .mojaCharacters
         )
     ]
 
@@ -194,6 +227,7 @@ fileprivate enum GachaCatalog {
         pet.id != initialDistributionPetID
             && !PetMaster.isHappinessRewardPetID(pet.id)
             && !foodCharacters.contains(where: { $0.id == pet.id })
+            && !mojaCharacters.contains(where: { $0.id == pet.id })
     }
 
     static func resolvedCharacterName(for pet: PetMasterItem) -> String {
@@ -203,7 +237,7 @@ fileprivate enum GachaCatalog {
     }
 
     /// 「いつでもガチャ」のSR排出対象キャラクター。
-    /// 初期配布、なつき度報酬、フードガチャ専用キャラクターを除外し、
+    /// 初期配布、なつき度報酬、フードガチャ / もじゃガチャ専用キャラクターを除外し、
     /// 初回限定SR確定枠に「いつでもガチャ」以外のキャラクターが混入しないようにする。
     static func alwaysGachaCharacterCandidates() -> [PetMasterItem] {
         PetMaster.all.filter { isGachaCharacter($0) }
@@ -221,12 +255,21 @@ fileprivate enum GachaCatalog {
         }
     }
 
+    static func remainingMojaCharacters(state: AppState, rarity: GachaRarity? = nil) -> [MojaGachaCharacter] {
+        let owned = Set(state.ownedPetIDs())
+        return mojaCharacters.filter {
+            !owned.contains($0.id) && (rarity == nil || $0.rarity == rarity)
+        }
+    }
+
     static func canGoldAppear(in gacha: GachaDefinition, state: AppState) -> Bool {
         switch gacha.rewardPool {
         case .normalCharacters:
             return !remainingNormalCharacters(state: state).isEmpty
         case .foodCharacters:
             return !remainingFoodCharacters(state: state, rarity: .gold).isEmpty
+        case .mojaCharacters:
+            return !remainingMojaCharacters(state: state, rarity: .gold).isEmpty
         }
     }
 
@@ -236,6 +279,8 @@ fileprivate enum GachaCatalog {
             return makeAlwaysGachaReward(for: rarity, state: state)
         case .foodCharacters:
             return makeFoodGachaReward(for: rarity, state: state)
+        case .mojaCharacters:
+            return makeMojaGachaReward(for: rarity, state: state)
         }
     }
 
@@ -293,6 +338,27 @@ fileprivate enum GachaCatalog {
                 title: foodCharacter.name,
                 subtitle: "フードキャラクター / SR",
                 imageName: foodCharacter.assetName
+            )
+        }
+    }
+
+    private static func makeMojaGachaReward(for rarity: GachaRarity, state: AppState) -> GachaReward? {
+        switch rarity {
+        case .blue, .red:
+            // もじゃガチャの N/R は、いつでもガチャと同じ排出内容にする。
+            return makeAlwaysGachaReward(for: rarity, state: state)
+
+        case .gold:
+            // もじゃガチャのキャラクターは SR のみで排出する。
+            let candidates = remainingMojaCharacters(state: state, rarity: .gold)
+            let pool = candidates.isEmpty ? mojaCharacters : candidates
+            guard let mojaCharacter = pool.randomElement() else { return nil }
+            return GachaReward(
+                rarity: .gold,
+                kind: .character(petID: mojaCharacter.id),
+                title: mojaCharacter.name,
+                subtitle: "もじゃキャラクター / SR",
+                imageName: mojaCharacter.assetName
             )
         }
     }

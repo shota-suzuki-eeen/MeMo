@@ -3,6 +3,7 @@
 //  MeMo
 //
 //  Updated for per-screen BGM with fade transitions.
+//  Home BGM follows the currently selected character's gacha theme.
 //  SoundEffect mappings adjusted for adopted SE/BGM assets only.
 //
 
@@ -55,6 +56,8 @@ final class BGMManager: NSObject, ObservableObject, AVAudioPlayerDelegate {
     private static let defaultBGMVolumeStep = 7
     private static let minimumBGMVolumeStep = 1
     private static let maximumBGMVolumeStep = 10
+    private static let sharedAppGroupID = "group.com.shota.CalPet"
+    private static let sharedCurrentPetIDKey = "currentPetID"
 
     @Published var isBGMEnabled: Bool {
         didSet {
@@ -134,6 +137,8 @@ final class BGMManager: NSObject, ObservableObject, AVAudioPlayerDelegate {
 
     enum BackgroundTrack: String, CaseIterable {
         case main = "BGM_main"
+        case food = "BGM_food"
+        case moja = "BGM_moja"
         case gacha = "BGM_gacha"
         case zukan = "BGM_zukan"
         case takibi = "takibi"
@@ -150,7 +155,7 @@ final class BGMManager: NSObject, ObservableObject, AVAudioPlayerDelegate {
         }
     }
 
-    private let defaultTrack: BackgroundTrack = .main
+    private var defaultTrack: BackgroundTrack = .main
 
     private var targetBGMVolume: Float {
         Float(Self.clampedBGMVolumeStep(bgmVolumeStep)) / Float(Self.maximumBGMVolumeStep)
@@ -192,10 +197,23 @@ final class BGMManager: NSObject, ObservableObject, AVAudioPlayerDelegate {
         isSoundEffectEnabled = defaults.bool(forKey: SettingsStorageKey.isSoundEffectEnabled)
 
         super.init()
+        refreshDefaultTrackFromSharedPetSnapshot()
         bindNotifications()
     }
 
     // MARK: - Public
+
+    func setDefaultBackground(
+        for petID: String,
+        switchImmediately: Bool = false,
+        fadeDuration: TimeInterval = 0.55
+    ) {
+        defaultTrack = Self.defaultBackgroundTrack(for: petID)
+
+        if switchImmediately {
+            switchBackground(to: defaultTrack, fadeDuration: fadeDuration)
+        }
+    }
 
     func startIfNeeded() {
         startIfNeeded(track: defaultTrack)
@@ -311,6 +329,7 @@ final class BGMManager: NSObject, ObservableObject, AVAudioPlayerDelegate {
     }
 
     func restoreDefaultBackground(fadeDuration: TimeInterval = 0.55) {
+        refreshDefaultTrackFromSharedPetSnapshot()
         switchBackground(to: defaultTrack, fadeDuration: fadeDuration)
     }
 
@@ -464,6 +483,28 @@ final class BGMManager: NSObject, ObservableObject, AVAudioPlayerDelegate {
 
     private static func clampedBGMVolumeStep(_ value: Int) -> Int {
         min(maximumBGMVolumeStep, max(minimumBGMVolumeStep, value))
+    }
+
+    private static func defaultBackgroundTrack(for petID: String) -> BackgroundTrack {
+        let normalizedID = petID.trimmingCharacters(in: .whitespacesAndNewlines)
+
+        if normalizedID.hasPrefix("food_") {
+            return .food
+        }
+        if normalizedID.hasPrefix("moja_") {
+            return .moja
+        }
+        return .main
+    }
+
+    private func refreshDefaultTrackFromSharedPetSnapshot() {
+        guard let defaults = UserDefaults(suiteName: Self.sharedAppGroupID),
+              let petID = defaults.string(forKey: Self.sharedCurrentPetIDKey),
+              !petID.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else {
+            return
+        }
+
+        defaultTrack = Self.defaultBackgroundTrack(for: petID)
     }
 
     private func applyBGMPlaybackPreference() {

@@ -2,7 +2,7 @@
 //  PetMaster.swift
 //  MeMo
 //
-//  Updated for フードガチャ character assets.
+//  Updated for フードガチャ / もじゃガチャ character assets.
 //
 
 import Foundation
@@ -149,7 +149,18 @@ enum PetMaster {
         .init(id: "food_satumaimo", name: "さつまいも"),
         .init(id: "food_shumai", name: "焼売"),
         .init(id: "food_tacos", name: "タコス"),
-        .init(id: "food_takoyaki", name: "たこ焼き")
+        .init(id: "food_takoyaki", name: "たこ焼き"),
+        .init(id: "moja_purpor", name: "パーポー"),
+        .init(id: "moja_beat", name: "ビート"),
+        .init(id: "moja_biniki", name: "ビニキ"),
+        .init(id: "moja_himei", name: "ヒメイ"),
+        .init(id: "moja_kakke", name: "カッケ"),
+        .init(id: "moja_kepyon", name: "ケピョン"),
+        .init(id: "moja_ninjin", name: "ニンジン"),
+        .init(id: "moja_obaoru", name: "オバオル"),
+        .init(id: "moja_sun", name: "スン"),
+        .init(id: "moja_wanigeeta", name: "ワニゲータ"),
+        .init(id: "moja_wareware", name: "ワレワレ")
     ]
 
     static func assetName(for petID: String) -> String {
@@ -230,6 +241,17 @@ enum PetMaster {
         case "food_shumai": return "shumai"
         case "food_tacos": return "tacos"
         case "food_takoyaki": return "takoyaki"
+        case "moja_purpor": return "purpor"
+        case "moja_beat": return "beat"
+        case "moja_biniki": return "biniki"
+        case "moja_himei": return "himei"
+        case "moja_kakke": return "kakke"
+        case "moja_kepyon": return "kepyon"
+        case "moja_ninjin": return "ninjin"
+        case "moja_obaoru": return "obaoru"
+        case "moja_sun": return "sun"
+        case "moja_wanigeeta": return "wanigeeta"
+        case "moja_wareware": return "wareware"
         default: return "person"
         }
     }
@@ -240,6 +262,8 @@ enum PetMaster {
         case let id where id.hasPrefix("food_"):
             return "\(base)_wc"
         case let id where id.hasPrefix("reward_"):
+            return "\(base)_wc"
+        case let id where id.hasPrefix("moja_"):
             return "\(base)_wc"
         default:
             return base
@@ -252,6 +276,8 @@ enum PetMaster {
         case let id where id.hasPrefix("food_"):
             return ["\(base)_idle_blink_0001", "\(base)_idle_blink_0002"]
         case let id where id.hasPrefix("reward_"):
+            return ["\(base)_idle_blink_0001", "\(base)_idle_blink_0002"]
+        case let id where id.hasPrefix("moja_"):
             return ["\(base)_idle_blink_0001", "\(base)_idle_blink_0002"]
         default:
             return []
@@ -316,6 +342,17 @@ enum PetMaster {
         case "reward_001_casual": return "ボーイ（A）の幸せLv.10到達報酬でのみ獲得できる特別なカジュアル衣装。幸せ度メーターはボーイ（A）と共通。"
         case "reward_002_casual": return "ガール（B）の幸せLv.10到達報酬でのみ獲得できる特別なカジュアル衣装。幸せ度メーターはガール（B）と共通。"
         case "reward_003_casual": return "ボーイ（B）の幸せLv.10到達報酬でのみ獲得できる特別なカジュアル衣装。幸せ度メーターはボーイ（B）と共通。"
+        case "moja_purpor": return "紫のもじゃ界では王道のスタンダード。派手な色なのに、本人はいたって普通のつもり。"
+        case "moja_beat": return "特技はブレイクダンス。回り始めると、もじゃまで遠心力で少し伸びる。"
+        case "moja_biniki": return "ビキニ姿でセクシー担当を自称している。季節は問わないし、寒さにも強いらしい。"
+        case "moja_himei": return "人を怖がらせるのが大好き。でも可愛すぎて、悲鳴より黄色い声援が返ってくる。"
+        case "moja_kakke": return "特技はスケボー。技が決まっても失敗しても、本人だけはずっとまじでカッケー。"
+        case "moja_kepyon": return "カエル姿の歌好きもじゃ。雨の日は絶好調だが、サビになるとだいたいケロケロになる。"
+        case "moja_ninjin": return "うさぎ姿なのに、にんじんはあまり好きじゃない。名前のせいで毎日すすめられて少し困っている。"
+        case "moja_obaoru": return "オーバーオールを一年分所有している。毎日着替えているのに、誰にも気づいてもらえない。"
+        case "moja_sun": return "太陽の形をしたもじゃ。名前はスンなのに、今日も元気よくサンと呼び間違えられている。"
+        case "moja_wanigeeta": return "歯磨きが大好きなワニのもじゃ。ただし歯の半分には歯ブラシが届かず、毎晩ちょっと悔しい。"
+        case "moja_wareware": return "宇宙から来たもじゃ。話している内容は誰にもわからないが、本人は会話が弾んでいると思っている。"
         case let id where id.hasPrefix("food_"):
             let name = all.first(where: { $0.id == id })?.name ?? "フードキャラクター"
             return "フードガチャで仲間になる「\(name)」のキャラクター。"
