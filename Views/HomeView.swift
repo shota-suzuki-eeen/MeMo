@@ -208,6 +208,13 @@ struct HomeView: View {
         state.nextClaimableHappinessRewardLevel()
     }
 
+    private func canPerformTenGacha(now: Date) -> Bool {
+        let isPad = UIDevice.current.userInterfaceIdiom == .pad
+        return state.walletSteps >= 5_000
+            || state.gachaCanUseInitialIPadFreeTenDraw(isPad: isPad)
+            || state.gachaCanUseFreeTenDraw(now: now)
+    }
+
     private var currentClaimedHappinessRewardLevels: Set<Int> {
         state.claimedHappinessRewardLevelsSnapshot()
     }
@@ -930,6 +937,7 @@ struct HomeView: View {
                 onCamera: { openCameraFromTopButton() },
                 onPresentBox: { openTopInfoPopup(.happinessRewards) },
                 onSleep: { openSleepModePopup() },
+                showsHappinessRewardBadge: currentClaimableHappinessRewardLevel != nil,
                 isSleepModeActive: state.isHappinessSleepModeActive(now: timeline.date),
                 buttonSize: Layout.topStatusButtonSize,
                 iconSize: Layout.topStatusButtonIconSize,
@@ -1288,6 +1296,7 @@ struct HomeView: View {
                 onStep: {
                     onTapStep()
                 },
+                showsGachaBadge: canPerformTenGacha(now: now),
                 isToiletLocked: isToiletLocked,
                 onBlocked: { showToiletLockedMessage() },
                 buttonSize: Layout.bottomButtonSize,
@@ -4245,6 +4254,7 @@ private struct TopStatusButtons: View {
     let onCamera: () -> Void
     let onPresentBox: () -> Void
     let onSleep: () -> Void
+    let showsHappinessRewardBadge: Bool
     let isSleepModeActive: Bool
     let buttonSize: CGFloat
     let iconSize: CGFloat
@@ -4252,10 +4262,24 @@ private struct TopStatusButtons: View {
 
     var body: some View {
         VStack(spacing: spacing) {
-            StatusIconButton(imageName: "camera_button", buttonSize: buttonSize, iconSize: iconSize, action: onCamera)
-                .accessibilityLabel("カメラ")
-            StatusIconButton(imageName: "presentBox", buttonSize: buttonSize, iconSize: iconSize, action: onPresentBox)
-                .accessibilityLabel("幸せ報酬")
+            StatusIconButton(
+                imageName: "camera_button",
+                buttonSize: buttonSize,
+                iconSize: iconSize,
+                showsNotificationBadge: false,
+                action: onCamera
+            )
+            .accessibilityLabel("カメラ")
+
+            StatusIconButton(
+                imageName: "presentBox",
+                buttonSize: buttonSize,
+                iconSize: iconSize,
+                showsNotificationBadge: showsHappinessRewardBadge,
+                action: onPresentBox
+            )
+            .accessibilityLabel("幸せ報酬")
+
             SleepStatusIconButton(
                 imageName: isSleepModeActive ? "sleep_button_on" : "sleep_button_off",
                 buttonSize: buttonSize,
@@ -4288,26 +4312,49 @@ private struct StatusIconButton: View {
     let imageName: String
     let buttonSize: CGFloat
     let iconSize: CGFloat
+    let showsNotificationBadge: Bool
     let action: () -> Void
 
     var body: some View {
         Button(action: action) {
-            ZStack {
-                Image(HomeView.Layout.bottomButtonBackgroundAssetName)
-                    .resizable()
-                    .scaledToFit()
-                    .frame(width: buttonSize, height: buttonSize)
+            ZStack(alignment: .topTrailing) {
+                ZStack {
+                    Image(HomeView.Layout.bottomButtonBackgroundAssetName)
+                        .resizable()
+                        .scaledToFit()
+                        .frame(width: buttonSize, height: buttonSize)
 
-                Image(imageName)
-                    .resizable()
-                    .scaledToFit()
-                    .frame(width: iconSize, height: iconSize)
+                    Image(imageName)
+                        .resizable()
+                        .scaledToFit()
+                        .frame(width: iconSize, height: iconSize)
+                }
+                .frame(width: buttonSize, height: buttonSize)
+
+                if showsNotificationBadge {
+                    HomeNotificationBadge()
+                        .offset(x: 3, y: -3)
+                }
             }
             .frame(width: buttonSize, height: buttonSize)
             .contentShape(RoundedRectangle(cornerRadius: 18, style: .continuous))
         }
         .buttonStyle(.plain)
         .shadow(color: .black.opacity(0.16), radius: 8, x: 0, y: 4)
+    }
+}
+
+private struct HomeNotificationBadge: View {
+    var body: some View {
+        Circle()
+            .fill(Color(red: 0.70, green: 0.94, blue: 0.16))
+            .frame(width: 15, height: 15)
+            .overlay {
+                Circle()
+                    .stroke(Color.white.opacity(0.96), lineWidth: 2)
+            }
+            .shadow(color: .black.opacity(0.22), radius: 2, x: 0, y: 1)
+            .accessibilityHidden(true)
     }
 }
 
@@ -5002,6 +5049,7 @@ private struct BottomButtons: View {
     let onGatya: () -> Void
     let onWork: () -> Void
     let onStep: () -> Void
+    let showsGachaBadge: Bool
 
     let isToiletLocked: Bool
     let onBlocked: () -> Void
@@ -5012,25 +5060,41 @@ private struct BottomButtons: View {
 
     var body: some View {
         HStack(spacing: spacing) {
-            BottomActionButton(imageName: "menu_button", buttonSize: buttonSize) {
+            BottomActionButton(
+                imageName: "menu_button",
+                buttonSize: buttonSize,
+                showsNotificationBadge: false
+            ) {
                 bgmManager.playSE(.push)
                 if isToiletLocked { onBlocked(); return }
                 onMenu()
             }
 
-            BottomActionButton(imageName: "gatya_button", buttonSize: buttonSize) {
+            BottomActionButton(
+                imageName: "gatya_button",
+                buttonSize: buttonSize,
+                showsNotificationBadge: showsGachaBadge
+            ) {
                 bgmManager.playSE(.push)
                 if isToiletLocked { onBlocked(); return }
                 onGatya()
             }
 
-            BottomActionButton(imageName: "work_button", buttonSize: buttonSize) {
+            BottomActionButton(
+                imageName: "work_button",
+                buttonSize: buttonSize,
+                showsNotificationBadge: false
+            ) {
                 bgmManager.playSE(.push)
                 if isToiletLocked { onBlocked(); return }
                 onWork()
             }
 
-            BottomActionButton(imageName: "step_button", buttonSize: buttonSize) {
+            BottomActionButton(
+                imageName: "step_button",
+                buttonSize: buttonSize,
+                showsNotificationBadge: false
+            ) {
                 bgmManager.playSE(.push)
                 if isToiletLocked { onBlocked(); return }
                 onStep()
@@ -5045,26 +5109,38 @@ private struct BottomButtons: View {
 private struct BottomActionButton: View {
     let imageName: String
     let buttonSize: CGFloat
+    let showsNotificationBadge: Bool
     let action: () -> Void
 
     var body: some View {
         Button(action: action) {
-            ZStack {
-                Image(HomeView.Layout.bottomButtonBackgroundAssetName)
-                    .resizable()
-                    .scaledToFit()
-                    .frame(
-                        width: HomeView.Layout.bottomButtonBackgroundSize,
-                        height: HomeView.Layout.bottomButtonBackgroundSize
-                    )
+            ZStack(alignment: .topTrailing) {
+                ZStack {
+                    Image(HomeView.Layout.bottomButtonBackgroundAssetName)
+                        .resizable()
+                        .scaledToFit()
+                        .frame(
+                            width: HomeView.Layout.bottomButtonBackgroundSize,
+                            height: HomeView.Layout.bottomButtonBackgroundSize
+                        )
 
-                Image(imageName)
-                    .resizable()
-                    .scaledToFit()
-                    .frame(
-                        width: HomeView.Layout.bottomButtonIconSize,
-                        height: HomeView.Layout.bottomButtonIconSize
-                    )
+                    Image(imageName)
+                        .resizable()
+                        .scaledToFit()
+                        .frame(
+                            width: HomeView.Layout.bottomButtonIconSize,
+                            height: HomeView.Layout.bottomButtonIconSize
+                        )
+                }
+                .frame(
+                    width: HomeView.Layout.bottomButtonBackgroundSize,
+                    height: HomeView.Layout.bottomButtonBackgroundSize
+                )
+
+                if showsNotificationBadge {
+                    HomeNotificationBadge()
+                        .offset(x: 3, y: -3)
+                }
             }
             .frame(
                 width: HomeView.Layout.bottomButtonBackgroundSize,
