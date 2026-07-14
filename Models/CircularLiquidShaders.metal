@@ -5,6 +5,10 @@
 //  円形メーター内の液体部分だけを描画するMetalシェーダーです。
 //  アセット画像へのマスク処理は行いません。
 //
+//  2026/07/14 update:
+//  15fpsでも連続して見えるよう波の速度と振幅を調整し、
+//  気泡数とハイライト計算量を抑えてフラグメント負荷を軽減しました。
+//
 
 #include <metal_stdlib>
 using namespace metal;
@@ -25,7 +29,9 @@ struct VertexOut {
     float2 uv;
 };
 
-vertex VertexOut circularLiquidVertex(uint vertexID [[vertex_id]]) {
+vertex VertexOut circularLiquidVertex(
+    uint vertexID [[vertex_id]]
+) {
     float2 positions[6] = {
         float2(-1.0, -1.0),
         float2( 1.0, -1.0),
@@ -39,7 +45,10 @@ vertex VertexOut circularLiquidVertex(uint vertexID [[vertex_id]]) {
 
     VertexOut out;
     out.position = float4(position, 0.0, 1.0);
-    out.uv = float2((position.x + 1.0) * 0.5, 1.0 - ((position.y + 1.0) * 0.5));
+    out.uv = float2(
+        (position.x + 1.0) * 0.5,
+        1.0 - ((position.y + 1.0) * 0.5)
+    );
     return out;
 }
 
@@ -51,56 +60,141 @@ static inline float hash11(float seed) {
     return fract(sin(seed) * 43758.5453123);
 }
 
-fragment float4 circularLiquidFragment(VertexOut in [[stage_in]], constant CircularLiquidUniforms& u [[buffer(0)]]) {
+fragment float4 circularLiquidFragment(
+    VertexOut in [[stage_in]],
+    constant CircularLiquidUniforms& u [[buffer(0)]]
+) {
     float2 uv = in.uv;
     float fill = saturateValue(u.fillFraction);
-    float motion = max(u.motionScale, 0.0);
-    float time = u.time * motion;
+
+    // 位相はRenderer側ですでに実時間とmotionScaleを反映しています。
+    float time = u.time;
 
     float surface = 1.0 - fill;
-    surface += sin(uv.x * 7.25 + time * 1.40) * 0.036;
-    surface += sin(uv.x * 13.75 - time * 0.88 + 1.20) * 0.018;
-    surface += sin((uv.x + uv.y * 0.18) * 21.0 + time * 0.58) * 0.007;
+    surface +=
+        sin(uv.x * 7.10 + time * 0.92) * 0.032;
+    surface +=
+        sin(uv.x * 13.40 - time * 0.61 + 1.20) * 0.015;
+    surface +=
+        sin(
+            (uv.x + uv.y * 0.16) * 20.0 +
+            time * 0.43
+        ) * 0.006;
 
-    float alpha = smoothstep(surface - 0.020, surface + 0.010, uv.y);
+    float alpha = smoothstep(
+        surface - 0.020,
+        surface + 0.010,
+        uv.y
+    );
     if (alpha <= 0.001) {
         return float4(0.0);
     }
 
-    float depth = saturateValue((uv.y - surface) / max(1.0 - surface, 0.001));
-    float4 color = mix(u.highlightColor, u.mainColor, smoothstep(0.02, 0.32, depth));
-    color = mix(color, u.deepColor, smoothstep(0.50, 1.0, depth));
+    float depth = saturateValue(
+        (uv.y - surface) /
+        max(1.0 - surface, 0.001)
+    );
 
-    float surfaceFoam = exp(-abs(uv.y - surface) * 72.0);
-    color.rgb += u.foamColor.rgb * surfaceFoam * 0.24;
+    float4 color = mix(
+        u.highlightColor,
+        u.mainColor,
+        smoothstep(0.02, 0.32, depth)
+    );
+    color = mix(
+        color,
+        u.deepColor,
+        smoothstep(0.50, 1.0, depth)
+    );
 
-    float shimmerA = sin((uv.x * 32.0 + uv.y * 18.0) + time * 2.0) * 0.5 + 0.5;
-    float shimmerB = sin((uv.x * 17.0 - uv.y * 29.0) - time * 1.25) * 0.5 + 0.5;
-    float caustics = pow(shimmerA * shimmerB, 3.0) * 0.13 * smoothstep(0.08, 0.78, depth);
-    color.rgb += u.highlightColor.rgb * caustics;
+    float surfaceFoam =
+        exp(-abs(uv.y - surface) * 68.0);
+    color.rgb +=
+        u.foamColor.rgb * surfaceFoam * 0.22;
+
+    float shimmerA =
+        sin(
+            uv.x * 28.0 +
+            uv.y * 16.0 +
+            time * 1.12
+        ) * 0.5 + 0.5;
+
+    float shimmerB =
+        sin(
+            uv.x * 15.0 -
+            uv.y * 25.0 -
+            time * 0.74
+        ) * 0.5 + 0.5;
+
+    float caustics =
+        pow(shimmerA * shimmerB, 3.0) *
+        0.11 *
+        smoothstep(0.08, 0.78, depth);
+
+    color.rgb +=
+        u.highlightColor.rgb * caustics;
 
     float bubbleAmount = 0.0;
-    for (int i = 0; i < 8; i++) {
+
+    // 8個から5個へ減らし、見た目を維持しながら負荷を軽減します。
+    for (int i = 0; i < 5; i++) {
         float seed = float(i) + 1.0;
         float bx = hash11(seed * 14.31);
-        float radius = mix(0.010, 0.026, hash11(seed * 2.17));
-        float speed = mix(0.045, 0.120, hash11(seed * 7.77)) * max(motion, 0.18);
+        float radius = mix(
+            0.011,
+            0.025,
+            hash11(seed * 2.17)
+        );
+        float speed = mix(
+            0.040,
+            0.095,
+            hash11(seed * 7.77)
+        );
         float start = hash11(seed * 19.83);
-        float by = fract(1.0 + start - time * speed);
+        float by = fract(
+            1.0 + start - time * speed
+        );
         by = mix(surface + 0.065, 0.98, by);
 
         float2 delta = uv - float2(bx, by);
         delta.x *= u.aspectRatio;
+
         float distanceToBubble = length(delta);
-        float bubble = 1.0 - smoothstep(radius * 0.68, radius, distanceToBubble);
-        float ring = smoothstep(radius, radius * 0.72, distanceToBubble) * smoothstep(radius * 0.38, radius * 0.62, distanceToBubble);
-        float insideLiquid = smoothstep(surface + 0.030, surface + 0.060, by);
-        bubbleAmount += (bubble * 0.34 + ring * 0.58) * insideLiquid;
+        float bubble = 1.0 - smoothstep(
+            radius * 0.68,
+            radius,
+            distanceToBubble
+        );
+        float ring =
+            smoothstep(
+                radius,
+                radius * 0.72,
+                distanceToBubble
+            ) *
+            smoothstep(
+                radius * 0.38,
+                radius * 0.62,
+                distanceToBubble
+            );
+        float insideLiquid = smoothstep(
+            surface + 0.030,
+            surface + 0.060,
+            by
+        );
+
+        bubbleAmount +=
+            (bubble * 0.34 + ring * 0.58) *
+            insideLiquid;
     }
 
-    color.rgb = mix(color.rgb, u.foamColor.rgb, saturateValue(bubbleAmount) * 0.45);
+    color.rgb = mix(
+        color.rgb,
+        u.foamColor.rgb,
+        saturateValue(bubbleAmount) * 0.42
+    );
 
-    float sideLight = smoothstep(0.0, 0.25, uv.x) * smoothstep(1.0, 0.75, uv.x);
+    float sideLight =
+        smoothstep(0.0, 0.25, uv.x) *
+        smoothstep(1.0, 0.75, uv.x);
     color.rgb *= mix(0.86, 1.05, sideLight);
 
     color.a *= alpha;

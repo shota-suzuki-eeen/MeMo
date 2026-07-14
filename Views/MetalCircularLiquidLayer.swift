@@ -13,6 +13,11 @@
 //  バックグラウンド中は波の描画時間を進めず、復帰時に一気に波が進んだように
 //  見える挙動を防ぎます。
 //
+//  2026/07/14 update:
+//  波を常時動かしたまま発熱を抑えるため、通常時15fps、値・色の変化中30fpsへ
+//  自動切り替えします。低電力モードでは10fps、高温時は8fpsへ降速します。
+//  Metal描画解像度は最大2xに制限し、非表示・バックグラウンド時は完全停止します.
+//
 
 import SwiftUI
 import Foundation
@@ -21,16 +26,32 @@ import MetalKit
 import simd
 
 enum MetalCircularLiquidQuality: Equatable {
-    case balanced
-    case low
+    case normal
+    case reduced
+    case thermal
     case still
 
-    var preferredFramesPerSecond: Int {
+    var steadyFramesPerSecond: Int {
         switch self {
-        case .balanced:
-            return 30
-        case .low:
+        case .normal:
             return 15
+        case .reduced:
+            return 10
+        case .thermal:
+            return 8
+        case .still:
+            return 1
+        }
+    }
+
+    var transitionFramesPerSecond: Int {
+        switch self {
+        case .normal:
+            return 30
+        case .reduced:
+            return 15
+        case .thermal:
+            return 12
         case .still:
             return 1
         }
@@ -38,10 +59,12 @@ enum MetalCircularLiquidQuality: Equatable {
 
     var motionScale: Float {
         switch self {
-        case .balanced:
+        case .normal:
             return 1.0
-        case .low:
-            return 0.45
+        case .reduced:
+            return 0.78
+        case .thermal:
+            return 0.62
         case .still:
             return 0.0
         }
@@ -56,15 +79,34 @@ struct MetalCircularLiquidLayer: View {
     let isActive: Bool
 
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
+    @Environment(\.scenePhase) private var scenePhase
+
+    @State private var isLowPowerModeEnabled = ProcessInfo.processInfo.isLowPowerModeEnabled
+    @State private var thermalState = ProcessInfo.processInfo.thermalState
 
     private var clampedFillFraction: CGFloat {
         max(0, min(1, fillFraction))
     }
 
     private var quality: MetalCircularLiquidQuality {
-        if reduceMotion { return .still }
-        if ProcessInfo.processInfo.isLowPowerModeEnabled { return .low }
-        return .balanced
+        if reduceMotion {
+            return .still
+        }
+
+        switch thermalState {
+        case .serious, .critical:
+            return .thermal
+        case .fair:
+            return .reduced
+        case .nominal:
+            return isLowPowerModeEnabled ? .reduced : .normal
+        @unknown default:
+            return isLowPowerModeEnabled ? .reduced : .normal
+        }
+    }
+
+    private var shouldAnimate: Bool {
+        isActive && scenePhase == .active && quality != .still
     }
 
     var body: some View {
@@ -75,7 +117,7 @@ struct MetalCircularLiquidLayer: View {
                     mainColor: mainColor,
                     deepColor: deepColor,
                     highlightColor: highlightColor,
-                    isActive: isActive,
+                    isActive: shouldAnimate,
                     quality: quality
                 )
             } else {
@@ -84,12 +126,33 @@ struct MetalCircularLiquidLayer: View {
                     mainColor: mainColor,
                     deepColor: deepColor,
                     highlightColor: highlightColor,
-                    isActive: isActive && quality != .still
+                    isActive: shouldAnimate,
+                    framesPerSecond: quality.steadyFramesPerSecond,
+                    motionScale: CGFloat(quality.motionScale)
                 )
             }
         }
         .compositingGroup()
         .accessibilityHidden(true)
+        .onReceive(
+            NotificationCenter.default.publisher(
+                for: .NSProcessInfoPowerStateDidChange
+            )
+        ) { _ in
+            isLowPowerModeEnabled = ProcessInfo.processInfo.isLowPowerModeEnabled
+        }
+        .onReceive(
+            NotificationCenter.default.publisher(
+                for: ProcessInfo.thermalStateDidChangeNotification
+            )
+        ) { _ in
+            thermalState = ProcessInfo.processInfo.thermalState
+        }
+        .onChange(of: scenePhase) { _, newPhase in
+            guard newPhase == .active else { return }
+            isLowPowerModeEnabled = ProcessInfo.processInfo.isLowPowerModeEnabled
+            thermalState = ProcessInfo.processInfo.thermalState
+        }
     }
 }
 
@@ -119,13 +182,17 @@ private struct MetalCircularLiquidRepresentable: UIViewRepresentable {
         view.clearColor = MTLClearColor(red: 0, green: 0, blue: 0, alpha: 0)
         view.colorPixelFormat = .bgra8Unorm
         view.framebufferOnly = true
-        view.preferredFramesPerSecond = quality.preferredFramesPerSecond
-        view.contentScaleFactor = UIScreen.main.scale
-        view.enableSetNeedsDisplay = false
-        view.isPaused = false
+        view.autoResizeDrawable = true
+        view.preferredFramesPerSecond = quality.steadyFramesPerSecond
+
+        // 小さな円形ゲージでは3x描画との差が視認しづらいため、
+        // 最大2xに制限してフラグメント処理量と発熱を抑えます。
+        view.contentScaleFactor = min(UIScreen.main.scale, 2.0)
+
+        view.enableSetNeedsDisplay = true
+        view.isPaused = true
 
         guard let device else {
-            view.isPaused = true
             return view
         }
 
@@ -141,25 +208,44 @@ private struct MetalCircularLiquidRepresentable: UIViewRepresentable {
     }
 
     func updateUIView(_ view: MTKView, context: Context) {
-        view.preferredFramesPerSecond = quality.preferredFramesPerSecond
+        guard let renderer = context.coordinator.renderer else {
+            view.isPaused = true
+            return
+        }
 
-        guard let renderer = context.coordinator.renderer else { return }
         updateRenderer(renderer, view: view)
     }
 
-    private func updateRenderer(_ renderer: MetalCircularLiquidRenderer, view: MTKView) {
+    static func dismantleUIView(_ uiView: MTKView, coordinator: Coordinator) {
+        uiView.isPaused = true
+        uiView.enableSetNeedsDisplay = true
+        uiView.delegate = nil
+        coordinator.renderer = nil
+    }
+
+    private func updateRenderer(
+        _ renderer: MetalCircularLiquidRenderer,
+        view: MTKView
+    ) {
         let safeFill = Float(max(0, min(1, fillFraction)))
         let allowsSmoothing = isActive && quality != .still
-        let targetMotionScale: Float = (allowsSmoothing && safeFill > 0.001) ? quality.motionScale : 0.0
+        let targetMotionScale: Float =
+            (allowsSmoothing && safeFill > 0.001) ? quality.motionScale : 0.0
 
-        renderer.update(
+        let recommendedFramesPerSecond = renderer.update(
             targetFillFraction: safeFill,
             targetMainColor: mainColor.metalRGBA,
             targetDeepColor: deepColor.metalRGBA,
             targetHighlightColor: highlightColor.metalRGBA,
             targetMotionScale: targetMotionScale,
-            allowsSmoothing: allowsSmoothing
+            allowsSmoothing: allowsSmoothing,
+            steadyFramesPerSecond: quality.steadyFramesPerSecond,
+            transitionFramesPerSecond: quality.transitionFramesPerSecond
         )
+
+        if view.preferredFramesPerSecond != recommendedFramesPerSecond {
+            view.preferredFramesPerSecond = recommendedFramesPerSecond
+        }
 
         if renderer.needsContinuousDrawing {
             view.enableSetNeedsDisplay = false
@@ -181,20 +267,23 @@ private final class MetalCircularLiquidRenderer: NSObject, MTKViewDelegate {
         var targetFillFraction: Float = 0.0
         var renderedFillFraction: Float = 0.0
 
-        var targetMotionScale: Float = 1.0
-        var renderedMotionScale: Float = 1.0
+        var targetMotionScale: Float = 0.0
+        var renderedMotionScale: Float = 0.0
 
-        var targetMainColor: SIMD4<Float> = SIMD4<Float>(0.12, 0.50, 0.18, 1.0)
-        var targetDeepColor: SIMD4<Float> = SIMD4<Float>(0.03, 0.16, 0.05, 1.0)
-        var targetHighlightColor: SIMD4<Float> = SIMD4<Float>(0.55, 0.92, 0.58, 1.0)
+        var targetMainColor = SIMD4<Float>(0.12, 0.50, 0.18, 1.0)
+        var targetDeepColor = SIMD4<Float>(0.03, 0.16, 0.05, 1.0)
+        var targetHighlightColor = SIMD4<Float>(0.55, 0.92, 0.58, 1.0)
 
-        var renderedMainColor: SIMD4<Float> = SIMD4<Float>(0.12, 0.50, 0.18, 1.0)
-        var renderedDeepColor: SIMD4<Float> = SIMD4<Float>(0.03, 0.16, 0.05, 1.0)
-        var renderedHighlightColor: SIMD4<Float> = SIMD4<Float>(0.55, 0.92, 0.58, 1.0)
+        var renderedMainColor = SIMD4<Float>(0.12, 0.50, 0.18, 1.0)
+        var renderedDeepColor = SIMD4<Float>(0.03, 0.16, 0.05, 1.0)
+        var renderedHighlightColor = SIMD4<Float>(0.55, 0.92, 0.58, 1.0)
 
         var renderedTime: Float = 0.0
-        var allowsSmoothing: Bool = true
-        var hasReceivedFirstState: Bool = false
+        var allowsSmoothing = false
+        var hasReceivedFirstState = false
+
+        var steadyFramesPerSecond = 15
+        var transitionFramesPerSecond = 30
     }
 
     private struct CircularLiquidUniforms {
@@ -211,11 +300,13 @@ private final class MetalCircularLiquidRenderer: NSObject, MTKViewDelegate {
     private let commandQueue: MTLCommandQueue?
     private let pipelineState: MTLRenderPipelineState?
     private let lock = NSLock()
+
     private var state = RenderState()
     private var lastFrameTimestamp: CFTimeInterval?
 
     private let fillSnapThreshold: Float = 0.0008
     private let colorSnapThreshold: Float = 0.0020
+    private let motionSnapThreshold: Float = 0.0010
 
     init(device: MTLDevice, colorPixelFormat: MTLPixelFormat) {
         commandQueue = device.makeCommandQueue()
@@ -250,15 +341,19 @@ private final class MetalCircularLiquidRenderer: NSObject, MTKViewDelegate {
         return result
     }
 
+    @discardableResult
     func update(
         targetFillFraction: Float,
         targetMainColor: SIMD4<Float>,
         targetDeepColor: SIMD4<Float>,
         targetHighlightColor: SIMD4<Float>,
         targetMotionScale: Float,
-        allowsSmoothing: Bool
-    ) {
+        allowsSmoothing: Bool,
+        steadyFramesPerSecond: Int,
+        transitionFramesPerSecond: Int
+    ) -> Int {
         lock.lock()
+        defer { lock.unlock() }
 
         let safeTargetFill = max(0, min(1, targetFillFraction))
         let safeMotionScale = max(0, targetMotionScale)
@@ -269,9 +364,14 @@ private final class MetalCircularLiquidRenderer: NSObject, MTKViewDelegate {
         state.targetHighlightColor = targetHighlightColor
         state.targetMotionScale = safeMotionScale
         state.allowsSmoothing = allowsSmoothing
+        state.steadyFramesPerSecond = max(1, steadyFramesPerSecond)
+        state.transitionFramesPerSecond = max(
+            state.steadyFramesPerSecond,
+            transitionFramesPerSecond
+        )
 
-        // 初回表示、Home非表示中、バックグラウンド中、reduce motion中は即座に現在値へ同期します。
-        // さらに lastFrameTimestamp を捨てることで、復帰時に停止中の経過時間をまとめて消化しません。
+        // 初回表示、Home非表示中、バックグラウンド中、
+        // Reduce Motion中は即座に現在値へ同期します。
         if !state.hasReceivedFirstState || !allowsSmoothing {
             state.renderedFillFraction = safeTargetFill
             state.renderedMainColor = targetMainColor
@@ -282,7 +382,7 @@ private final class MetalCircularLiquidRenderer: NSObject, MTKViewDelegate {
             lastFrameTimestamp = nil
         }
 
-        lock.unlock()
+        return recommendedFramesPerSecondLocked(state)
     }
 
     func mtkView(_ view: MTKView, drawableSizeWillChange size: CGSize) {}
@@ -293,14 +393,19 @@ private final class MetalCircularLiquidRenderer: NSObject, MTKViewDelegate {
               let descriptor = view.currentRenderPassDescriptor,
               let drawable = view.currentDrawable,
               let commandBuffer = commandQueue.makeCommandBuffer(),
-              let encoder = commandBuffer.makeRenderCommandEncoder(descriptor: descriptor) else {
+              let encoder = commandBuffer.makeRenderCommandEncoder(
+                descriptor: descriptor
+              ) else {
             return
         }
 
         let now = CACurrentMediaTime()
         let current = advanceState(now: now)
         let drawableSize = view.drawableSize
-        let aspectRatio = drawableSize.height > 0 ? Float(drawableSize.width / drawableSize.height) : 1.0
+        let aspectRatio =
+            drawableSize.height > 0
+            ? Float(drawableSize.width / drawableSize.height)
+            : 1.0
 
         var uniforms = CircularLiquidUniforms(
             time: current.renderedTime,
@@ -314,14 +419,32 @@ private final class MetalCircularLiquidRenderer: NSObject, MTKViewDelegate {
         )
 
         encoder.setRenderPipelineState(pipelineState)
-        encoder.setFragmentBytes(&uniforms, length: MemoryLayout<CircularLiquidUniforms>.stride, index: 0)
-        encoder.drawPrimitives(type: .triangle, vertexStart: 0, vertexCount: 6)
+        encoder.setFragmentBytes(
+            &uniforms,
+            length: MemoryLayout<CircularLiquidUniforms>.stride,
+            index: 0
+        )
+        encoder.drawPrimitives(
+            type: .triangle,
+            vertexStart: 0,
+            vertexCount: 6
+        )
         encoder.endEncoding()
 
         commandBuffer.present(drawable)
         commandBuffer.commit()
 
-        // 0%まで滑らかに減った後など、継続描画が不要になったら停止します。
+        let desiredFramesPerSecond = recommendedFramesPerSecond(for: current)
+        if view.preferredFramesPerSecond != desiredFramesPerSecond {
+            DispatchQueue.main.async { [weak view] in
+                guard let view,
+                      view.preferredFramesPerSecond != desiredFramesPerSecond else {
+                    return
+                }
+                view.preferredFramesPerSecond = desiredFramesPerSecond
+            }
+        }
+
         if !shouldContinueDrawing(current) {
             DispatchQueue.main.async { [weak view] in
                 guard let view else { return }
@@ -342,19 +465,20 @@ private final class MetalCircularLiquidRenderer: NSObject, MTKViewDelegate {
             return state
         }
 
-        let previousTimestamp = lastFrameTimestamp
         let rawDeltaTime: Float
-        if let previousTimestamp {
-            rawDeltaTime = Float(max(0, now - previousTimestamp))
+        if let lastFrameTimestamp {
+            rawDeltaTime = Float(max(0, now - lastFrameTimestamp))
         } else {
-            rawDeltaTime = 1.0 / 30.0
+            rawDeltaTime =
+                1.0 / Float(max(state.transitionFramesPerSecond, 1))
         }
 
-        // 復帰直後や一時的なメインスレッド停止で大きい delta が来ても、一気に波を進めません。
-        let deltaTime = min(rawDeltaTime, 1.0 / 12.0)
+        // 8fps動作にも対応しつつ、長時間停止後の大ジャンプは防ぎます。
+        let deltaTime = min(rawDeltaTime, 1.0 / 6.0)
         lastFrameTimestamp = now
 
-        let isIncreasing = state.targetFillFraction >= state.renderedFillFraction
+        let isIncreasing =
+            state.targetFillFraction >= state.renderedFillFraction
         let fillResponse: Float = isIncreasing ? 3.2 : 4.0
         let colorResponse: Float = 8.0
         let motionResponse: Float = 10.0
@@ -372,7 +496,7 @@ private final class MetalCircularLiquidRenderer: NSObject, MTKViewDelegate {
             target: state.targetMotionScale,
             deltaTime: deltaTime,
             response: motionResponse,
-            snapThreshold: 0.001
+            snapThreshold: motionSnapThreshold
         )
 
         state.renderedMainColor = smoothedVector(
@@ -399,7 +523,10 @@ private final class MetalCircularLiquidRenderer: NSObject, MTKViewDelegate {
             snapThreshold: colorSnapThreshold
         )
 
-        state.renderedTime += deltaTime * max(0, state.renderedMotionScale)
+        // フレーム数ではなく実時間差分で位相を進めるため、
+        // 15fpsや8fpsでも波の速度が不自然に遅くなりません。
+        state.renderedTime +=
+            deltaTime * max(0, state.renderedMotionScale)
 
         return state
     }
@@ -441,21 +568,78 @@ private final class MetalCircularLiquidRenderer: NSObject, MTKViewDelegate {
         return current + difference * alpha
     }
 
-    private func shouldContinueDrawing(_ state: RenderState) -> Bool {
-        if state.renderedMotionScale > 0.001 { return true }
-        return shouldContinueDrawingLocked(state)
+    private func recommendedFramesPerSecond(
+        for state: RenderState
+    ) -> Int {
+        if isTransitioning(state) {
+            return state.transitionFramesPerSecond
+        }
+        return state.steadyFramesPerSecond
     }
 
-    private func shouldContinueDrawingLocked(_ state: RenderState) -> Bool {
-        if state.targetMotionScale > 0.001 { return true }
-        if abs(state.targetFillFraction - state.renderedFillFraction) > fillSnapThreshold { return true }
-        if maxColorDifference(state.targetMainColor, state.renderedMainColor) > colorSnapThreshold { return true }
-        if maxColorDifference(state.targetDeepColor, state.renderedDeepColor) > colorSnapThreshold { return true }
-        if maxColorDifference(state.targetHighlightColor, state.renderedHighlightColor) > colorSnapThreshold { return true }
+    private func recommendedFramesPerSecondLocked(
+        _ state: RenderState
+    ) -> Int {
+        recommendedFramesPerSecond(for: state)
+    }
+
+    private func isTransitioning(_ state: RenderState) -> Bool {
+        if abs(
+            state.targetFillFraction - state.renderedFillFraction
+        ) > fillSnapThreshold {
+            return true
+        }
+
+        if abs(
+            state.targetMotionScale - state.renderedMotionScale
+        ) > motionSnapThreshold {
+            return true
+        }
+
+        if maxColorDifference(
+            state.targetMainColor,
+            state.renderedMainColor
+        ) > colorSnapThreshold {
+            return true
+        }
+
+        if maxColorDifference(
+            state.targetDeepColor,
+            state.renderedDeepColor
+        ) > colorSnapThreshold {
+            return true
+        }
+
+        if maxColorDifference(
+            state.targetHighlightColor,
+            state.renderedHighlightColor
+        ) > colorSnapThreshold {
+            return true
+        }
+
         return false
     }
 
-    private func maxColorDifference(_ a: SIMD4<Float>, _ b: SIMD4<Float>) -> Float {
+    private func shouldContinueDrawing(_ state: RenderState) -> Bool {
+        if state.renderedMotionScale > motionSnapThreshold {
+            return true
+        }
+        return shouldContinueDrawingLocked(state)
+    }
+
+    private func shouldContinueDrawingLocked(
+        _ state: RenderState
+    ) -> Bool {
+        if state.targetMotionScale > motionSnapThreshold {
+            return true
+        }
+        return isTransitioning(state)
+    }
+
+    private func maxColorDifference(
+        _ a: SIMD4<Float>,
+        _ b: SIMD4<Float>
+    ) -> Float {
         let difference = a - b
         return max(
             max(abs(difference.x), abs(difference.y)),
@@ -470,6 +654,8 @@ private struct SwiftUICircularLiquidFallback: View {
     let deepColor: Color
     let highlightColor: Color
     let isActive: Bool
+    let framesPerSecond: Int
+    let motionScale: CGFloat
 
     @State private var displayedFillFraction: CGFloat = 0
     @State private var waveTime: CGFloat = 0
@@ -480,44 +666,21 @@ private struct SwiftUICircularLiquidFallback: View {
     }
 
     var body: some View {
-        TimelineView(.animation(minimumInterval: isActive ? 1.0 / 20.0 : 1.0)) { timeline in
-            Canvas { context, size in
-                let fraction = max(0, min(1, displayedFillFraction))
-                guard fraction > 0 else { return }
-
-                let width = max(size.width, 1)
-                let height = max(size.height, 1)
-                let baseY = height * (1 - fraction)
-
-                var path = Path()
-                path.move(to: CGPoint(x: 0, y: height))
-                path.addLine(to: CGPoint(x: 0, y: baseY))
-
-                for x in stride(from: CGFloat.zero, through: width, by: 2) {
-                    let progress = x / width
-                    let wave1 = sin(progress * .pi * 2.3 + waveTime * 1.45) * 5.0
-                    let wave2 = sin(progress * .pi * 4.7 - waveTime * 0.95) * 2.4
-                    path.addLine(to: CGPoint(x: x, y: baseY + wave1 + wave2))
-                }
-
-                path.addLine(to: CGPoint(x: width, y: height))
-                path.closeSubpath()
-
-                context.fill(
-                    path,
-                    with: .linearGradient(
-                        Gradient(colors: [
-                            highlightColor.opacity(0.90),
-                            mainColor.opacity(0.96),
-                            deepColor.opacity(0.94)
-                        ]),
-                        startPoint: CGPoint(x: width * 0.5, y: baseY),
-                        endPoint: CGPoint(x: width * 0.5, y: height)
+        Group {
+            if isActive {
+                TimelineView(
+                    .animation(
+                        minimumInterval:
+                            1.0 / Double(max(framesPerSecond, 1))
                     )
-                )
-            }
-            .onChange(of: timeline.date) { _, newDate in
-                advanceWaveTimeIfNeeded(now: newDate)
+                ) { timeline in
+                    liquidCanvas
+                        .onChange(of: timeline.date) { _, newDate in
+                            advanceWaveTimeIfNeeded(now: newDate)
+                        }
+                }
+            } else {
+                liquidCanvas
             }
         }
         .onAppear {
@@ -541,6 +704,57 @@ private struct SwiftUICircularLiquidFallback: View {
         }
     }
 
+    private var liquidCanvas: some View {
+        Canvas { context, size in
+            let fraction = max(0, min(1, displayedFillFraction))
+            guard fraction > 0 else { return }
+
+            let width = max(size.width, 1)
+            let height = max(size.height, 1)
+            let baseY = height * (1 - fraction)
+
+            var path = Path()
+            path.move(to: CGPoint(x: 0, y: height))
+            path.addLine(to: CGPoint(x: 0, y: baseY))
+
+            for x in stride(
+                from: CGFloat.zero,
+                through: width,
+                by: 3
+            ) {
+                let progress = x / width
+                let wave1 =
+                    sin(progress * .pi * 2.3 + waveTime * 1.05) * 4.6
+                let wave2 =
+                    sin(progress * .pi * 4.7 - waveTime * 0.68) * 2.1
+                path.addLine(
+                    to: CGPoint(
+                        x: x,
+                        y: baseY + wave1 + wave2
+                    )
+                )
+            }
+
+            path.addLine(to: CGPoint(x: width, y: height))
+            path.closeSubpath()
+
+            context.fill(
+                path,
+                with: .linearGradient(
+                    Gradient(
+                        colors: [
+                            highlightColor.opacity(0.90),
+                            mainColor.opacity(0.96),
+                            deepColor.opacity(0.94)
+                        ]
+                    ),
+                    startPoint: CGPoint(x: width * 0.5, y: baseY),
+                    endPoint: CGPoint(x: width * 0.5, y: height)
+                )
+            )
+        }
+    }
+
     private func advanceWaveTimeIfNeeded(now: Date) {
         guard isActive else {
             lastTimelineDate = nil
@@ -549,14 +763,18 @@ private struct SwiftUICircularLiquidFallback: View {
 
         let rawDeltaTime: TimeInterval
         if let lastTimelineDate {
-            rawDeltaTime = max(0, now.timeIntervalSince(lastTimelineDate))
+            rawDeltaTime = max(
+                0,
+                now.timeIntervalSince(lastTimelineDate)
+            )
         } else {
-            rawDeltaTime = 1.0 / 20.0
+            rawDeltaTime =
+                1.0 / Double(max(framesPerSecond, 1))
         }
 
         lastTimelineDate = now
-        let deltaTime = min(rawDeltaTime, 1.0 / 12.0)
-        waveTime += CGFloat(deltaTime)
+        let deltaTime = min(rawDeltaTime, 1.0 / 6.0)
+        waveTime += CGFloat(deltaTime) * max(motionScale, 0)
     }
 }
 
@@ -568,8 +786,18 @@ private extension Color {
         var blue: CGFloat = 0
         var alpha: CGFloat = 0
 
-        if uiColor.getRed(&red, green: &green, blue: &blue, alpha: &alpha) {
-            return SIMD4<Float>(Float(red), Float(green), Float(blue), Float(alpha))
+        if uiColor.getRed(
+            &red,
+            green: &green,
+            blue: &blue,
+            alpha: &alpha
+        ) {
+            return SIMD4<Float>(
+                Float(red),
+                Float(green),
+                Float(blue),
+                Float(alpha)
+            )
         }
 
         return SIMD4<Float>(1.0, 1.0, 1.0, 1.0)
