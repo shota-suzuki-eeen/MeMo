@@ -16,12 +16,6 @@ struct MeMoLiveActivitySettingsSection: View {
     @AppStorage(MeMoLiveActivityManager.enabledStorageKey)
     private var isEnabled: Bool = false
 
-    @AppStorage(MeMoLiveActivityManager.lockScreenEnabledStorageKey)
-    private var isLockScreenEnabled: Bool = true
-
-    @AppStorage(MeMoLiveActivityManager.dynamicIslandEnabledStorageKey)
-    private var isDynamicIslandEnabled: Bool = true
-
     @State private var isChanging: Bool = false
 
     private var state: AppState? { states.first }
@@ -40,29 +34,11 @@ struct MeMoLiveActivitySettingsSection: View {
             }
             .disabled(isChanging || !MeMoLiveActivityManager.shared.isSupported)
 
-            if isEnabled {
-                VStack(alignment: .leading, spacing: 12) {
-                    Toggle(isOn: Binding(get: { isLockScreenEnabled }, set: { setLockScreenEnabled($0) })) {
-                        Text("ロック画面")
-                            .font(.subheadline.weight(.semibold))
-                    }
-
-                    Toggle(isOn: Binding(get: { isDynamicIslandEnabled }, set: { setDynamicIslandEnabled($0) })) {
-                        Text("ダイナミックアイランド")
-                            .font(.subheadline.weight(.semibold))
-                    }
-                }
-                .padding(.leading, 4)
-                .transition(.opacity.combined(with: .move(edge: .top)))
-                .disabled(isChanging || !MeMoLiveActivityManager.shared.isSupported)
-            }
-
             Text(descriptionText)
                 .font(.footnote)
                 .foregroundStyle(.secondary)
                 .fixedSize(horizontal: false, vertical: true)
         }
-        .animation(.easeInOut(duration: 0.18), value: isEnabled)
     }
 
     private var statusText: String {
@@ -74,9 +50,9 @@ struct MeMoLiveActivitySettingsSection: View {
 
     private var descriptionText: String {
         if isEnabled {
-            return "お世話中のミーモ、歩数、満腹度、次の10回ガチャまでの残り歩数を表示します。"
+            return "ロック画面とダイナミックアイランドに、お世話中のミーモ、歩数、満腹度、次の10回ガチャまでの残り歩数を表示します。"
         }
-        return "ONにすると、ロック画面とダイナミックアイランドの表示先を個別に設定できます。"
+        return "ONにすると、ロック画面とダイナミックアイランドでミーモの現在の状態を確認できます。"
     }
 
     private func setEnabled(_ enabled: Bool) {
@@ -85,44 +61,7 @@ struct MeMoLiveActivitySettingsSection: View {
         isChanging = true
 
         Task { @MainActor in
-            if enabled {
-                if UserDefaults.standard.object(forKey: MeMoLiveActivityManager.lockScreenEnabledStorageKey) == nil {
-                    isLockScreenEnabled = true
-                }
-                if UserDefaults.standard.object(forKey: MeMoLiveActivityManager.dynamicIslandEnabledStorageKey) == nil {
-                    isDynamicIslandEnabled = true
-                }
-            }
-
             await MeMoLiveActivityManager.shared.setEnabled(enabled, state: state)
-            isChanging = false
-        }
-    }
-
-    private func setLockScreenEnabled(_ enabled: Bool) {
-        guard isChanging == false else { return }
-        bgmManager.playSE(.push)
-        isChanging = true
-
-        Task { @MainActor in
-            await MeMoLiveActivityManager.shared.setDisplayPreferences(
-                lockScreenEnabled: enabled,
-                state: state
-            )
-            isChanging = false
-        }
-    }
-
-    private func setDynamicIslandEnabled(_ enabled: Bool) {
-        guard isChanging == false else { return }
-        bgmManager.playSE(.push)
-        isChanging = true
-
-        Task { @MainActor in
-            await MeMoLiveActivityManager.shared.setDisplayPreferences(
-                dynamicIslandEnabled: enabled,
-                state: state
-            )
             isChanging = false
         }
     }

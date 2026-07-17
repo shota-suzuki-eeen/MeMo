@@ -15,37 +15,27 @@ import WidgetKit
 struct MeMoWidgetLiveActivity: Widget {
     var body: some WidgetConfiguration {
         ActivityConfiguration(for: MeMoCareActivityAttributes.self) { context in
-            if context.state.showsLockScreenCard {
-                TimelineView(.periodic(from: context.state.updatedAt, by: 60)) { timeline in
-                    MeMoCareLockScreenLiveActivityView(context: context, now: timeline.date)
-                }
-                .frame(maxWidth: .infinity, maxHeight: .infinity)
-                .activityBackgroundTint(.black)
-                .activitySystemActionForegroundColor(.white)
-            } else {
-                EmptyView()
-                    .activityBackgroundTint(.clear)
-                    .activitySystemActionForegroundColor(.white)
+            TimelineView(.periodic(from: context.state.updatedAt, by: 60)) { timeline in
+                MeMoCareLockScreenLiveActivityView(context: context, now: timeline.date)
             }
+            .frame(maxWidth: .infinity, maxHeight: .infinity)
+            .activityBackgroundTint(.black)
+            .activitySystemActionForegroundColor(.white)
         } dynamicIsland: { context in
             DynamicIsland {
                 DynamicIslandExpandedRegion(.leading) {
-                    if context.state.showsDynamicIslandContent {
-                        TimelineView(.periodic(from: context.state.updatedAt, by: 60)) { timeline in
-                            MeMoDynamicIslandLeadingView(state: context.state, now: timeline.date)
-                        }
+                    TimelineView(.periodic(from: context.state.updatedAt, by: 60)) { timeline in
+                        MeMoDynamicIslandLeadingView(state: context.state, now: timeline.date)
                     }
                 }
 
                 DynamicIslandExpandedRegion(.trailing) {
-                    if context.state.showsDynamicIslandContent {
-                        TimelineView(.periodic(from: context.state.updatedAt, by: 60)) { timeline in
-                            MeMoDynamicIslandPetView(
-                                state: context.state,
-                                now: timeline.date,
-                                size: CGSize(width: 112, height: 112)
-                            )
-                        }
+                    TimelineView(.periodic(from: context.state.updatedAt, by: 60)) { timeline in
+                        MeMoDynamicIslandPetView(
+                            state: context.state,
+                            now: timeline.date,
+                            size: CGSize(width: 112, height: 112)
+                        )
                     }
                 }
 
@@ -53,31 +43,25 @@ struct MeMoWidgetLiveActivity: Widget {
                     EmptyView()
                 }
             } compactLeading: {
-                if context.state.showsDynamicIslandContent {
-                    TimelineView(.periodic(from: context.state.updatedAt, by: 60)) { timeline in
-                        MeMoDynamicIslandPetView(
-                            state: context.state,
-                            now: timeline.date,
-                            size: CGSize(width: 24, height: 24)
-                        )
-                    }
+                TimelineView(.periodic(from: context.state.updatedAt, by: 60)) { timeline in
+                    MeMoDynamicIslandPetView(
+                        state: context.state,
+                        now: timeline.date,
+                        size: CGSize(width: 24, height: 24)
+                    )
                 }
             } compactTrailing: {
-                if context.state.showsDynamicIslandContent {
-                    Text("\(context.state.clampedTodaySteps.memoCompactFormatted)歩")
-                        .font(.caption2.monospacedDigit().weight(.bold))
-                        .lineLimit(1)
-                        .minimumScaleFactor(0.72)
-                }
+                Text("\(context.state.clampedTodaySteps.memoCompactFormatted)歩")
+                    .font(.caption2.monospacedDigit().weight(.bold))
+                    .lineLimit(1)
+                    .minimumScaleFactor(0.72)
             } minimal: {
-                if context.state.showsDynamicIslandContent {
-                    TimelineView(.periodic(from: context.state.updatedAt, by: 60)) { timeline in
-                        MeMoDynamicIslandPetView(
-                            state: context.state,
-                            now: timeline.date,
-                            size: CGSize(width: 22, height: 22)
-                        )
-                    }
+                TimelineView(.periodic(from: context.state.updatedAt, by: 60)) { timeline in
+                    MeMoDynamicIslandPetView(
+                        state: context.state,
+                        now: timeline.date,
+                        size: CGSize(width: 22, height: 22)
+                    )
                 }
             }
             .keylineTint(.yellow)

@@ -73,7 +73,7 @@ final class HealthKitManager: ObservableObject {
         }
     }
 
-    /// ✅ Widget 用に今日の歩数を即時更新
+    /// ✅ Widget / Live Activity 用に今日の歩数を即時更新
     func refreshTodayStepsForWidget(now: Date = Date()) async {
         guard authState == .authorized else { return }
         guard !isRefreshingTodaySteps else { return }
@@ -91,19 +91,24 @@ final class HealthKitManager: ObservableObject {
         guard let stepType = HKObjectType.quantityType(forIdentifier: .stepCount) else { return }
 
         let query = HKObserverQuery(sampleType: stepType, predicate: nil) { [weak self] _, completionHandler, error in
-            defer { completionHandler() }
-
-            guard let self else { return }
+            guard let self else {
+                completionHandler()
+                return
+            }
 
             if let error {
                 Task { @MainActor in
                     self.errorMessage = "歩数監視に失敗: \(error.localizedDescription)"
+                    completionHandler()
                 }
                 return
             }
 
+            // Background Delivery で起動された場合も、歩数取得と Live Activity 更新が
+            // 完了してから HealthKit へ completion を返す。
             Task { @MainActor in
                 await self.refreshTodayStepsForWidget()
+                completionHandler()
             }
         }
 
@@ -179,8 +184,8 @@ final class HealthKitManager: ObservableObject {
                 lastGoodSteps = protectedTodaySteps
             }
 
-            // ✅ 歩数だけでも Widget へ早めに反映
-            pushTodayStepsToWidgetIfNeeded(protectedTodaySteps)
+            // ✅ 歩数だけでも Widget / Live Activity へ早めに反映
+            await pushTodayStepsToWidgetIfNeeded(protectedTodaySteps)
 
             return (max(0, deltaFetched), now)
         } catch {
@@ -260,8 +265,8 @@ final class HealthKitManager: ObservableObject {
             lastGoodSteps = protectedSteps
         }
 
-        // ✅ StepEnjoy 系の取得でも Widget 側へ反映
-        pushTodayStepsToWidgetIfNeeded(protectedSteps)
+        // ✅ StepEnjoy 系の取得でも Widget / Live Activity 側へ反映
+        await pushTodayStepsToWidgetIfNeeded(protectedSteps)
 
         return protectedSteps
     }
@@ -272,9 +277,9 @@ final class HealthKitManager: ObservableObject {
         return await fetchStepCount(from: start, to: now)
     }
 
-    // MARK: - Widget Bridge
+    // MARK: - Widget / Live Activity Bridge
 
-    private func pushTodayStepsToWidgetIfNeeded(_ steps: Int) {
+    private func pushTodayStepsToWidgetIfNeeded(_ steps: Int) async {
         let safeSteps = max(0, steps)
         let changed = HealthKitWidgetBridge.saveTodaySteps(safeSteps)
 
@@ -283,6 +288,11 @@ final class HealthKitManager: ObservableObject {
             WidgetCenter.shared.reloadTimelines(ofKind: HealthKitWidgetBridge.widgetKind)
         }
         #endif
+
+        // Live Activity は WidgetCenter の reload 対象ではないため ActivityKit 側へ直接反映する。
+        // HealthKit の Background Delivery 完了通知より先に更新を終えるため、ここで await する。
+        // 同値の場合は Manager 内の差分判定で Activity.update を抑制する。
+        await MeMoLiveActivityManager.shared.updateTodaySteps(safeSteps)
     }
 
     // MARK: - DayKey
