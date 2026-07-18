@@ -988,22 +988,24 @@ struct HomeView: View {
     }
 
     private func characterImageLayer(displayHeight: CGFloat) -> some View {
-        Image(characterAssetName.isEmpty ? preferredCharacterRestAssetName : characterAssetName)
-            .resizable()
-            .scaledToFit()
-            .frame(maxHeight: displayHeight)
-            .offset(
-                x: isToiletLocked ? (isToiletWiggleOn ? Layout.toiletWiggleOffset : -Layout.toiletWiggleOffset) : 0,
-                y: Layout.characterTopOffset
-            )
-            .animation(
-                isToiletLocked
-                ? .easeInOut(duration: Layout.toiletWiggleDuration).repeatForever(autoreverses: true)
-                : .default,
-                value: isToiletWiggleOn
-            )
-            .zIndex(Layout.zCharacter - 1)
-            .allowsHitTesting(false)
+        CharacterSpriteView(
+            assetName: characterAssetName.isEmpty ? preferredCharacterRestAssetName : characterAssetName,
+            baseAssetName: currentBaseAssetName,
+            isIdleEnabled: isHomeVisible && !isCharacterActionRunning && !isToiletLocked,
+            displayHeight: displayHeight
+        )
+        .offset(
+            x: isToiletLocked ? (isToiletWiggleOn ? Layout.toiletWiggleOffset : -Layout.toiletWiggleOffset) : 0,
+            y: Layout.characterTopOffset
+        )
+        .animation(
+            isToiletLocked
+            ? .easeInOut(duration: Layout.toiletWiggleDuration).repeatForever(autoreverses: true)
+            : .default,
+            value: isToiletWiggleOn
+        )
+        .zIndex(Layout.zCharacter - 1)
+        .allowsHitTesting(false)
     }
 
     private var floatingHeartsLayer: some View {
@@ -1796,8 +1798,6 @@ struct HomeView: View {
 
 
     private func openCameraFromTopButton() {
-        bgmManager.playSE(.push)
-
         if isToiletLocked {
             showToiletLockedMessage()
             return
@@ -2097,7 +2097,6 @@ struct HomeView: View {
             } else {
                 segmentDistance = 0
             }
-
             guard segmentDistance > 0 else {
                 toiletPoopActivePoint[poop.id] = point
                 continue
@@ -2397,7 +2396,6 @@ struct HomeView: View {
         withAnimation(.spring(response: 0.28, dampingFraction: 0.88)) {
             resetFoodSelectorDragState()
         }
-
         Task { @MainActor in
             Haptics.tap(style: .soft)
         }
@@ -2748,58 +2746,10 @@ struct HomeView: View {
 
     @MainActor
     private func startCharacterIdleLoopIfNeeded() {
-        guard idleLoopTask == nil else { return }
-
-        idleLoopTask = Task {
-            try? await Task.sleep(nanoseconds: 600_000_000)
-
-            while !Task.isCancelled {
-                if !isHomeVisible {
-                    try? await Task.sleep(nanoseconds: 300_000_000)
-                    continue
-                }
-
-                if isToiletLocked {
-                    try? await Task.sleep(nanoseconds: 120_000_000)
-                    continue
-                }
-
-                if isCharacterActionRunning {
-                    try? await Task.sleep(nanoseconds: 120_000_000)
-                    continue
-                }
-
-                let wait = Double.random(in: 2.2...6.0)
-                try? await Task.sleep(nanoseconds: UInt64(wait * 1_000_000_000))
-
-                if Task.isCancelled { break }
-                if !isHomeVisible { continue }
-                if isToiletLocked { continue }
-                if isCharacterActionRunning { continue }
-
-                if !canPlayBlinkAnimation {
-                    await MainActor.run {
-                        characterAssetName = preferredCharacterRestAssetName
-                    }
-                    continue
-                }
-
-                let doDouble = Double.random(in: 0...1) < doubleBlinkChance
-                await playBlink()
-
-                if doDouble {
-                    let gap = Double.random(in: doubleBlinkGapRange)
-                    try? await Task.sleep(nanoseconds: UInt64(gap * 1_000_000_000))
-
-                    if Task.isCancelled { break }
-                    if !isHomeVisible { continue }
-                    if isToiletLocked { continue }
-                    if isCharacterActionRunning { continue }
-
-                    await playBlink()
-                }
-            }
-        }
+        // SpriteKit側（CharacterSpriteView）でIdle・呼吸・ランダム瞬き・二度瞬きを管理する。
+        // SwiftUI側の旧Taskループは起動しないことで、二重アニメーションと画像競合を防ぐ。
+        idleLoopTask?.cancel()
+        idleLoopTask = nil
     }
 
     @MainActor
@@ -5797,7 +5747,6 @@ private struct FloatingHeart: Identifiable, Equatable {
     let yOffset: CGFloat
     let size: CGFloat
 }
-
 private struct FloatingHeartView: View {
     let heart: FloatingHeart
     @State private var isAnimating = false
