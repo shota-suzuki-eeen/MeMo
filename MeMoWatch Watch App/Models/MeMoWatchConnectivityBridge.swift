@@ -49,7 +49,8 @@ final class MeMoWatchConnectivityBridge: NSObject, ObservableObject {
 
     private static let userDefaultsKey = "memo.watch.latestSnapshot"
 
-    @Published private(set) var latestSnapshot: MeMoWatchSnapshot = MeMoWatchConnectivityBridge.initialSnapshot()
+    @Published private(set) var latestSnapshot: MeMoWatchSnapshot =
+        MeMoWatchConnectivityBridge.initialSnapshot()
 
     #if canImport(WatchConnectivity)
     private var session: WCSession? {
@@ -60,6 +61,7 @@ final class MeMoWatchConnectivityBridge: NSObject, ObservableObject {
     #if os(iOS)
     private weak var appState: AppState?
     private weak var healthKitManager: HealthKitManager?
+    private var lastBackgroundAssetName: String = "Home_background"
     #endif
 
     private override init() {
@@ -69,9 +71,12 @@ final class MeMoWatchConnectivityBridge: NSObject, ObservableObject {
     func activate() {
         #if canImport(WatchConnectivity)
         guard let session else { return }
-        guard session.activationState == .notActivated else { return }
+
         session.delegate = self
-        session.activate()
+
+        if session.activationState == .notActivated {
+            session.activate()
+        }
         #endif
     }
 
@@ -80,14 +85,23 @@ final class MeMoWatchConnectivityBridge: NSObject, ObservableObject {
         self.appState = appState
         self.healthKitManager = healthKitManager
         activate()
-        publishCurrentSnapshot()
+        publishCurrentSnapshot(backgroundAssetName: nil)
     }
 
     func publishCurrentSnapshot(
-        backgroundAssetName: String = "Home_background",
+        backgroundAssetName: String? = nil,
         now: Date = Date()
     ) {
         guard let appState else { return }
+
+        let resolvedBackgroundAssetName: String
+        if let backgroundAssetName,
+           !backgroundAssetName.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+            resolvedBackgroundAssetName = backgroundAssetName
+            lastBackgroundAssetName = backgroundAssetName
+        } else {
+            resolvedBackgroundAssetName = lastBackgroundAssetName
+        }
 
         let todaySteps = max(
             0,
@@ -105,8 +119,10 @@ final class MeMoWatchConnectivityBridge: NSObject, ObservableObject {
             happinessMaxPoint: AppState.happinessMaxPointsPerLevel,
             fullnessLevel: appState.currentSatisfaction(now: now),
             fullnessMaxLevel: AppState.fullnessMaxLevel,
-            characterAssetName: PetMaster.assetName(for: appState.normalizedCurrentPetID),
-            backgroundAssetName: backgroundAssetName,
+            characterAssetName: PetMaster.assetName(
+                for: appState.normalizedCurrentPetID
+            ),
+            backgroundAssetName: resolvedBackgroundAssetName,
             updatedAt: now
         )
 
@@ -117,23 +133,41 @@ final class MeMoWatchConnectivityBridge: NSObject, ObservableObject {
 
     func sendPettingTouch() {
         #if os(watchOS)
+        sendWatchEvent("pettingTouch")
+        #endif
+    }
+
+    func requestCurrentSnapshot() {
+        #if os(watchOS)
+        sendWatchEvent("requestSnapshot")
+        #endif
+    }
+
+    #if os(watchOS)
+    private func sendWatchEvent(_ event: String) {
         #if canImport(WatchConnectivity)
         guard let session else { return }
         guard session.activationState == .activated else { return }
 
         let message: [String: Any] = [
-            "event": "pettingTouch",
+            "event": event,
             "sentAt": Date().timeIntervalSince1970
         ]
 
         if session.isReachable {
-            session.sendMessage(message, replyHandler: nil, errorHandler: nil)
+            session.sendMessage(
+                message,
+                replyHandler: nil,
+                errorHandler: { _ in
+                    session.transferUserInfo(message)
+                }
+            )
         } else {
             session.transferUserInfo(message)
         }
         #endif
-        #endif
     }
+    #endif
 
     private func apply(_ snapshot: MeMoWatchSnapshot) {
         latestSnapshot = snapshot
@@ -154,7 +188,11 @@ final class MeMoWatchConnectivityBridge: NSObject, ObservableObject {
         }
 
         if session.isReachable {
-            session.sendMessage(payload, replyHandler: nil, errorHandler: nil)
+            session.sendMessage(
+                payload,
+                replyHandler: nil,
+                errorHandler: nil
+            )
         }
         #endif
         #endif
@@ -167,10 +205,20 @@ final class MeMoWatchConnectivityBridge: NSObject, ObservableObject {
         }
 
         #if os(iOS)
-        if dictionary["event"] as? String == "pettingTouch" {
+        switch dictionary["event"] as? String {
+        case "pettingTouch":
             guard let appState else { return }
-            _ = appState.registerHappinessPettingTouch(count: 1, now: Date())
-            publishCurrentSnapshot()
+            _ = appState.registerHappinessPettingTouch(
+                count: 1,
+                now: Date()
+            )
+            publishCurrentSnapshot(backgroundAssetName: nil)
+
+        case "requestSnapshot":
+            publishCurrentSnapshot(backgroundAssetName: nil)
+
+        default:
+            break
         }
         #endif
     }
@@ -179,27 +227,45 @@ final class MeMoWatchConnectivityBridge: NSObject, ObservableObject {
         loadStoredSnapshot(key: userDefaultsKey) ?? .placeholder
     }
 
-    private static func payload(from snapshot: MeMoWatchSnapshot) -> [String: Any]? {
-        guard let data = try? JSONEncoder().encode(snapshot) else { return nil }
+    private static func payload(
+        from snapshot: MeMoWatchSnapshot
+    ) -> [String: Any]? {
+        guard let data = try? JSONEncoder().encode(snapshot) else {
+            return nil
+        }
         return ["snapshotData": data]
     }
 
-    private static func snapshot(from dictionary: [String: Any]) -> MeMoWatchSnapshot? {
-        if let data = dictionary["snapshotData"] as? Data {
-            return try? JSONDecoder().decode(MeMoWatchSnapshot.self, from: data)
+    private static func snapshot(
+        from dictionary: [String: Any]
+    ) -> MeMoWatchSnapshot? {
+        guard let data = dictionary["snapshotData"] as? Data else {
+            return nil
         }
-
-        return nil
+        return try? JSONDecoder().decode(
+            MeMoWatchSnapshot.self,
+            from: data
+        )
     }
 
-    private static func store(_ snapshot: MeMoWatchSnapshot, key: String) {
+    private static func store(
+        _ snapshot: MeMoWatchSnapshot,
+        key: String
+    ) {
         guard let data = try? JSONEncoder().encode(snapshot) else { return }
         UserDefaults.standard.set(data, forKey: key)
     }
 
-    private static func loadStoredSnapshot(key: String) -> MeMoWatchSnapshot? {
-        guard let data = UserDefaults.standard.data(forKey: key) else { return nil }
-        return try? JSONDecoder().decode(MeMoWatchSnapshot.self, from: data)
+    private static func loadStoredSnapshot(
+        key: String
+    ) -> MeMoWatchSnapshot? {
+        guard let data = UserDefaults.standard.data(forKey: key) else {
+            return nil
+        }
+        return try? JSONDecoder().decode(
+            MeMoWatchSnapshot.self,
+            from: data
+        )
     }
 }
 
@@ -210,11 +276,15 @@ extension MeMoWatchConnectivityBridge: WCSessionDelegate {
         activationDidCompleteWith activationState: WCSessionActivationState,
         error: Error?
     ) {
-        #if os(iOS)
+        guard activationState == .activated else { return }
+
         Task { @MainActor in
-            self.publishCurrentSnapshot()
+            #if os(iOS)
+            self.publishCurrentSnapshot(backgroundAssetName: nil)
+            #elseif os(watchOS)
+            self.requestCurrentSnapshot()
+            #endif
         }
-        #endif
     }
 
     #if os(iOS)
@@ -227,16 +297,18 @@ extension MeMoWatchConnectivityBridge: WCSessionDelegate {
 
     nonisolated func session(
         _ session: WCSession,
-        didReceiveApplicationContext applicationContext: [String : Any]
+        didReceiveApplicationContext applicationContext: [String: Any]
     ) {
         Task { @MainActor in
-            self.handleIncomingOnMainActor(dictionary: applicationContext)
+            self.handleIncomingOnMainActor(
+                dictionary: applicationContext
+            )
         }
     }
 
     nonisolated func session(
         _ session: WCSession,
-        didReceiveUserInfo userInfo: [String : Any] = [:]
+        didReceiveUserInfo userInfo: [String: Any] = [:]
     ) {
         Task { @MainActor in
             self.handleIncomingOnMainActor(dictionary: userInfo)
@@ -245,7 +317,7 @@ extension MeMoWatchConnectivityBridge: WCSessionDelegate {
 
     nonisolated func session(
         _ session: WCSession,
-        didReceiveMessage message: [String : Any]
+        didReceiveMessage message: [String: Any]
     ) {
         Task { @MainActor in
             self.handleIncomingOnMainActor(dictionary: message)

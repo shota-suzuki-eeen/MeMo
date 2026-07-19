@@ -11,35 +11,51 @@ import SwiftUI
 #if os(iOS)
 struct MeMoWatchBridgeInstaller: ViewModifier {
     let appState: AppState
-    let healthKitManager: HealthKitManager
+    @ObservedObject var healthKitManager: HealthKitManager
     let backgroundAssetName: String
 
     func body(content: Content) -> some View {
         content
             .onAppear {
-                MeMoWatchConnectivityBridge.shared.install(
-                    appState: appState,
-                    healthKitManager: healthKitManager
-                )
-                MeMoWatchConnectivityBridge.shared.publishCurrentSnapshot(
-                    backgroundAssetName: backgroundAssetName
-                )
+                publishCurrentSnapshot(installIfNeeded: true)
             }
             .onChange(of: appState.currentPetID) { _, _ in
-                MeMoWatchConnectivityBridge.shared.publishCurrentSnapshot(
-                    backgroundAssetName: backgroundAssetName
-                )
+                publishCurrentSnapshot()
             }
             .onChange(of: appState.cachedTodaySteps) { _, _ in
-                MeMoWatchConnectivityBridge.shared.publishCurrentSnapshot(
-                    backgroundAssetName: backgroundAssetName
-                )
+                publishCurrentSnapshot()
+            }
+            .onChange(of: healthKitManager.todaySteps) { _, _ in
+                publishCurrentSnapshot()
+            }
+            .onChange(of: appState.happinessPoint) { _, _ in
+                publishCurrentSnapshot()
+            }
+            .onChange(of: appState.happinessLevel) { _, _ in
+                publishCurrentSnapshot()
             }
             .onChange(of: appState.satisfactionLevel) { _, _ in
-                MeMoWatchConnectivityBridge.shared.publishCurrentSnapshot(
-                    backgroundAssetName: backgroundAssetName
-                )
+                publishCurrentSnapshot()
             }
+            .onChange(of: appState.satisfactionLastUpdatedAt) { _, _ in
+                publishCurrentSnapshot()
+            }
+            .onChange(of: backgroundAssetName) { _, _ in
+                publishCurrentSnapshot()
+            }
+    }
+
+    private func publishCurrentSnapshot(installIfNeeded: Bool = false) {
+        if installIfNeeded {
+            MeMoWatchConnectivityBridge.shared.install(
+                appState: appState,
+                healthKitManager: healthKitManager
+            )
+        }
+
+        MeMoWatchConnectivityBridge.shared.publishCurrentSnapshot(
+            backgroundAssetName: backgroundAssetName
+        )
     }
 }
 

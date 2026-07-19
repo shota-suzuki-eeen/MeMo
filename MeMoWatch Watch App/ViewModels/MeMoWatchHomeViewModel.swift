@@ -20,9 +20,12 @@ final class MeMoWatchHomeViewModel: ObservableObject {
         max(0, snapshot.todaySteps)
     }
 
+    var dailyStepGoal: Int {
+        max(1, snapshot.dailyStepGoal)
+    }
+
     var stepProgress: Double {
-        let goal = max(1, snapshot.dailyStepGoal)
-        return min(1, max(0, Double(todaySteps) / Double(goal)))
+        min(1, max(0, Double(todaySteps) / Double(dailyStepGoal)))
     }
 
     var currentCharacterAssetName: String {
@@ -58,6 +61,7 @@ final class MeMoWatchHomeViewModel: ObservableObject {
     func start() async {
         bridge.activate()
         snapshot = bridge.latestSnapshot
+        bridge.requestCurrentSnapshot()
 
         bridge.$latestSnapshot
             .receive(on: DispatchQueue.main)
