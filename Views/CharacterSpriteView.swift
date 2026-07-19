@@ -145,7 +145,9 @@ final class CharacterSpriteScene: SKScene {
         addChild(breathNode)
         breathNode.addChild(spriteNode)
 
-        spriteNode.anchorPoint = CGPoint(x: 0.5, y: 0.5)
+        // Breathing must not move the character's feet.
+        // Use the bottom-center of the sprite as the transform pivot.
+        spriteNode.anchorPoint = CGPoint(x: 0.5, y: 0.0)
         spriteNode.position = .zero
         resetMotionImmediately()
     }
@@ -199,6 +201,21 @@ final class CharacterSpriteScene: SKScene {
             width: max(1, height * aspectRatio),
             height: height
         )
+
+        updateBreathingPivotPosition()
+    }
+
+    /// Keeps the sprite's bottom edge fixed while breathing.
+    /// The previous center-anchored layout occupied -height/2 ... +height/2,
+    /// so placing the bottom pivot at -height/2 preserves the same resting position.
+    private func updateBreathingPivotPosition() {
+        guard let configuration else {
+            breathNode.position = .zero
+            return
+        }
+
+        let height = max(1, configuration.visualHeight)
+        breathNode.position = CGPoint(x: 0, y: -(height * 0.5))
     }
 
     private func startContinuousIdleMotionIfNeeded() {
@@ -208,7 +225,7 @@ final class CharacterSpriteScene: SKScene {
             // Keep the character's center point completely fixed.
             // A very small, non-uniform scale change creates a soft breathing effect.
             let inhale = eased(
-                SKAction.scaleX(to: 1.004, y: 1.012, duration: 1.55)
+                SKAction.scaleX(to: 1.004, y: 1.008, duration: 1.55)
             )
             let softRelease = eased(
                 SKAction.scaleX(to: 0.999, y: 0.997, duration: 1.35)
@@ -320,11 +337,11 @@ final class CharacterSpriteScene: SKScene {
     }
 
     private func resetMotionImmediately() {
-        breathNode.position = .zero
         breathNode.zRotation = 0
         breathNode.xScale = 1
         breathNode.yScale = 1
         spriteNode.position = .zero
+        updateBreathingPivotPosition()
     }
 
     private func eased(_ action: SKAction) -> SKAction {
