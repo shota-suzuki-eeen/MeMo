@@ -100,6 +100,10 @@ struct RootView: View {
                         state: sharedState,
                         viewModel: onboardingViewModel
                     )
+                    .installMeMoWatchBridge(
+                        appState: sharedState,
+                        healthKitManager: hk
+                    )
                     .onAppear {
                         lastObservedWalletSteps = sharedState.walletSteps
                         walkStore.bootstrap()

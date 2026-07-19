@@ -3861,7 +3861,7 @@ private struct HomeStepMeterUniforms {
 }
 
 // MARK: - Widget Bridge
-private enum HomeWidgetBridge {
+enum HomeWidgetBridge {
     static let appGroupID = "group.com.shota.CalPet"
     static let widgetKind = "CalPetMediumWidget"
 
