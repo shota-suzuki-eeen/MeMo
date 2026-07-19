@@ -9,7 +9,12 @@
 import SwiftUI
 
 #if os(iOS)
+import Combine
+import SwiftData
+
 struct MeMoWatchBridgeInstaller: ViewModifier {
+    @Environment(\.modelContext) private var modelContext
+
     let appState: AppState
     @ObservedObject var healthKitManager: HealthKitManager
     let backgroundAssetName: String
@@ -40,7 +45,15 @@ struct MeMoWatchBridgeInstaller: ViewModifier {
             .onChange(of: appState.satisfactionLastUpdatedAt) { _, _ in
                 publishCurrentSnapshot()
             }
+            .onChange(of: appState.ownedFoodCountsData) { _, _ in
+                publishCurrentSnapshot()
+            }
             .onChange(of: backgroundAssetName) { _, _ in
+                publishCurrentSnapshot()
+            }
+            .onReceive(
+                NotificationCenter.default.publisher(for: .memoDesiredFoodDidChange)
+            ) { _ in
                 publishCurrentSnapshot()
             }
     }
@@ -49,7 +62,14 @@ struct MeMoWatchBridgeInstaller: ViewModifier {
         if installIfNeeded {
             MeMoWatchConnectivityBridge.shared.install(
                 appState: appState,
-                healthKitManager: healthKitManager
+                healthKitManager: healthKitManager,
+                persistChanges: {
+                    do {
+                        try modelContext.save()
+                    } catch {
+                        print("❌ MeMoWatch bridge save failed: \(error)")
+                    }
+                }
             )
         }
 

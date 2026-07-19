@@ -13,6 +13,22 @@ import Foundation
 import WatchConnectivity
 #endif
 
+#if os(iOS) && canImport(WidgetKit)
+import WidgetKit
+#endif
+
+struct MeMoWatchFoodItemSnapshot: Codable, Equatable, Identifiable {
+    var id: String
+    var name: String
+    var assetName: String
+    var rarity: String
+    var count: Int
+
+    var isRare: Bool {
+        rarity == "R"
+    }
+}
+
 struct MeMoWatchSnapshot: Codable, Equatable {
     var todaySteps: Int
     var dailyStepGoal: Int
@@ -27,6 +43,11 @@ struct MeMoWatchSnapshot: Codable, Equatable {
     var characterAssetName: String
     var backgroundAssetName: String
 
+    // Optional fields keep snapshots saved by older app versions decodable.
+    var desiredFoodID: String? = nil
+    var desiredFoodAssetName: String? = nil
+    var ownedFoods: [MeMoWatchFoodItemSnapshot]? = nil
+
     var updatedAt: Date
 
     static let placeholder = MeMoWatchSnapshot(
@@ -39,6 +60,9 @@ struct MeMoWatchSnapshot: Codable, Equatable {
         fullnessMaxLevel: 5,
         characterAssetName: "person",
         backgroundAssetName: "Home_background",
+        desiredFoodID: nil,
+        desiredFoodAssetName: nil,
+        ownedFoods: [],
         updatedAt: Date()
     )
 }
@@ -62,6 +86,10 @@ final class MeMoWatchConnectivityBridge: NSObject, ObservableObject {
     private weak var appState: AppState?
     private weak var healthKitManager: HealthKitManager?
     private var lastBackgroundAssetName: String = "Home_background"
+    private var persistChangesHandler: (() -> Void)?
+    private var pendingWatchEvents: [[String: Any]] = []
+    private var processedWatchRequestIDs: Set<String> = []
+    private var processedWatchRequestIDOrder: [String] = []
     #endif
 
     private override init() {
@@ -81,11 +109,17 @@ final class MeMoWatchConnectivityBridge: NSObject, ObservableObject {
     }
 
     #if os(iOS)
-    func install(appState: AppState, healthKitManager: HealthKitManager) {
+    func install(
+        appState: AppState,
+        healthKitManager: HealthKitManager,
+        persistChanges: (() -> Void)? = nil
+    ) {
         self.appState = appState
         self.healthKitManager = healthKitManager
+        self.persistChangesHandler = persistChanges
         activate()
         publishCurrentSnapshot(backgroundAssetName: nil)
+        flushPendingWatchEventsIfNeeded()
     }
 
     func publishCurrentSnapshot(
@@ -111,29 +145,130 @@ final class MeMoWatchConnectivityBridge: NSObject, ObservableObject {
             )
         )
 
+        let fullnessLevel = appState.currentSatisfaction(now: now)
+        if fullnessLevel < AppState.fullnessMaxLevel {
+            _ = appState.ensureDesiredFoodIfNeeded()
+        }
+
+        let desiredFood = appState.desiredFood
+        let ownedFoods = FoodCatalog.all.compactMap { food -> MeMoWatchFoodItemSnapshot? in
+            let count = appState.foodCount(foodId: food.id)
+            guard count > 0 else { return nil }
+
+            return MeMoWatchFoodItemSnapshot(
+                id: food.id,
+                name: food.name,
+                assetName: food.assetName,
+                rarity: food.isShopEligible ? "N" : "R",
+                count: count
+            )
+        }
+
         let snapshot = MeMoWatchSnapshot(
             todaySteps: todaySteps,
             dailyStepGoal: AppState.fixedDailyStepGoal,
             happinessPoint: appState.happinessPoint,
             happinessLevel: appState.happinessLevel,
             happinessMaxPoint: AppState.happinessMaxPointsPerLevel,
-            fullnessLevel: appState.currentSatisfaction(now: now),
+            fullnessLevel: fullnessLevel,
             fullnessMaxLevel: AppState.fullnessMaxLevel,
             characterAssetName: PetMaster.assetName(
                 for: appState.normalizedCurrentPetID
             ),
             backgroundAssetName: resolvedBackgroundAssetName,
+            desiredFoodID: desiredFood?.id,
+            desiredFoodAssetName: desiredFood?.assetName,
+            ownedFoods: ownedFoods,
             updatedAt: now
         )
 
         apply(snapshot)
         send(snapshot)
     }
+
+    @discardableResult
+    private func resolveFoodFeedRequest(foodID: String) -> Bool {
+        guard let appState else { return false }
+        guard !appState.hasToiletFlag else {
+            publishCurrentSnapshot(backgroundAssetName: nil)
+            return false
+        }
+        guard let food = FoodCatalog.byId(foodID) else {
+            publishCurrentSnapshot(backgroundAssetName: nil)
+            return false
+        }
+
+        let now = Date()
+        let feedState = appState.canFeedNow(now: now)
+        guard feedState.can else {
+            publishCurrentSnapshot(backgroundAssetName: nil, now: now)
+            return false
+        }
+
+        guard appState.foodCount(foodId: foodID) > 0 else {
+            publishCurrentSnapshot(backgroundAssetName: nil, now: now)
+            return false
+        }
+
+        guard appState.consumeFood(foodId: foodID, count: 1) else {
+            publishCurrentSnapshot(backgroundAssetName: nil, now: now)
+            return false
+        }
+
+        let feedResult = appState.feedOnce(now: now)
+        guard feedResult.didFeed else {
+            publishCurrentSnapshot(backgroundAssetName: nil, now: now)
+            return false
+        }
+
+        _ = appState.resolveFood(now: now)
+
+        let happinessBonus = appState.happinessBonusPoints(forFoodID: food.id)
+            + appState.desiredFoodAdditionalHappinessBonus(forFoodID: food.id)
+
+        _ = appState.registerDesiredFoodFeedingResult(foodID: food.id)
+
+        if happinessBonus > 0 {
+            _ = appState.addHappinessPoints(happinessBonus, now: now)
+        }
+
+        persistChangesHandler?()
+        refreshWidgetSnapshotIfAvailable(appState: appState, now: now)
+        publishCurrentSnapshot(backgroundAssetName: nil, now: now)
+        return true
+    }
+
+    private func refreshWidgetSnapshotIfAvailable(appState: AppState, now: Date) {
+        #if canImport(WidgetKit)
+        let todaySteps = max(
+            0,
+            max(
+                healthKitManager?.todaySteps ?? 0,
+                appState.cachedTodaySteps
+            )
+        )
+        let widgetState = appState.makeWidgetStateSnapshot(todaySteps: todaySteps)
+        let changed = HomeWidgetBridge.save(widgetState: widgetState, state: appState)
+        if changed {
+            WidgetCenter.shared.reloadAllTimelines()
+        }
+        #endif
+    }
     #endif
 
     func sendPettingTouch() {
         #if os(watchOS)
         sendWatchEvent("pettingTouch")
+        #endif
+    }
+
+    func sendFoodFeedRequest(foodID: String) {
+        #if os(watchOS)
+        guard !foodID.isEmpty else { return }
+        sendWatchEvent(
+            "feedFood",
+            payload: ["foodID": foodID]
+        )
         #endif
     }
 
@@ -144,15 +279,23 @@ final class MeMoWatchConnectivityBridge: NSObject, ObservableObject {
     }
 
     #if os(watchOS)
-    private func sendWatchEvent(_ event: String) {
+    private func sendWatchEvent(
+        _ event: String,
+        payload: [String: Any] = [:]
+    ) {
         #if canImport(WatchConnectivity)
         guard let session else { return }
-        guard session.activationState == .activated else { return }
 
-        let message: [String: Any] = [
-            "event": event,
-            "sentAt": Date().timeIntervalSince1970
-        ]
+        var message = payload
+        message["event"] = event
+        message["requestID"] = UUID().uuidString
+        message["sentAt"] = Date().timeIntervalSince1970
+
+        guard session.activationState == .activated else {
+            session.activate()
+            session.transferUserInfo(message)
+            return
+        }
 
         if session.isReachable {
             session.sendMessage(
@@ -205,14 +348,30 @@ final class MeMoWatchConnectivityBridge: NSObject, ObservableObject {
         }
 
         #if os(iOS)
-        switch dictionary["event"] as? String {
+        guard let event = dictionary["event"] as? String else { return }
+
+        if appState == nil {
+            enqueuePendingWatchEvent(dictionary)
+            return
+        }
+
+        if let requestID = dictionary["requestID"] as? String {
+            guard markWatchRequestAsProcessedIfNeeded(requestID) else { return }
+        }
+
+        switch event {
         case "pettingTouch":
             guard let appState else { return }
             _ = appState.registerHappinessPettingTouch(
                 count: 1,
                 now: Date()
             )
+            persistChangesHandler?()
             publishCurrentSnapshot(backgroundAssetName: nil)
+
+        case "feedFood":
+            guard let foodID = dictionary["foodID"] as? String else { return }
+            _ = resolveFoodFeedRequest(foodID: foodID)
 
         case "requestSnapshot":
             publishCurrentSnapshot(backgroundAssetName: nil)
@@ -222,6 +381,48 @@ final class MeMoWatchConnectivityBridge: NSObject, ObservableObject {
         }
         #endif
     }
+
+    #if os(iOS)
+    private func enqueuePendingWatchEvent(_ dictionary: [String: Any]) {
+        if let requestID = dictionary["requestID"] as? String,
+           pendingWatchEvents.contains(where: { $0["requestID"] as? String == requestID }) {
+            return
+        }
+
+        pendingWatchEvents.append(dictionary)
+        if pendingWatchEvents.count > 32 {
+            pendingWatchEvents.removeFirst(pendingWatchEvents.count - 32)
+        }
+    }
+
+    private func flushPendingWatchEventsIfNeeded() {
+        guard appState != nil, !pendingWatchEvents.isEmpty else { return }
+        let queuedEvents = pendingWatchEvents
+        pendingWatchEvents.removeAll()
+
+        for event in queuedEvents {
+            handleIncomingOnMainActor(dictionary: event)
+        }
+    }
+
+    private func markWatchRequestAsProcessedIfNeeded(_ requestID: String) -> Bool {
+        guard !processedWatchRequestIDs.contains(requestID) else { return false }
+
+        processedWatchRequestIDs.insert(requestID)
+        processedWatchRequestIDOrder.append(requestID)
+
+        if processedWatchRequestIDOrder.count > 128 {
+            let overflow = processedWatchRequestIDOrder.count - 128
+            let removed = Array(processedWatchRequestIDOrder.prefix(overflow))
+            processedWatchRequestIDOrder.removeFirst(overflow)
+            for id in removed {
+                processedWatchRequestIDs.remove(id)
+            }
+        }
+
+        return true
+    }
+    #endif
 
     private static func initialSnapshot() -> MeMoWatchSnapshot {
         loadStoredSnapshot(key: userDefaultsKey) ?? .placeholder
