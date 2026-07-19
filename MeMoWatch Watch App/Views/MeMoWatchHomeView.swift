@@ -42,7 +42,7 @@ struct MeMoWatchHomeView: View {
                         .position(x: layoutWidth * 0.50, y: 76 * scale)
 
                     characterLayer(scale: scale)
-                        .position(x: layoutWidth * 0.50, y: 262 * scale)
+                        .position(x: layoutWidth * 0.50, y: 270 * scale)
 
                     WatchHappinessGauge(
                         point: viewModel.happinessPoint,
@@ -50,14 +50,14 @@ struct MeMoWatchHomeView: View {
                         level: viewModel.happinessLevel,
                         scale: scale
                     )
-                    .position(x: 75 * scale, y: 356 * scale)
+                    .position(x: 70 * scale, y: 356 * scale)
 
                     WatchFullnessGauge(
                         level: viewModel.fullnessLevel,
                         maxLevel: viewModel.fullnessMaxLevel,
                         scale: scale
                     )
-                    .position(x: layoutWidth - (75 * scale), y: 356 * scale)
+                    .position(x: layoutWidth - (70 * scale), y: 356 * scale)
                 }
                 .frame(width: layoutWidth, height: layoutHeight)
                 .position(x: width * 0.5, y: layoutHeight * 0.5)
@@ -350,7 +350,7 @@ private struct WatchHappinessGauge: View {
             Image(levelAssetName)
                 .resizable()
                 .scaledToFit()
-                .frame(width: outerSize * 0.58, height: outerSize * 0.32)
+                .frame(width: outerSize * 0.78, height: outerSize * 0.44)
                 .offset(y: outerSize * 0.03)
                 .shadow(color: .black.opacity(0.16), radius: 4 * scale, x: 0, y: 2 * scale)
         }
@@ -368,6 +368,36 @@ private struct WatchFullnessGauge: View {
         CGFloat(min(1, max(0, Double(level) / Double(max(maxLevel, 1)))))
     }
 
+    private var colorLevel: Int {
+        min(maxLevel, max(0, level))
+    }
+
+    private var liquidMainColor: Color {
+        switch colorLevel {
+        case 0: return Color(red: 0.18, green: 0.42, blue: 0.20).opacity(0.18)
+        case 1: return Color(red: 0.15, green: 0.49, blue: 0.17)
+        case 2: return Color(red: 0.13, green: 0.45, blue: 0.15)
+        case 3: return Color(red: 0.11, green: 0.40, blue: 0.13)
+        case 4: return Color(red: 0.10, green: 0.36, blue: 0.12)
+        default: return Color(red: 0.09, green: 0.32, blue: 0.11)
+        }
+    }
+
+    private var liquidDeepColor: Color {
+        switch colorLevel {
+        case 0: return Color(red: 0.08, green: 0.22, blue: 0.09).opacity(0.14)
+        case 1: return Color(red: 0.07, green: 0.26, blue: 0.08)
+        case 2: return Color(red: 0.06, green: 0.23, blue: 0.07)
+        case 3: return Color(red: 0.05, green: 0.20, blue: 0.06)
+        case 4: return Color(red: 0.04, green: 0.18, blue: 0.05)
+        default: return Color(red: 0.03, green: 0.16, blue: 0.05)
+        }
+    }
+
+    private var liquidHighlightColor: Color {
+        Color(red: 0.42, green: 0.76, blue: 0.46)
+    }
+
     var body: some View {
         let outerSize = 88 * scale
         let innerSize = 75 * scale
@@ -379,9 +409,9 @@ private struct WatchFullnessGauge: View {
             if fillFraction > 0.001 {
                 WatchCircularLiquidSurface(
                     fillFraction: fillFraction,
-                    mainColor: Color(red: 0.30, green: 0.76, blue: 0.98),
-                    deepColor: Color(red: 0.08, green: 0.40, blue: 0.69),
-                    highlightColor: Color(red: 0.72, green: 0.95, blue: 1.00)
+                    mainColor: liquidMainColor,
+                    deepColor: liquidDeepColor,
+                    highlightColor: liquidHighlightColor
                 )
                 .frame(width: liquidDiameter, height: liquidDiameter)
                 .clipShape(Circle())
@@ -393,7 +423,7 @@ private struct WatchFullnessGauge: View {
                 assetWidth: assetWidth,
                 assetHeight: assetHeight,
                 innerSize: innerSize,
-                accentColor: Color(red: 0.76, green: 0.94, blue: 1.00)
+                accentColor: Color(red: 0.80, green: 0.88, blue: 0.86)
             )
         }
         .frame(width: outerSize, height: outerSize)
