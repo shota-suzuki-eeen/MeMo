@@ -29,6 +29,15 @@ struct MeMoWatchFoodItemSnapshot: Codable, Equatable, Identifiable {
     }
 }
 
+struct MeMoWatchToiletPoopSnapshot: Codable, Equatable, Identifiable {
+    var id: String
+    var centerXRatio: Double
+    var centerYRatio: Double
+    var rotationDegrees: Double
+    var isFlippedHorizontally: Bool
+    var cleanedProgress: Double
+}
+
 struct MeMoWatchSnapshot: Codable, Equatable {
     var todaySteps: Int
     var dailyStepGoal: Int
@@ -48,6 +57,10 @@ struct MeMoWatchSnapshot: Codable, Equatable {
     var desiredFoodAssetName: String? = nil
     var ownedFoods: [MeMoWatchFoodItemSnapshot]? = nil
 
+    // Toilet fields are optional so snapshots stored by earlier app versions remain decodable.
+    var hasToiletFlag: Bool? = nil
+    var toiletPoops: [MeMoWatchToiletPoopSnapshot]? = nil
+
     var updatedAt: Date
 
     static let placeholder = MeMoWatchSnapshot(
@@ -63,6 +76,8 @@ struct MeMoWatchSnapshot: Codable, Equatable {
         desiredFoodID: nil,
         desiredFoodAssetName: nil,
         ownedFoods: [],
+        hasToiletFlag: false,
+        toiletPoops: [],
         updatedAt: Date()
     )
 }
@@ -128,6 +143,16 @@ final class MeMoWatchConnectivityBridge: NSObject, ObservableObject {
     ) {
         guard let appState else { return }
 
+        // Keep the iPhone toilet timeline authoritative, including the 15-minute
+        // poop growth rule and the same maximum of 10 poops used by HomeView.
+        if appState.hasToiletFlag {
+            let didUpdateToiletPoops = appState.updateToiletPoopsByTime(now: now)
+            if didUpdateToiletPoops {
+                persistChangesHandler?()
+                refreshWidgetSnapshotIfAvailable(appState: appState, now: now)
+            }
+        }
+
         let resolvedBackgroundAssetName: String
         if let backgroundAssetName,
            !backgroundAssetName.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
@@ -164,6 +189,23 @@ final class MeMoWatchConnectivityBridge: NSObject, ObservableObject {
             )
         }
 
+        let hasToiletFlag = appState.hasToiletFlag
+        let toiletPoops = Array(
+            appState.toiletPoops()
+                .filter { !$0.isCleared }
+                .prefix(AppState.toiletPoopMaxCount)
+        )
+        .map { poop in
+            MeMoWatchToiletPoopSnapshot(
+                id: poop.id,
+                centerXRatio: poop.centerXRatio,
+                centerYRatio: poop.centerYRatio,
+                rotationDegrees: poop.rotationDegrees,
+                isFlippedHorizontally: poop.isFlippedHorizontally,
+                cleanedProgress: max(0, min(1, poop.cleanedProgress))
+            )
+        }
+
         let snapshot = MeMoWatchSnapshot(
             todaySteps: todaySteps,
             dailyStepGoal: AppState.fixedDailyStepGoal,
@@ -179,6 +221,8 @@ final class MeMoWatchConnectivityBridge: NSObject, ObservableObject {
             desiredFoodID: desiredFood?.id,
             desiredFoodAssetName: desiredFood?.assetName,
             ownedFoods: ownedFoods,
+            hasToiletFlag: hasToiletFlag,
+            toiletPoops: toiletPoops,
             updatedAt: now
         )
 
@@ -238,6 +282,54 @@ final class MeMoWatchConnectivityBridge: NSObject, ObservableObject {
         return true
     }
 
+    @discardableResult
+    private func resolveToiletPoopProgressRequest(
+        poopID: String,
+        progress: Double
+    ) -> Bool {
+        guard let appState else { return false }
+
+        let now = Date()
+
+        if appState.hasToiletFlag {
+            _ = appState.updateToiletPoopsByTime(now: now)
+        }
+
+        guard appState.hasToiletFlag else {
+            publishCurrentSnapshot(backgroundAssetName: nil, now: now)
+            return false
+        }
+
+        let clampedProgress = max(0, min(1, progress))
+        guard appState.toiletPoops().contains(where: {
+            $0.id == poopID && !$0.isCleared
+        }) else {
+            publishCurrentSnapshot(backgroundAssetName: nil, now: now)
+            return false
+        }
+
+        _ = appState.updateToiletPoopProgress(
+            id: poopID,
+            progress: clampedProgress
+        )
+
+        if clampedProgress >= 1 {
+            _ = appState.markToiletPoopCleared(id: poopID)
+        }
+
+        if !appState.hasRemainingToiletPoops {
+            let result = appState.resolveToilet(now: now)
+            if result.didResolve {
+                _ = appState.addHappinessPoints(10, now: now)
+            }
+        }
+
+        persistChangesHandler?()
+        refreshWidgetSnapshotIfAvailable(appState: appState, now: now)
+        publishCurrentSnapshot(backgroundAssetName: nil, now: now)
+        return true
+    }
+
     private func refreshWidgetSnapshotIfAvailable(appState: AppState, now: Date) {
         #if canImport(WidgetKit)
         let todaySteps = max(
@@ -268,6 +360,22 @@ final class MeMoWatchConnectivityBridge: NSObject, ObservableObject {
         sendWatchEvent(
             "feedFood",
             payload: ["foodID": foodID]
+        )
+        #endif
+    }
+
+    func sendToiletPoopProgress(
+        poopID: String,
+        progress: Double
+    ) {
+        #if os(watchOS)
+        guard !poopID.isEmpty else { return }
+        sendWatchEvent(
+            "updateToiletPoopProgress",
+            payload: [
+                "poopID": poopID,
+                "progress": max(0, min(1, progress))
+            ]
         )
         #endif
     }
@@ -372,6 +480,21 @@ final class MeMoWatchConnectivityBridge: NSObject, ObservableObject {
         case "feedFood":
             guard let foodID = dictionary["foodID"] as? String else { return }
             _ = resolveFoodFeedRequest(foodID: foodID)
+
+        case "updateToiletPoopProgress":
+            guard let poopID = dictionary["poopID"] as? String else { return }
+            let progress: Double
+            if let raw = dictionary["progress"] as? Double {
+                progress = raw
+            } else if let raw = dictionary["progress"] as? NSNumber {
+                progress = raw.doubleValue
+            } else {
+                return
+            }
+            _ = resolveToiletPoopProgressRequest(
+                poopID: poopID,
+                progress: progress
+            )
 
         case "requestSnapshot":
             publishCurrentSnapshot(backgroundAssetName: nil)

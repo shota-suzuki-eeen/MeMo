@@ -48,6 +48,18 @@ struct MeMoWatchBridgeInstaller: ViewModifier {
             .onChange(of: appState.ownedFoodCountsData) { _, _ in
                 publishCurrentSnapshot()
             }
+            .onChange(of: appState.toiletFlagAt) { _, _ in
+                publishCurrentSnapshot()
+            }
+            .onChange(of: appState.toiletPoopsData) { _, _ in
+                publishCurrentSnapshot()
+            }
+            .onChange(of: appState.toiletPoopLastSpawnAt) { _, _ in
+                publishCurrentSnapshot()
+            }
+            .onChange(of: appState.toiletNextSpawnAt) { _, _ in
+                publishCurrentSnapshot()
+            }
             .onChange(of: backgroundAssetName) { _, _ in
                 publishCurrentSnapshot()
             }

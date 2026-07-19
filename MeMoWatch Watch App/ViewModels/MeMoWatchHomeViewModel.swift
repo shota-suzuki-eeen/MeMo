@@ -60,6 +60,7 @@ final class MeMoWatchHomeViewModel: ObservableObject {
     private var cancellables = Set<AnyCancellable>()
     private var pettingFeedbackTask: Task<Void, Never>?
     private var feedingAnimationTask: Task<Void, Never>?
+    private var toiletRefreshTask: Task<Void, Never>?
     private var hasStarted = false
 
     var todaySteps: Int {
@@ -75,8 +76,9 @@ final class MeMoWatchHomeViewModel: ObservableObject {
     }
 
     var currentCharacterAssetName: String {
-        let base = snapshot.characterAssetName.trimmingCharacters(in: .whitespacesAndNewlines)
-        return base.isEmpty ? "person" : base
+        let rawBase = snapshot.characterAssetName.trimmingCharacters(in: .whitespacesAndNewlines)
+        let base = rawBase.isEmpty ? "person" : rawBase
+        return hasToiletFlag ? "\(base)_wc" : base
     }
 
     var backgroundAssetName: String {
@@ -104,8 +106,21 @@ final class MeMoWatchHomeViewModel: ObservableObject {
         max(1, snapshot.fullnessMaxLevel)
     }
 
+    var hasToiletFlag: Bool {
+        snapshot.hasToiletFlag ?? false
+    }
+
+    var activeToiletPoops: [MeMoWatchToiletPoopSnapshot] {
+        (snapshot.toiletPoops ?? []).filter { $0.cleanedProgress < 0.9999 }
+    }
+
+    var visibleToiletPoops: [MeMoWatchToiletPoopSnapshot] {
+        Array(activeToiletPoops.prefix(5))
+    }
+
     var canShowFoodBubble: Bool {
         fullnessLevel < fullnessMaxLevel
+        && !hasToiletFlag
         && !isFoodSelectorPresented
         && pendingFoodID == nil
     }
@@ -163,9 +178,12 @@ final class MeMoWatchHomeViewModel: ObservableObject {
                 self.reconcileFoodStateWithSnapshot()
             }
             .store(in: &cancellables)
+
+        startToiletRefreshLoopIfNeeded()
     }
 
     func petCharacter() {
+        guard !hasToiletFlag else { return }
         bridge.sendPettingTouch()
 
         isPettingFeedbackActive = true
@@ -178,6 +196,7 @@ final class MeMoWatchHomeViewModel: ObservableObject {
     }
 
     func openFoodSelector() {
+        guard !hasToiletFlag else { return }
         guard fullnessLevel < fullnessMaxLevel else { return }
 
         pendingFoodID = nil
@@ -318,7 +337,100 @@ final class MeMoWatchHomeViewModel: ObservableObject {
         }
     }
 
+    func toiletPoopProgress(id: String) -> Double {
+        let progress = (snapshot.toiletPoops ?? [])
+            .first(where: { $0.id == id })?
+            .cleanedProgress ?? 0
+        return max(0, min(1, progress))
+    }
+
+    func previewToiletPoopProgress(
+        id: String,
+        progress: Double
+    ) {
+        updateLocalToiletPoopProgress(
+            id: id,
+            progress: progress
+        )
+    }
+
+    func commitToiletPoopProgress(
+        id: String,
+        progress: Double
+    ) {
+        let clamped = max(0, min(1, progress))
+        updateLocalToiletPoopProgress(
+            id: id,
+            progress: clamped
+        )
+        bridge.sendToiletPoopProgress(
+            poopID: id,
+            progress: clamped
+        )
+    }
+
+    func tapToiletPoop(id: String) {
+        guard hasToiletFlag else { return }
+        guard let current = (snapshot.toiletPoops ?? []).first(where: { $0.id == id }) else {
+            return
+        }
+
+        let next = min(1, max(0, current.cleanedProgress) + 0.20)
+        withAnimation(.easeOut(duration: 0.20)) {
+            updateLocalToiletPoopProgress(
+                id: id,
+                progress: next
+            )
+        }
+
+        bridge.sendToiletPoopProgress(
+            poopID: id,
+            progress: next
+        )
+    }
+
+    func refreshToiletState() {
+        bridge.requestCurrentSnapshot()
+    }
+
+    private func updateLocalToiletPoopProgress(
+        id: String,
+        progress: Double
+    ) {
+        guard var poops = snapshot.toiletPoops,
+              let index = poops.firstIndex(where: { $0.id == id }) else {
+            return
+        }
+
+        poops[index].cleanedProgress = max(0, min(1, progress))
+        snapshot.toiletPoops = poops
+    }
+
+    private func startToiletRefreshLoopIfNeeded() {
+        guard toiletRefreshTask == nil else { return }
+
+        toiletRefreshTask = Task { [weak self] in
+            while !Task.isCancelled {
+                try? await Task.sleep(nanoseconds: 60_000_000_000)
+                guard !Task.isCancelled else { return }
+                guard let self else { return }
+
+                if self.hasToiletFlag {
+                    self.bridge.requestCurrentSnapshot()
+                }
+            }
+        }
+    }
+
     private func reconcileFoodStateWithSnapshot() {
+        if hasToiletFlag {
+            isFoodSelectorPresented = false
+            if !isFoodFeedingAnimationRunning {
+                pendingFoodID = nil
+                pendingFoodDragOffsetY = 0
+            }
+        }
+
         if fullnessLevel >= fullnessMaxLevel {
             isFoodSelectorPresented = false
             if !isFoodFeedingAnimationRunning {
@@ -356,5 +468,6 @@ final class MeMoWatchHomeViewModel: ObservableObject {
     deinit {
         pettingFeedbackTask?.cancel()
         feedingAnimationTask?.cancel()
+        toiletRefreshTask?.cancel()
     }
 }

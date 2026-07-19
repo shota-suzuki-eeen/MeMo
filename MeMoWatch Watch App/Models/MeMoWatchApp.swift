@@ -35,7 +35,29 @@ private struct MeMoWatchFoodEnabledHomeView: View {
                 let layoutWidth = referenceSize.width * scale
 
                 ZStack(alignment: .topLeading) {
-                    if foodViewModel.isFoodSelectorPresented {
+                    if foodViewModel.hasToiletFlag {
+                        WatchFloatingThoughtButton(
+                            imageName: "wc_button",
+                            size: 88 * scale,
+                            amplitude: 5 * scale,
+                            action: {
+                                foodViewModel.refreshToiletState()
+                            }
+                        )
+                        .position(
+                            x: layoutWidth - (78 * scale),
+                            y: 165 * scale
+                        )
+                        .zIndex(24)
+
+                        WatchToiletPoopsLayer(
+                            viewModel: foodViewModel,
+                            layoutWidth: layoutWidth,
+                            layoutHeight: layoutHeight,
+                            scale: scale
+                        )
+                        .zIndex(28)
+                    } else if foodViewModel.isFoodSelectorPresented {
                         // ごはん一覧の表示中は、ホーム画面の歩数メーターとキャラクターだけを
                         // 同じ背景画像で覆います。下部の幸せ度・満腹度ゲージはそのまま残します。
                         WatchFoodSelectorHomeContentCover(
@@ -97,6 +119,322 @@ private struct MeMoWatchFoodEnabledHomeView: View {
         .task {
             await foodViewModel.start()
         }
+    }
+}
+
+// MARK: - Toilet flag / poop interaction
+
+private struct WatchFloatingThoughtButton: View {
+    let imageName: String
+    let size: CGFloat
+    let amplitude: CGFloat
+    let action: () -> Void
+
+    @Environment(\.scenePhase) private var scenePhase
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
+    @State private var isFloating = false
+
+    var body: some View {
+        Button(action: action) {
+            Image(imageName)
+                .resizable()
+                .scaledToFit()
+                .frame(width: size, height: size)
+                .contentShape(Rectangle())
+                .offset(y: floatingOffset)
+        }
+        .buttonStyle(.plain)
+        .onAppear {
+            updateFloatingAnimation()
+        }
+        .onChange(of: scenePhase) { _, _ in
+            updateFloatingAnimation()
+        }
+        .onChange(of: reduceMotion) { _, _ in
+            updateFloatingAnimation()
+        }
+        .accessibilityLabel("トイレ")
+    }
+
+    private var floatingOffset: CGFloat {
+        guard scenePhase == .active, !reduceMotion else { return 0 }
+        return isFloating ? -amplitude : amplitude
+    }
+
+    private func updateFloatingAnimation() {
+        guard scenePhase == .active, !reduceMotion, amplitude > 0 else {
+            isFloating = false
+            return
+        }
+
+        isFloating = false
+        DispatchQueue.main.async {
+            withAnimation(
+                .easeInOut(duration: 0.85)
+                    .repeatForever(autoreverses: true)
+            ) {
+                isFloating = true
+            }
+        }
+    }
+}
+
+private struct WatchToiletPoopsLayer: View {
+    @ObservedObject var viewModel: MeMoWatchHomeViewModel
+
+    let layoutWidth: CGFloat
+    let layoutHeight: CGFloat
+    let scale: CGFloat
+
+    @State private var lastGesturePoint: CGPoint?
+    @State private var dirtyPoopIDs: Set<String> = []
+
+    private var visiblePoops: [MeMoWatchToiletPoopSnapshot] {
+        viewModel.visibleToiletPoops
+    }
+
+    private var poopSize: CGFloat {
+        96 * scale
+    }
+
+    private var hitSize: CGFloat {
+        116 * scale
+    }
+
+    private var scratchDistanceToClear: CGFloat {
+        max(1, 420 * scale)
+    }
+
+    private var gestureMoveThreshold: CGFloat {
+        max(2, 8 * scale)
+    }
+
+    private var tapDistanceThreshold: CGFloat {
+        max(3, 10 * scale)
+    }
+
+    private var contentTopInset: CGFloat {
+        88 * scale
+    }
+
+    var body: some View {
+        ZStack {
+            ForEach(visiblePoops) { poop in
+                WatchToiletPoopView(
+                    item: poop,
+                    size: poopSize,
+                    hitSize: hitSize
+                )
+                .position(position(for: poop))
+                .allowsHitTesting(false)
+                .transition(.opacity.combined(with: .scale(scale: 0.82)))
+            }
+
+            Color.black.opacity(0.001)
+                .contentShape(Rectangle())
+                .gesture(
+                    DragGesture(minimumDistance: 0)
+                        .onChanged(handleGestureChanged)
+                        .onEnded(handleGestureEnded)
+                )
+        }
+        .frame(width: layoutWidth, height: layoutHeight)
+        .clipped()
+    }
+
+    private func position(
+        for poop: MeMoWatchToiletPoopSnapshot
+    ) -> CGPoint {
+        let contentHeight = max(1, layoutHeight - contentTopInset)
+        let x = min(
+            layoutWidth - (hitSize * 0.5),
+            max(
+                hitSize * 0.5,
+                CGFloat(poop.centerXRatio) * layoutWidth
+            )
+        )
+        let y = min(
+            layoutHeight - (hitSize * 0.5),
+            max(
+                contentTopInset + (hitSize * 0.5),
+                contentTopInset
+                    + (CGFloat(poop.centerYRatio) * contentHeight)
+            )
+        )
+        return CGPoint(x: x, y: y)
+    }
+
+    private func hitRect(
+        for poop: MeMoWatchToiletPoopSnapshot
+    ) -> CGRect {
+        let center = position(for: poop)
+        return CGRect(
+            x: center.x - (hitSize * 0.5),
+            y: center.y - (hitSize * 0.5),
+            width: hitSize,
+            height: hitSize
+        )
+    }
+
+    private func scratchRect(
+        for poop: MeMoWatchToiletPoopSnapshot
+    ) -> CGRect {
+        hitRect(for: poop).insetBy(
+            dx: 5 * scale,
+            dy: 5 * scale
+        )
+    }
+
+    private func handleGestureChanged(
+        _ value: DragGesture.Value
+    ) {
+        let point = value.location
+        let previousPoint = lastGesturePoint
+        let movedDistanceFromStart = hypot(
+            point.x - value.startLocation.x,
+            point.y - value.startLocation.y
+        )
+
+        defer {
+            lastGesturePoint = point
+        }
+
+        guard movedDistanceFromStart >= gestureMoveThreshold else {
+            return
+        }
+
+        for poop in visiblePoops {
+            let rect = scratchRect(for: poop)
+            let isInside = rect.contains(point)
+            let wasInside = previousPoint.map {
+                rect.contains($0)
+            } ?? false
+
+            guard isInside || wasInside else {
+                continue
+            }
+
+            guard let previousPoint else {
+                continue
+            }
+
+            let segmentDistance = distanceInsideRect(
+                from: previousPoint,
+                to: point,
+                rect: rect
+            )
+            guard segmentDistance > 0 else {
+                continue
+            }
+
+            let current = viewModel.toiletPoopProgress(id: poop.id)
+            let next = min(
+                1,
+                current + Double(segmentDistance / scratchDistanceToClear)
+            )
+
+            viewModel.previewToiletPoopProgress(
+                id: poop.id,
+                progress: next
+            )
+            dirtyPoopIDs.insert(poop.id)
+        }
+    }
+
+    private func handleGestureEnded(
+        _ value: DragGesture.Value
+    ) {
+        defer {
+            lastGesturePoint = nil
+            dirtyPoopIDs.removeAll()
+        }
+
+        let totalDistance = hypot(
+            value.location.x - value.startLocation.x,
+            value.location.y - value.startLocation.y
+        )
+
+        if totalDistance < tapDistanceThreshold {
+            guard let poop = visiblePoops.reversed().first(where: {
+                hitRect(for: $0).contains(value.location)
+            }) else {
+                return
+            }
+
+            viewModel.tapToiletPoop(id: poop.id)
+            return
+        }
+
+        for poopID in dirtyPoopIDs {
+            viewModel.commitToiletPoopProgress(
+                id: poopID,
+                progress: viewModel.toiletPoopProgress(id: poopID)
+            )
+        }
+    }
+
+    private func distanceInsideRect(
+        from start: CGPoint,
+        to end: CGPoint,
+        rect: CGRect
+    ) -> CGFloat {
+        let totalDistance = hypot(
+            end.x - start.x,
+            end.y - start.y
+        )
+        guard totalDistance > 0 else { return 0 }
+
+        let sampleCount = 12
+        var insideDistance: CGFloat = 0
+        var previous = start
+        var previousInside = rect.contains(previous)
+
+        for index in 1...sampleCount {
+            let t = CGFloat(index) / CGFloat(sampleCount)
+            let current = CGPoint(
+                x: start.x + ((end.x - start.x) * t),
+                y: start.y + ((end.y - start.y) * t)
+            )
+            let currentInside = rect.contains(current)
+
+            if previousInside || currentInside {
+                insideDistance += hypot(
+                    current.x - previous.x,
+                    current.y - previous.y
+                )
+            }
+
+            previous = current
+            previousInside = currentInside
+        }
+
+        return insideDistance
+    }
+}
+
+private struct WatchToiletPoopView: View {
+    let item: MeMoWatchToiletPoopSnapshot
+    let size: CGFloat
+    let hitSize: CGFloat
+
+    private var opacity: Double {
+        max(0, min(1, 1 - item.cleanedProgress))
+    }
+
+    var body: some View {
+        Image("poop")
+            .resizable()
+            .scaledToFit()
+            .frame(width: size, height: size)
+            .scaleEffect(
+                x: item.isFlippedHorizontally ? -1 : 1,
+                y: 1
+            )
+            .rotationEffect(.degrees(item.rotationDegrees))
+            .opacity(opacity)
+            .animation(.easeOut(duration: 0.20), value: opacity)
+            .frame(width: hitSize, height: hitSize)
+            .contentShape(Rectangle())
     }
 }
 
