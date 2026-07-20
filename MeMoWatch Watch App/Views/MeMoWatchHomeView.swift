@@ -42,7 +42,7 @@ struct MeMoWatchHomeView: View {
                         .position(x: layoutWidth * 0.50, y: 76 * scale)
 
                     characterLayer(scale: scale)
-                        .position(x: layoutWidth * 0.50, y: 275 * scale)
+                        .position(x: layoutWidth * 0.50, y: 280 * scale)
 
                     WatchHappinessGauge(
                         point: viewModel.happinessPoint,

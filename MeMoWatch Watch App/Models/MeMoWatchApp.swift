@@ -19,7 +19,35 @@ struct MeMoWatchApp: App {
 private struct MeMoWatchFoodEnabledHomeView: View {
     @StateObject private var foodViewModel = MeMoWatchHomeViewModel()
 
+    @State private var floatingHearts: [WatchCelebrationHeart] = []
+    @State private var floatingHeartCleanupTasks: [UUID: Task<Void, Never>] = [:]
+    @State private var isAwaitingFoodHappinessCelebration = false
+    @State private var isAwaitingToiletHappinessCelebration = false
+    @State private var foodCelebrationTimeoutTask: Task<Void, Never>?
+    @State private var toiletCelebrationTimeoutTask: Task<Void, Never>?
+
     private let referenceSize = CGSize(width: 368, height: 448)
+
+    private struct CelebrationObservation: Equatable {
+        let happinessScore: Int
+        let hasToiletFlag: Bool
+        let visibleToiletPoopCount: Int
+        let isFoodFeedingAnimationRunning: Bool
+    }
+
+    private var celebrationObservation: CelebrationObservation {
+        let maxPoint = max(1, foodViewModel.happinessMaxPoint)
+        let happinessScore =
+            (max(0, foodViewModel.happinessLevel) * maxPoint)
+            + max(0, foodViewModel.happinessPoint)
+
+        return CelebrationObservation(
+            happinessScore: happinessScore,
+            hasToiletFlag: foodViewModel.hasToiletFlag,
+            visibleToiletPoopCount: foodViewModel.visibleToiletPoops.count,
+            isFoodFeedingAnimationRunning: foodViewModel.isFoodFeedingAnimationRunning
+        )
+    }
 
     var body: some View {
         ZStack {
@@ -109,6 +137,19 @@ private struct MeMoWatchFoodEnabledHomeView: View {
                         .position(x: 78 * scale, y: 165 * scale)
                         .zIndex(20)
                     }
+
+                    ForEach(floatingHearts) { heart in
+                        WatchCelebrationHeartView(
+                            heart: heart,
+                            scale: scale
+                        )
+                        .position(
+                            x: (layoutWidth * 0.5) + (heart.xOffset * scale),
+                            y: (240 * scale) + (heart.yOffset * scale)
+                        )
+                        .allowsHitTesting(false)
+                        .zIndex(40)
+                    }
                 }
                 .frame(width: layoutWidth, height: layoutHeight)
                 .position(x: width * 0.5, y: layoutHeight * 0.5)
@@ -119,6 +160,173 @@ private struct MeMoWatchFoodEnabledHomeView: View {
         .task {
             await foodViewModel.start()
         }
+        .onChange(of: celebrationObservation) { oldValue, newValue in
+            handleCelebrationObservationChange(
+                oldValue: oldValue,
+                newValue: newValue
+            )
+        }
+        .onDisappear {
+            foodCelebrationTimeoutTask?.cancel()
+            foodCelebrationTimeoutTask = nil
+
+            toiletCelebrationTimeoutTask?.cancel()
+            toiletCelebrationTimeoutTask = nil
+
+            floatingHeartCleanupTasks.values.forEach { $0.cancel() }
+            floatingHeartCleanupTasks.removeAll()
+            floatingHearts.removeAll()
+        }
+    }
+
+    private func handleCelebrationObservationChange(
+        oldValue: CelebrationObservation,
+        newValue: CelebrationObservation
+    ) {
+        if !oldValue.isFoodFeedingAnimationRunning,
+           newValue.isFoodFeedingAnimationRunning,
+           let pendingFood = foodViewModel.pendingFood {
+            let shouldAwardHappiness =
+                pendingFood.isRare
+                || pendingFood.id == foodViewModel.snapshot.desiredFoodID
+
+            if shouldAwardHappiness {
+                armFoodHappinessCelebration()
+            } else {
+                clearFoodHappinessCelebration()
+            }
+        }
+
+        if oldValue.visibleToiletPoopCount > 0,
+           newValue.visibleToiletPoopCount == 0,
+           oldValue.hasToiletFlag || newValue.hasToiletFlag {
+            armToiletHappinessCelebration()
+        }
+
+        let didResolveToilet =
+            oldValue.hasToiletFlag
+            && !newValue.hasToiletFlag
+
+        if didResolveToilet {
+            armToiletHappinessCelebration()
+        }
+
+        let didGainHappiness =
+            newValue.happinessScore
+            > oldValue.happinessScore
+
+        guard didGainHappiness else { return }
+
+        if isAwaitingFoodHappinessCelebration {
+            spawnFloatingHearts(count: 5)
+            clearFoodHappinessCelebration()
+        }
+
+        if isAwaitingToiletHappinessCelebration || didResolveToilet {
+            spawnFloatingHearts(count: 5)
+            clearToiletHappinessCelebration()
+        }
+    }
+
+    private func armFoodHappinessCelebration() {
+        isAwaitingFoodHappinessCelebration = true
+
+        foodCelebrationTimeoutTask?.cancel()
+        foodCelebrationTimeoutTask = Task { @MainActor in
+            try? await Task.sleep(nanoseconds: 5_000_000_000)
+            guard !Task.isCancelled else { return }
+
+            isAwaitingFoodHappinessCelebration = false
+            foodCelebrationTimeoutTask = nil
+        }
+    }
+
+    private func clearFoodHappinessCelebration() {
+        isAwaitingFoodHappinessCelebration = false
+        foodCelebrationTimeoutTask?.cancel()
+        foodCelebrationTimeoutTask = nil
+    }
+
+    private func armToiletHappinessCelebration() {
+        isAwaitingToiletHappinessCelebration = true
+
+        toiletCelebrationTimeoutTask?.cancel()
+        toiletCelebrationTimeoutTask = Task { @MainActor in
+            try? await Task.sleep(nanoseconds: 5_000_000_000)
+            guard !Task.isCancelled else { return }
+
+            isAwaitingToiletHappinessCelebration = false
+            toiletCelebrationTimeoutTask = nil
+        }
+    }
+
+    private func clearToiletHappinessCelebration() {
+        isAwaitingToiletHappinessCelebration = false
+        toiletCelebrationTimeoutTask?.cancel()
+        toiletCelebrationTimeoutTask = nil
+    }
+
+    private func spawnFloatingHearts(count: Int) {
+        guard count > 0 else { return }
+
+        for index in 0..<count {
+            let heart = WatchCelebrationHeart(
+                xOffset: CGFloat.random(in: -80...80),
+                yOffset: CGFloat.random(in: -34...26),
+                size: CGFloat.random(in: 34...62)
+            )
+
+            floatingHearts.append(heart)
+
+            let heartID = heart.id
+            floatingHeartCleanupTasks[heartID]?.cancel()
+            floatingHeartCleanupTasks[heartID] = Task { @MainActor in
+                let delay = 1.05 + (Double(index) * 0.04)
+                try? await Task.sleep(
+                    nanoseconds: UInt64(delay * 1_000_000_000)
+                )
+                guard !Task.isCancelled else { return }
+
+                floatingHearts.removeAll { $0.id == heartID }
+                floatingHeartCleanupTasks.removeValue(forKey: heartID)
+            }
+        }
+    }
+}
+
+private struct WatchCelebrationHeart: Identifiable, Equatable {
+    let id = UUID()
+    let xOffset: CGFloat
+    let yOffset: CGFloat
+    let size: CGFloat
+}
+
+private struct WatchCelebrationHeartView: View {
+    let heart: WatchCelebrationHeart
+    let scale: CGFloat
+
+    @State private var isAnimating = false
+
+    var body: some View {
+        Image("heart")
+            .resizable()
+            .scaledToFit()
+            .frame(
+                width: heart.size * scale,
+                height: heart.size * scale
+            )
+            .offset(
+                y: isAnimating
+                    ? -(72 * scale)
+                    : -(12 * scale)
+            )
+            .opacity(isAnimating ? 0 : 1)
+            .scaleEffect(isAnimating ? 1.18 : 0.74)
+            .onAppear {
+                withAnimation(.easeOut(duration: 0.90)) {
+                    isAnimating = true
+                }
+            }
     }
 }
 
