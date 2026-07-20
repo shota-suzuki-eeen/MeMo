@@ -17,6 +17,10 @@ import WatchConnectivity
 import WidgetKit
 #endif
 
+#if os(iOS) && canImport(UIKit)
+import UIKit
+#endif
+
 struct MeMoWatchFoodItemSnapshot: Codable, Equatable, Identifiable {
     var id: String
     var name: String
@@ -105,6 +109,7 @@ final class MeMoWatchConnectivityBridge: NSObject, ObservableObject {
     private var pendingWatchEvents: [[String: Any]] = []
     private var processedWatchRequestIDs: Set<String> = []
     private var processedWatchRequestIDOrder: [String] = []
+    private var isRefreshingStepsForWatch = false
     #endif
 
     private override init() {
@@ -135,6 +140,69 @@ final class MeMoWatchConnectivityBridge: NSObject, ObservableObject {
         activate()
         publishCurrentSnapshot(backgroundAssetName: nil)
         flushPendingWatchEventsIfNeeded()
+    }
+
+    /// Watch から最新状態を要求された時に、iPhone 側 HealthKit を再取得してから
+    /// iPhone を正本としたスナップショットを返す。
+    ///
+    /// iPhone が前面表示中は HomeView の既存同期処理を優先し、ここでは歩数通貨を
+    /// 変更しない。iPhone がバックグラウンド中のみキャッシュ差分を正式に加算することで、
+    /// HomeView の同期処理との二重加算を防ぐ。
+    func refreshLatestStepsAndPublish(
+        backgroundAssetName: String? = nil,
+        now: Date = Date()
+    ) async {
+        guard !isRefreshingStepsForWatch else {
+            publishCurrentSnapshot(backgroundAssetName: backgroundAssetName, now: now)
+            return
+        }
+
+        isRefreshingStepsForWatch = true
+        defer { isRefreshingStepsForWatch = false }
+
+        if let healthKitManager {
+            await healthKitManager.refreshTodayStepsForWidget(now: now)
+        }
+
+        synchronizeBackgroundStepGainIfNeeded(now: now)
+        publishCurrentSnapshot(backgroundAssetName: backgroundAssetName, now: now)
+    }
+
+    private func synchronizeBackgroundStepGainIfNeeded(now: Date) {
+        guard let appState, let healthKitManager else { return }
+
+        #if canImport(UIKit)
+        // Foregroundでは HomeView.runSync が既存仕様どおり加算を担当する。
+        // Watch要求とHomeView同期が同時に走った場合の二重加算を防ぐため、
+        // ここで正式加算するのはiPhoneがバックグラウンドの時だけに限定する。
+        guard UIApplication.shared.applicationState == .background else { return }
+        #endif
+
+        let todayKey = AppState.makeDayKey(now)
+
+        if appState.lastDayKey != todayKey {
+            appState.cachedTodaySteps = 0
+            appState.cachedTodayMeterSteps = 0
+            appState.ensureDailyResetIfNeeded(now: now)
+            appState.lastSyncedAt = Calendar.current.startOfDay(for: now)
+        }
+
+        let previousCachedSteps = max(0, appState.cachedTodaySteps)
+        let fetchedSteps = max(0, healthKitManager.todaySteps)
+        let cacheResult = appState.updateTodayStepCacheProtectingZero(
+            fetchedSteps: fetchedSteps,
+            todayKey: todayKey
+        )
+
+        let deltaSteps = max(0, cacheResult.stepsToUse - previousCachedSteps)
+        appState.lastSyncedAt = now
+
+        if deltaSteps > 0 {
+            _ = appState.addWalletSteps(deltaSteps)
+        }
+
+        persistChangesHandler?()
+        refreshWidgetSnapshotIfAvailable(appState: appState, now: now)
     }
 
     func publishCurrentSnapshot(
@@ -401,7 +469,12 @@ final class MeMoWatchConnectivityBridge: NSObject, ObservableObject {
 
         guard session.activationState == .activated else {
             session.activate()
-            session.transferUserInfo(message)
+
+            if event == "requestSnapshot" {
+                try? session.updateApplicationContext(message)
+            } else {
+                session.transferUserInfo(message)
+            }
             return
         }
 
@@ -410,9 +483,16 @@ final class MeMoWatchConnectivityBridge: NSObject, ObservableObject {
                 message,
                 replyHandler: nil,
                 errorHandler: { _ in
-                    session.transferUserInfo(message)
+                    if event == "requestSnapshot" {
+                        try? session.updateApplicationContext(message)
+                    } else {
+                        session.transferUserInfo(message)
+                    }
                 }
             )
+        } else if event == "requestSnapshot" {
+            // 定期的な最新歩数要求はキューを積み上げず、最新1件だけを保持する。
+            try? session.updateApplicationContext(message)
         } else {
             session.transferUserInfo(message)
         }
@@ -497,7 +577,10 @@ final class MeMoWatchConnectivityBridge: NSObject, ObservableObject {
             )
 
         case "requestSnapshot":
-            publishCurrentSnapshot(backgroundAssetName: nil)
+            Task { @MainActor [weak self] in
+                guard let self else { return }
+                await self.refreshLatestStepsAndPublish(backgroundAssetName: nil)
+            }
 
         default:
             break

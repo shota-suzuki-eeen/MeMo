@@ -18,10 +18,15 @@
 import Foundation
 import SwiftUI
 
+#if canImport(WatchKit)
+import WatchKit
+#endif
+
 struct MeMoWatchHomeView: View {
     @StateObject private var viewModel = MeMoWatchHomeViewModel()
 
     private let referenceSize = CGSize(width: 368, height: 448)
+    private let activeStepRefreshIntervalNanoseconds: UInt64 = 15_000_000_000
 
     var body: some View {
         GeometryReader { geometry in
@@ -70,6 +75,18 @@ struct MeMoWatchHomeView: View {
         .watchSystemOverlayHiddenIfAvailable()
         .task {
             await viewModel.start()
+
+            // HealthKit / WatchConnectivity の自動更新を基本としつつ、
+            // Watch表示中は定期的にiPhoneへ最新歩数を再確認する。
+            // requestSnapshot は未接続時に applicationContext を使うため、
+            // オフライン中も要求キューが無制限に積み上がらない。
+            while !Task.isCancelled {
+                try? await Task.sleep(nanoseconds: activeStepRefreshIntervalNanoseconds)
+                guard !Task.isCancelled else { return }
+                await MainActor.run {
+                    MeMoWatchConnectivityBridge.shared.requestCurrentSnapshot()
+                }
+            }
         }
     }
 
@@ -133,16 +150,27 @@ private struct WatchHomeStepMeter: View {
     let goalSteps: Int
     let miniCharacterAssetName: String
 
-    private var safeSteps: Int { max(0, steps) }
+    @State private var displayedSteps: Int = 0
+    @State private var hasInitializedDisplayedSteps = false
+    @State private var stepGainAmount: Int?
+    @State private var stepGainPopupID = UUID()
+    @State private var isStepGainPopupAbsorbing = false
+    @State private var stepGainAnimationTask: Task<Void, Never>?
+
+    private let absorbDelayNanoseconds: UInt64 = 1_350_000_000
+    private let absorbDurationNanoseconds: UInt64 = 560_000_000
+
+    private var safeTargetSteps: Int { max(0, steps) }
+    private var safeDisplayedSteps: Int { max(0, displayedSteps) }
     private var safeGoalSteps: Int { max(1, goalSteps) }
 
     private var blueProgress: CGFloat {
-        CGFloat(min(1, Double(safeSteps) / Double(safeGoalSteps)))
+        CGFloat(min(1, Double(safeDisplayedSteps) / Double(safeGoalSteps)))
     }
 
     private var goldProgress: CGFloat {
-        guard safeSteps > safeGoalSteps else { return 0 }
-        return CGFloat(min(1, Double(safeSteps - safeGoalSteps) / Double(safeGoalSteps)))
+        guard safeDisplayedSteps > safeGoalSteps else { return 0 }
+        return CGFloat(min(1, Double(safeDisplayedSteps - safeGoalSteps) / Double(safeGoalSteps)))
     }
 
     private var activeProgress: CGFloat {
@@ -150,7 +178,7 @@ private struct WatchHomeStepMeter: View {
     }
 
     private var currentStepText: String {
-        Self.numberFormatter.string(from: NSNumber(value: safeSteps)) ?? "0"
+        Self.numberFormatter.string(from: NSNumber(value: safeDisplayedSteps)) ?? "0"
     }
 
     private var goalStepText: String {
@@ -219,10 +247,253 @@ private struct WatchHomeStepMeter: View {
                     .position(x: clampedIconX, y: iconCenterY)
                     .animation(.easeOut(duration: 0.28), value: activeProgress)
                     .allowsHitTesting(false)
+
+                if let stepGainAmount {
+                    WatchStepGainPopupView(
+                        amount: stepGainAmount,
+                        scale: scale
+                    )
+                    .id(stepGainPopupID)
+                    .position(
+                        x: width / 2,
+                        y: isStepGainPopupAbsorbing
+                            ? trackCenterY
+                            : max(4 * scale, trackTopY - (14 * scale))
+                    )
+                    .scaleEffect(isStepGainPopupAbsorbing ? 0.18 : 1.0)
+                    .opacity(isStepGainPopupAbsorbing ? 0 : 1)
+                    .animation(
+                        .easeInOut(duration: 0.56),
+                        value: isStepGainPopupAbsorbing
+                    )
+                    .allowsHitTesting(false)
+                    .zIndex(20)
+                }
             }
         }
+        .onAppear {
+            guard !hasInitializedDisplayedSteps else { return }
+            displayedSteps = safeTargetSteps
+            hasInitializedDisplayedSteps = true
+        }
+        .onChange(of: steps) { _, newValue in
+            handleTargetStepsChange(max(0, newValue))
+        }
+        .onDisappear {
+            cancelStepGainAnimation()
+        }
         .accessibilityElement(children: .ignore)
-        .accessibilityLabel("今日の歩数メーター \(safeSteps)歩")
+        .accessibilityLabel("今日の歩数メーター \(safeDisplayedSteps)歩")
+    }
+
+    private func handleTargetStepsChange(_ newTarget: Int) {
+        guard hasInitializedDisplayedSteps else {
+            displayedSteps = newTarget
+            hasInitializedDisplayedSteps = true
+            return
+        }
+
+        if newTarget < displayedSteps {
+            // 日付変更などで歩数が下がった場合は増加演出を出さず即時リセットする。
+            cancelStepGainAnimation()
+            displayedSteps = newTarget
+            return
+        }
+
+        let remainingIncrease = newTarget - displayedSteps
+        guard remainingIncrease > 0 else { return }
+
+        playStepGainAnimation(
+            amount: remainingIncrease,
+            targetSteps: newTarget
+        )
+    }
+
+    private func playStepGainAnimation(
+        amount: Int,
+        targetSteps: Int
+    ) {
+        let safeAmount = max(0, amount)
+        guard safeAmount > 0 else { return }
+
+        stepGainAnimationTask?.cancel()
+
+        let startSteps = displayedSteps
+        stepGainAmount = safeAmount
+        stepGainPopupID = UUID()
+        isStepGainPopupAbsorbing = false
+
+        playWatchStepHaptic(.start)
+
+        stepGainAnimationTask = Task { @MainActor in
+            try? await Task.sleep(nanoseconds: absorbDelayNanoseconds)
+            guard !Task.isCancelled else { return }
+
+            withAnimation(.easeInOut(duration: 0.56)) {
+                isStepGainPopupAbsorbing = true
+            }
+
+            try? await Task.sleep(nanoseconds: absorbDurationNanoseconds)
+            guard !Task.isCancelled else { return }
+
+            stepGainAmount = nil
+            isStepGainPopupAbsorbing = false
+
+            let totalMagnitude = max(0, targetSteps - startSteps)
+            let duration = min(1.6, max(0.45, Double(totalMagnitude) * 0.008))
+            let fps: Double = 30
+            let frames = max(1, Int(duration * fps))
+
+            for frame in 0...frames {
+                guard !Task.isCancelled else { return }
+
+                let t = Double(frame) / Double(frames)
+                let eased = 1 - pow(1 - t, 3)
+                displayedSteps = startSteps
+                    + Int(Double(targetSteps - startSteps) * eased)
+
+                try? await Task.sleep(
+                    nanoseconds: UInt64(1_000_000_000 / fps)
+                )
+            }
+
+            guard !Task.isCancelled else { return }
+            displayedSteps = targetSteps
+            playWatchStepHaptic(.success)
+            stepGainAnimationTask = nil
+        }
+    }
+
+    private func cancelStepGainAnimation() {
+        stepGainAnimationTask?.cancel()
+        stepGainAnimationTask = nil
+        stepGainAmount = nil
+        isStepGainPopupAbsorbing = false
+    }
+
+    private enum WatchStepHapticKind {
+        case start
+        case success
+    }
+
+    private func playWatchStepHaptic(_ kind: WatchStepHapticKind) {
+        #if canImport(WatchKit)
+        switch kind {
+        case .start:
+            WKInterfaceDevice.current().play(.click)
+        case .success:
+            WKInterfaceDevice.current().play(.success)
+        }
+        #endif
+    }
+}
+
+private struct WatchStepGainPopupView: View {
+    let amount: Int
+    let scale: CGFloat
+
+    @State private var popScale: CGFloat = 0.72
+    @State private var sparkleScale: CGFloat = 0.2
+    @State private var sparkleOpacity: Double = 0
+    @State private var floatingOffset: CGFloat = 5
+
+    var body: some View {
+        ZStack {
+            sparkleLayer
+
+            Text("+\(max(0, amount))歩")
+                .font(.system(size: 18 * scale, weight: .black, design: .rounded))
+                .foregroundStyle(.white)
+                .monospacedDigit()
+                .lineLimit(1)
+                .minimumScaleFactor(0.72)
+                .padding(.horizontal, 12 * scale)
+                .padding(.vertical, 7 * scale)
+                .background(
+                    Capsule(style: .continuous)
+                        .fill(
+                            LinearGradient(
+                                colors: [
+                                    Color(red: 0.30, green: 0.78, blue: 1.0),
+                                    Color(red: 0.12, green: 0.42, blue: 0.96)
+                                ],
+                                startPoint: .topLeading,
+                                endPoint: .bottomTrailing
+                            )
+                        )
+                        .overlay(
+                            Capsule(style: .continuous)
+                                .stroke(.white.opacity(0.82), lineWidth: 1.5 * scale)
+                        )
+                        .shadow(
+                            color: .black.opacity(0.22),
+                            radius: 7 * scale,
+                            x: 0,
+                            y: 4 * scale
+                        )
+                )
+                .shadow(
+                    color: .black.opacity(0.20),
+                    radius: 1.5 * scale,
+                    x: 0,
+                    y: 1 * scale
+                )
+                .scaleEffect(popScale)
+                .offset(y: floatingOffset * scale)
+        }
+        .onAppear {
+            playPopAnimation()
+        }
+    }
+
+    private var sparkleLayer: some View {
+        ZStack {
+            Circle()
+                .fill(Color.white.opacity(0.86))
+                .frame(width: 6 * scale, height: 6 * scale)
+                .offset(x: -48 * scale, y: -12 * scale)
+
+            Circle()
+                .fill(Color.cyan.opacity(0.78))
+                .frame(width: 5 * scale, height: 5 * scale)
+                .offset(x: 48 * scale, y: -15 * scale)
+
+            Circle()
+                .fill(Color.white.opacity(0.62))
+                .frame(width: 4 * scale, height: 4 * scale)
+                .offset(x: -36 * scale, y: 18 * scale)
+
+            Circle()
+                .fill(Color.blue.opacity(0.74))
+                .frame(width: 5 * scale, height: 5 * scale)
+                .offset(x: 37 * scale, y: 19 * scale)
+        }
+        .scaleEffect(sparkleScale)
+        .opacity(sparkleOpacity)
+    }
+
+    private func playPopAnimation() {
+        popScale = 0.72
+        sparkleScale = 0.2
+        sparkleOpacity = 0
+        floatingOffset = 5
+
+        withAnimation(.spring(response: 0.22, dampingFraction: 0.48)) {
+            popScale = 1.14
+            sparkleScale = 1.12
+            sparkleOpacity = 1
+            floatingOffset = -2
+        }
+
+        withAnimation(.spring(response: 0.22, dampingFraction: 0.78).delay(0.16)) {
+            popScale = 1.0
+            floatingOffset = 0
+        }
+
+        withAnimation(.easeOut(duration: 0.72).delay(0.68)) {
+            sparkleOpacity = 0
+            sparkleScale = 1.38
+        }
     }
 }
 
