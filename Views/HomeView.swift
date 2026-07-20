@@ -147,6 +147,11 @@ struct HomeView: View {
     }
 
     private var isToiletLocked: Bool { state.hasToiletFlag }
+
+    private var shouldWiggleForToilet: Bool {
+        isToiletLocked && !visibleToiletPoops.isEmpty
+    }
+
     private var fixedDailyGoalSteps: Int { AppState.fixedDailyStepGoal }
 
     private var widgetLinkedTodaySteps: Int {
@@ -995,13 +1000,15 @@ struct HomeView: View {
             displayHeight: displayHeight
         )
         .offset(
-            x: isToiletLocked ? (isToiletWiggleOn ? Layout.toiletWiggleOffset : -Layout.toiletWiggleOffset) : 0,
+            x: shouldWiggleForToilet
+                ? (isToiletWiggleOn ? Layout.toiletWiggleOffset : -Layout.toiletWiggleOffset)
+                : 0,
             y: Layout.characterTopOffset
         )
         .animation(
-            isToiletLocked
-            ? .easeInOut(duration: Layout.toiletWiggleDuration).repeatForever(autoreverses: true)
-            : .default,
+            shouldWiggleForToilet
+                ? .easeInOut(duration: Layout.toiletWiggleDuration).repeatForever(autoreverses: true)
+                : .default,
             value: isToiletWiggleOn
         )
         .zIndex(Layout.zCharacter - 1)
@@ -2171,6 +2178,11 @@ struct HomeView: View {
         save()
 
         if !state.hasRemainingToiletPoops {
+            // 最後のpoopを消した瞬間に、repeatForeverの左右揺れを確実に停止する。
+            toiletWiggleActivationTask?.cancel()
+            toiletWiggleActivationTask = nil
+            isToiletWiggleOn = false
+
             toiletPoopActivePoint.removeAll()
             toiletPoopGestureStartPoint = nil
             toiletPoopGestureLastPoint = nil
@@ -2671,13 +2683,20 @@ struct HomeView: View {
     private func updateToiletWiggle() {
         toiletWiggleActivationTask?.cancel()
 
-        if isToiletLocked {
+        if shouldWiggleForToilet {
             isToiletWiggleOn = false
             toiletWiggleActivationTask = scheduleMainActorTask(after: 0) {
+                guard shouldWiggleForToilet else {
+                    isToiletWiggleOn = false
+                    toiletWiggleActivationTask = nil
+                    return
+                }
+
                 isToiletWiggleOn = true
                 toiletWiggleActivationTask = nil
             }
         } else {
+            toiletWiggleActivationTask = nil
             isToiletWiggleOn = false
         }
     }

@@ -437,7 +437,6 @@ private struct WatchToiletPoopView: View {
             .contentShape(Rectangle())
     }
 }
-
 // MARK: - Selector-only home content cover
 
 private struct WatchFoodSelectorHomeContentCover: View {
@@ -667,12 +666,10 @@ private struct WatchFoodSelectorOverlay: View {
                 }
             )
             .position(
-                x: layoutWidth - (58 * scale),
-                // Apple Watchの時刻表示と重ならないよう、
-                // ホームの歩数メーターと同じ高さまで下げる。
-                y: 84 * scale
+                x: layoutWidth - (86 * scale),
+                y: 96 * scale
             )
-            .zIndex(50)
+            .zIndex(100)
         }
         .frame(width: layoutWidth, height: layoutHeight)
         .contentShape(Rectangle())
@@ -738,12 +735,18 @@ private struct WatchFoodSelectorCard: View {
     private var cardSide: CGFloat {
         switch abs(relativeIndex) {
         case 0:
-            return 128 * scale
+            // 中央の選択中カードは、皿とごはんを元サイズの1.5倍で表示する。
+            return 128 * 1.5 * scale
         case 1:
             return 82 * scale
         default:
             return 58 * scale
         }
+    }
+
+    private var foodImageSide: CGFloat {
+        // ごはんも皿と同じ倍率で拡大されるよう、常にカードサイズ基準にする。
+        cardSide * 0.66
     }
 
     private var opacity: Double {
@@ -773,7 +776,7 @@ private struct WatchFoodSelectorCard: View {
                 Image(item.assetName)
                     .resizable()
                     .scaledToFit()
-                    .frame(width: cardSide * 0.66, height: cardSide * 0.66)
+                    .frame(width: foodImageSide, height: foodImageSide)
             }
             .frame(width: cardSide, height: cardSide)
             .overlay(alignment: .bottomTrailing) {
@@ -815,36 +818,47 @@ private struct WatchFoodRarityToggleButton: View {
 
     var body: some View {
         Button(action: action) {
-            HStack(spacing: 4 * scale) {
-                rarityPill(
-                    title: selectedTab.rawValue,
-                    isActive: true
-                )
+            ZStack {
+                Color.black.opacity(0.001)
 
-                Image(systemName: "arrow.triangle.2.circlepath")
-                    .font(.system(size: 8 * scale, weight: .bold))
-                    .foregroundStyle(.white.opacity(0.92))
+                HStack(spacing: 7 * scale) {
+                    rarityPill(
+                        title: selectedTab.rawValue,
+                        isActive: true
+                    )
 
-                rarityPill(
-                    title: selectedTab.next.rawValue,
-                    isActive: false
+                    Image(systemName: "arrow.triangle.2.circlepath")
+                        .font(.system(size: 14 * scale, weight: .bold))
+                        .foregroundStyle(.white.opacity(0.92))
+
+                    rarityPill(
+                        title: selectedTab.next.rawValue,
+                        isActive: false
+                    )
+                }
+                .padding(.horizontal, 10 * scale)
+                .padding(.vertical, 8 * scale)
+                .background(
+                    Color.black.opacity(0.52),
+                    in: Capsule()
                 )
             }
-            .padding(.horizontal, 6 * scale)
-            .padding(.vertical, 5 * scale)
-            .background(Color.black.opacity(0.52), in: Capsule())
+            .frame(
+                width: 148 * scale,
+                height: 68 * scale
+            )
+            .contentShape(Rectangle())
         }
         .buttonStyle(.plain)
         .accessibilityLabel("NとRを切り替える")
     }
 
-
     @ViewBuilder
     private func rarityPill(title: String, isActive: Bool) -> some View {
         Text(title)
-            .font(.system(size: 10 * scale, weight: .black, design: .rounded))
+            .font(.system(size: 16 * scale, weight: .black, design: .rounded))
             .foregroundStyle(isActive ? .white : .white.opacity(0.72))
-            .frame(width: 20 * scale, height: 20 * scale)
+            .frame(width: 38 * scale, height: 38 * scale)
             .background(
                 isActive ? selectedAccent : Color.white.opacity(0.16),
                 in: Circle()
@@ -945,7 +959,7 @@ private struct WatchPendingFoodDecisionOverlay: View {
                     .background(Color.black.opacity(0.72), in: Capsule())
                     .offset(x: 5 * scale, y: 5 * scale)
             }
-            .position(x: 184 * scale, y: 202 * scale)
+            .position(x: 184 * scale, y: 260 * scale)
             .offset(y: visualOffsetY)
             .scaleEffect(isFeeding ? 1.08 : 1.0)
             .opacity(isFeeding ? 0.15 : 1.0)
