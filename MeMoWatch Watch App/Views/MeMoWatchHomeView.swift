@@ -91,8 +91,7 @@ struct MeMoWatchHomeView: View {
     }
 
     private func backgroundLayer(width: CGFloat, height: CGFloat) -> some View {
-        Image(viewModel.backgroundAssetName)
-            .resizable()
+        MeMoWatchDynamicImage(assetName: viewModel.backgroundAssetName)
             .scaledToFill()
             .frame(width: width, height: height)
             .clipped()
@@ -582,6 +581,8 @@ private struct WatchHappinessGauge: View {
     let level: Int
     let scale: CGFloat
 
+    @ObservedObject private var assetCache = MeMoWatchDynamicAssetCache.shared
+
     private var fillFraction: CGFloat {
         CGFloat(min(1, max(0, Double(point) / Double(max(maxPoint, 1)))))
     }
@@ -618,12 +619,28 @@ private struct WatchHappinessGauge: View {
                 accentColor: Color(red: 1.00, green: 0.82, blue: 0.88)
             )
 
-            Image(levelAssetName)
-                .resizable()
-                .scaledToFit()
-                .frame(width: outerSize * 0.78, height: outerSize * 0.44)
-                .offset(y: outerSize * 0.03)
-                .shadow(color: .black.opacity(0.16), radius: 4 * scale, x: 0, y: 2 * scale)
+            Group {
+                if assetCache.containsAsset(named: levelAssetName) {
+                    MeMoWatchDynamicImage(assetName: levelAssetName)
+                        .scaledToFit()
+                } else {
+                    // Never leave the level blank while the decorative number
+                    // image is being synchronized from the iPhone.
+                    Text("\(min(40, max(0, level)))")
+                        .font(
+                            .system(
+                                size: 30 * scale,
+                                weight: .black,
+                                design: .rounded
+                            )
+                        )
+                        .foregroundStyle(.white)
+                        .minimumScaleFactor(0.65)
+                }
+            }
+            .frame(width: outerSize * 0.78, height: outerSize * 0.44)
+            .offset(y: outerSize * 0.03)
+            .shadow(color: .black.opacity(0.16), radius: 4 * scale, x: 0, y: 2 * scale)
         }
         .frame(width: outerSize, height: outerSize)
         .shadow(color: .black.opacity(0.16), radius: 7 * scale, x: 0, y: 4 * scale)

@@ -277,7 +277,6 @@ private struct MeMoWatchFoodEnabledHomeView: View {
             )
 
             floatingHearts.append(heart)
-
             let heartID = heart.id
             floatingHeartCleanupTasks[heartID]?.cancel()
             floatingHeartCleanupTasks[heartID] = Task { @MainActor in
@@ -654,8 +653,7 @@ private struct WatchFoodSelectorHomeContentCover: View {
     let scale: CGFloat
 
     var body: some View {
-        Image(backgroundAssetName)
-            .resizable()
+        MeMoWatchDynamicImage(assetName: backgroundAssetName)
             .scaledToFill()
             .frame(width: layoutWidth, height: layoutHeight)
             .clipped()
@@ -701,8 +699,7 @@ private struct WatchDesiredFoodThoughtButton: View {
                     .scaledToFit()
 
                 if let desiredFoodAssetName {
-                    Image(desiredFoodAssetName)
-                        .resizable()
+                    MeMoWatchDynamicImage(assetName: desiredFoodAssetName)
                         .scaledToFit()
                         .frame(width: size * 0.54, height: size * 0.54)
                         .offset(y: -size * 0.10)
@@ -981,8 +978,7 @@ private struct WatchFoodSelectorCard: View {
                     .frame(width: cardSide * 0.66, height: cardSide * 0.66)
                     .blur(radius: 7 * scale)
 
-                Image(item.assetName)
-                    .resizable()
+                MeMoWatchDynamicImage(assetName: item.assetName)
                     .scaledToFit()
                     .frame(width: foodImageSide, height: foodImageSide)
             }
@@ -1153,8 +1149,7 @@ private struct WatchPendingFoodDecisionOverlay: View {
                     .frame(width: 88 * scale, height: 88 * scale)
                     .blur(radius: 8 * scale)
 
-                Image(item.assetName)
-                    .resizable()
+                MeMoWatchDynamicImage(assetName: item.assetName)
                     .scaledToFit()
                     .frame(width: 86 * scale, height: 86 * scale)
             }

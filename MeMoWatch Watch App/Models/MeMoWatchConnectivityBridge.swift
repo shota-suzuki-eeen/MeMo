@@ -7,7 +7,13 @@
 //
 
 import Combine
+import CoreGraphics
 import Foundation
+
+#if os(watchOS)
+import ImageIO
+import SwiftUI
+#endif
 
 #if canImport(WatchConnectivity)
 import WatchConnectivity
@@ -15,6 +21,244 @@ import WatchConnectivity
 
 #if os(iOS) && canImport(WidgetKit)
 import WidgetKit
+#endif
+
+
+// MARK: - Dynamically transferred Watch assets
+
+enum MeMoWatchDynamicAssetTransferConstants {
+    static let assetNameMetadataKey = "memoDynamicAssetName"
+}
+
+private struct MeMoWatchImmediateDynamicAssetEnvelope: Codable {
+    let assetName: String
+    let payload: Data
+}
+
+
+#if os(watchOS)
+/// Bridge-local disk access used only by WatchConnectivity.
+/// This intentionally does not depend on the SwiftUI-facing dynamic asset cache,
+/// so the shared connectivity file can compile independently in every target.
+private enum MeMoWatchBridgeDynamicAssetDiskStore {
+    private static var directoryName: String {
+        let build = Bundle.main.object(
+            forInfoDictionaryKey: "CFBundleVersion"
+        ) as? String ?? "0"
+        return "MeMoWatchDynamicAssets-\(build)"
+    }
+
+    static func containsAsset(named assetName: String) -> Bool {
+        guard let url = assetURL(for: assetName) else { return false }
+        return FileManager.default.fileExists(atPath: url.path)
+    }
+
+    static func cgImage(named assetName: String) -> CGImage? {
+        guard let url = assetURL(for: assetName),
+              FileManager.default.fileExists(atPath: url.path),
+              let source = CGImageSourceCreateWithURL(url as CFURL, nil) else {
+            return nil
+        }
+
+        return CGImageSourceCreateImageAtIndex(source, 0, nil)
+    }
+
+    @discardableResult
+    static func storeReceivedFile(
+        from sourceURL: URL,
+        assetName: String
+    ) -> Bool {
+        guard !assetName.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty,
+              let directoryURL = cacheDirectoryURL(),
+              let destinationURL = assetURL(for: assetName) else {
+            return false
+        }
+
+        let fileManager = FileManager.default
+
+        do {
+            try fileManager.createDirectory(
+                at: directoryURL,
+                withIntermediateDirectories: true
+            )
+
+            let stagingURL = directoryURL
+                .appendingPathComponent(UUID().uuidString)
+                .appendingPathExtension("incoming")
+
+            try fileManager.copyItem(at: sourceURL, to: stagingURL)
+
+            if fileManager.fileExists(atPath: destinationURL.path) {
+                try fileManager.removeItem(at: destinationURL)
+            }
+
+            try fileManager.moveItem(at: stagingURL, to: destinationURL)
+            return true
+        } catch {
+            print("❌ MeMoWatch bridge dynamic asset store failed: \(error)")
+            return false
+        }
+    }
+
+    @discardableResult
+    static func storeReceivedData(
+        _ data: Data,
+        assetName: String
+    ) -> Bool {
+        guard !data.isEmpty,
+              !assetName.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty,
+              let directoryURL = cacheDirectoryURL(),
+              let destinationURL = assetURL(for: assetName) else {
+            return false
+        }
+
+        let fileManager = FileManager.default
+
+        do {
+            try fileManager.createDirectory(
+                at: directoryURL,
+                withIntermediateDirectories: true
+            )
+
+            let stagingURL = directoryURL
+                .appendingPathComponent(UUID().uuidString)
+                .appendingPathExtension("incoming")
+
+            try data.write(to: stagingURL, options: .atomic)
+
+            if fileManager.fileExists(atPath: destinationURL.path) {
+                try fileManager.removeItem(at: destinationURL)
+            }
+
+            try fileManager.moveItem(at: stagingURL, to: destinationURL)
+            return true
+        } catch {
+            print("❌ MeMoWatch bridge immediate asset store failed: \(error)")
+            return false
+        }
+    }
+
+    private static func cacheDirectoryURL() -> URL? {
+        FileManager.default.urls(
+            for: .cachesDirectory,
+            in: .userDomainMask
+        ).first?.appendingPathComponent(
+            directoryName,
+            isDirectory: true
+        )
+    }
+
+    private static func assetURL(for assetName: String) -> URL? {
+        guard let directoryURL = cacheDirectoryURL() else { return nil }
+
+        return directoryURL
+            .appendingPathComponent(safeFileName(for: assetName))
+            .appendingPathExtension("asset")
+    }
+
+    private static func safeFileName(for assetName: String) -> String {
+        let encoded = Data(assetName.utf8)
+            .base64EncodedString()
+            .replacingOccurrences(of: "/", with: "_")
+            .replacingOccurrences(of: "+", with: "-")
+            .replacingOccurrences(of: "=", with: "")
+
+        return encoded.isEmpty ? "unnamed" : encoded
+    }
+}
+
+/// Watch-side in-memory cache for dynamically transferred images.
+/// Kept in this shared bridge file so the Watch target never depends on
+/// a separate support file or its Target Membership setting.
+@MainActor
+final class MeMoWatchDynamicAssetCache: ObservableObject {
+    static let shared = MeMoWatchDynamicAssetCache()
+
+    @Published private(set) var revision: Int = 0
+    @Published private(set) var lastStoredAssetName: String?
+
+    private var imageCache: [String: CGImage] = [:]
+    private var assetStoredCancellable: AnyCancellable?
+
+    private init() {
+        assetStoredCancellable = NotificationCenter.default
+            .publisher(for: Notification.Name("memo.watch.dynamicAssetStored"))
+            .receive(on: DispatchQueue.main)
+            .sink { [weak self] notification in
+                guard let assetName = notification.object as? String else { return }
+                self?.notifyAssetStored(named: assetName)
+            }
+    }
+
+    func cgImage(named assetName: String) -> CGImage? {
+        if let cached = imageCache[assetName] {
+            return cached
+        }
+
+        guard let image = MeMoWatchBridgeDynamicAssetDiskStore.cgImage(named: assetName) else {
+            return nil
+        }
+
+        imageCache[assetName] = image
+        return image
+    }
+
+    func containsAsset(named assetName: String) -> Bool {
+        imageCache[assetName] != nil
+            || MeMoWatchBridgeDynamicAssetDiskStore.containsAsset(named: assetName)
+    }
+
+    func notifyAssetStored(named assetName: String) {
+        imageCache.removeValue(forKey: assetName)
+        lastStoredAssetName = assetName
+        revision &+= 1
+    }
+}
+
+/// Displays the requested transferred image as soon as it is available.
+/// When an asset name changes, the previously displayed image is kept until
+/// the replacement arrives so the UI never flashes blank during synchronization.
+@MainActor
+struct MeMoWatchDynamicImage: View {
+    let assetName: String
+
+    @ObservedObject private var assetCache = MeMoWatchDynamicAssetCache.shared
+    @State private var retainedImage: CGImage?
+
+    private var resolvedImage: CGImage? {
+        assetCache.cgImage(named: assetName) ?? retainedImage
+    }
+
+    var body: some View {
+        Group {
+            if let cgImage = resolvedImage {
+                Image(
+                    decorative: cgImage,
+                    scale: 1,
+                    orientation: .up
+                )
+                .resizable()
+            } else {
+                Color.clear
+            }
+        }
+        .onAppear {
+            updateRetainedImageIfAvailable()
+        }
+        .onChange(of: assetName) { _, _ in
+            updateRetainedImageIfAvailable()
+        }
+        .onChange(of: assetCache.revision) { _, _ in
+            updateRetainedImageIfAvailable()
+        }
+    }
+
+    private func updateRetainedImageIfAvailable() {
+        if let image = assetCache.cgImage(named: assetName) {
+            retainedImage = image
+        }
+    }
+}
 #endif
 
 #if os(iOS) && canImport(UIKit)
@@ -110,6 +354,14 @@ final class MeMoWatchConnectivityBridge: NSObject, ObservableObject {
     private var processedWatchRequestIDs: Set<String> = []
     private var processedWatchRequestIDOrder: [String] = []
     private var isRefreshingStepsForWatch = false
+    private var proactivelyScheduledDynamicAssetNames: Set<String> = []
+    private var proactivelySentImmediateAssetNames: Set<String> = []
+    #endif
+
+    #if os(watchOS)
+    private static let dynamicAssetRequestRetryInterval: TimeInterval = 2.5
+    private var dynamicAssetLastRequestDates: [String: Date] = [:]
+    private var dynamicAssetRetryTask: Task<Void, Never>?
     #endif
 
     private override init() {
@@ -125,6 +377,10 @@ final class MeMoWatchConnectivityBridge: NSObject, ObservableObject {
         if session.activationState == .notActivated {
             session.activate()
         }
+
+        #if os(watchOS)
+        requestMissingDynamicAssets(for: latestSnapshot)
+        #endif
         #endif
     }
 
@@ -204,6 +460,279 @@ final class MeMoWatchConnectivityBridge: NSObject, ObservableObject {
         persistChangesHandler?()
         refreshWidgetSnapshotIfAvailable(appState: appState, now: now)
     }
+
+    @discardableResult
+    private func transferDynamicAssetsToWatch(assetNames: [String]) -> Set<String> {
+        #if canImport(WatchConnectivity) && canImport(UIKit)
+        guard let session,
+              session.activationState == .activated else {
+            return []
+        }
+
+        let outstandingNames = Set(
+            session.outstandingFileTransfers.compactMap { transfer in
+                transfer.file.metadata?[MeMoWatchDynamicAssetTransferConstants.assetNameMetadataKey] as? String
+            }
+        )
+
+        var seenNames = Set<String>()
+        let uniqueNames = assetNames
+            .map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }
+            .filter { !$0.isEmpty && seenNames.insert($0).inserted }
+            .prefix(128)
+
+        var scheduledNames = Set<String>()
+
+        for assetName in uniqueNames {
+            if outstandingNames.contains(assetName) {
+                scheduledNames.insert(assetName)
+                continue
+            }
+
+            autoreleasepool {
+                guard let fileURL = makeDynamicAssetTransferFile(assetName: assetName) else {
+                    return
+                }
+
+                session.transferFile(
+                    fileURL,
+                    metadata: [MeMoWatchDynamicAssetTransferConstants.assetNameMetadataKey: assetName]
+                )
+                scheduledNames.insert(assetName)
+            }
+        }
+
+        return scheduledNames
+        #else
+        return []
+        #endif
+    }
+
+    /// Sends small, display-ready assets immediately while the counterpart app is reachable.
+    /// Each asset is sent independently so one failed image does not delay the rest.
+    @discardableResult
+    private func sendImmediateDynamicAssetsToWatch(
+        assetNames: [String]
+    ) -> Set<String> {
+        #if canImport(WatchConnectivity) && canImport(UIKit)
+        guard let session,
+              session.activationState == .activated,
+              session.isReachable else {
+            return []
+        }
+
+        var seenNames = Set<String>()
+        let uniqueNames = assetNames
+            .map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }
+            .filter { !$0.isEmpty && seenNames.insert($0).inserted }
+            .prefix(16)
+
+        var attemptedNames = Set<String>()
+
+        for assetName in uniqueNames {
+            autoreleasepool {
+                guard let data = makeImmediateDynamicAssetEnvelopeData(
+                    assetName: assetName
+                ) else {
+                    return
+                }
+
+                attemptedNames.insert(assetName)
+
+                session.sendMessageData(
+                    data,
+                    replyHandler: nil,
+                    errorHandler: { [weak self] _ in
+                        Task { @MainActor in
+                            guard let self else { return }
+                            self.proactivelySentImmediateAssetNames.remove(assetName)
+                            _ = self.transferDynamicAssetsToWatch(
+                                assetNames: [assetName]
+                            )
+                        }
+                    }
+                )
+            }
+        }
+
+        return attemptedNames
+        #else
+        return []
+        #endif
+    }
+
+    private func proactivelyTransferDynamicAssetsIfNeeded(
+        for snapshot: MeMoWatchSnapshot
+    ) {
+        let criticalNames = Self.criticalDynamicAssetNames(for: snapshot)
+        let criticalNamesNotSent = criticalNames.filter {
+            !proactivelySentImmediateAssetNames.contains($0)
+        }
+
+        let immediatelyAttemptedNames = sendImmediateDynamicAssetsToWatch(
+            assetNames: criticalNamesNotSent
+        )
+        proactivelySentImmediateAssetNames.formUnion(immediatelyAttemptedNames)
+
+        let requiredNames = Self.requiredDynamicAssetNames(for: snapshot)
+        let unscheduledNames = requiredNames.filter {
+            !proactivelyScheduledDynamicAssetNames.contains($0)
+                && !immediatelyAttemptedNames.contains($0)
+        }
+
+        guard !unscheduledNames.isEmpty else { return }
+
+        let scheduledNames = transferDynamicAssetsToWatch(
+            assetNames: unscheduledNames
+        )
+        proactivelyScheduledDynamicAssetNames.formUnion(scheduledNames)
+    }
+
+    #if canImport(UIKit)
+    private func makeDynamicAssetTransferFile(assetName: String) -> URL? {
+        guard let sourceImage = UIImage(named: assetName) else {
+            return nil
+        }
+
+        let maximumPixelDimension = preferredMaximumPixelDimension(
+            for: assetName
+        )
+        guard let data = optimizedAssetData(
+            from: sourceImage,
+            assetName: assetName,
+            maximumPixelDimension: maximumPixelDimension
+        ) else {
+            return nil
+        }
+
+        let directoryURL = FileManager.default.temporaryDirectory
+            .appendingPathComponent(
+                "MeMoWatchDynamicAssetTransfers",
+                isDirectory: true
+            )
+
+        do {
+            try FileManager.default.createDirectory(
+                at: directoryURL,
+                withIntermediateDirectories: true
+            )
+
+            let fileURL = directoryURL
+                .appendingPathComponent(UUID().uuidString)
+                .appendingPathExtension("png")
+
+            try data.write(to: fileURL, options: .atomic)
+            return fileURL
+        } catch {
+            print("❌ MeMoWatch dynamic asset preparation failed: \(error)")
+            return nil
+        }
+    }
+
+    private func makeImmediateDynamicAssetEnvelopeData(
+        assetName: String
+    ) -> Data? {
+        guard let sourceImage = UIImage(named: assetName),
+              let payload = optimizedAssetData(
+                from: sourceImage,
+                assetName: assetName,
+                maximumPixelDimension: preferredImmediateMaximumPixelDimension(
+                    for: assetName
+                )
+              ) else {
+            return nil
+        }
+
+        return try? PropertyListEncoder().encode(
+            MeMoWatchImmediateDynamicAssetEnvelope(
+                assetName: assetName,
+                payload: payload
+            )
+        )
+    }
+
+    private func preferredMaximumPixelDimension(for assetName: String) -> CGFloat {
+        if Int(assetName) != nil {
+            return 192
+        }
+
+        if assetName == lastBackgroundAssetName {
+            return 640
+        }
+
+        if FoodCatalog.all.contains(where: { $0.assetName == assetName }) {
+            return 320
+        }
+
+        return 640
+    }
+
+    private func preferredImmediateMaximumPixelDimension(
+        for assetName: String
+    ) -> CGFloat {
+        if Int(assetName) != nil {
+            return 160
+        }
+
+        if assetName == lastBackgroundAssetName {
+            return 512
+        }
+
+        if FoodCatalog.all.contains(where: { $0.assetName == assetName }) {
+            return 256
+        }
+
+        return 512
+    }
+
+    private func optimizedAssetData(
+        from image: UIImage,
+        assetName: String,
+        maximumPixelDimension: CGFloat
+    ) -> Data? {
+        let pixelWidth = CGFloat(image.cgImage?.width ?? 0)
+        let pixelHeight = CGFloat(image.cgImage?.height ?? 0)
+        let currentMaximum = max(pixelWidth, pixelHeight)
+
+        guard currentMaximum > 0,
+              currentMaximum > maximumPixelDimension else {
+            return encodedAssetData(from: image, assetName: assetName)
+        }
+
+        let ratio = maximumPixelDimension / currentMaximum
+        let targetSize = CGSize(
+            width: max(1, pixelWidth * ratio),
+            height: max(1, pixelHeight * ratio)
+        )
+
+        let format = UIGraphicsImageRendererFormat.default()
+        format.scale = 1
+        format.opaque = false
+
+        let renderer = UIGraphicsImageRenderer(
+            size: targetSize,
+            format: format
+        )
+        let resizedImage = renderer.image { _ in
+            image.draw(in: CGRect(origin: .zero, size: targetSize))
+        }
+        return encodedAssetData(
+            from: resizedImage,
+            assetName: assetName
+        )
+    }
+
+    private func encodedAssetData(
+        from image: UIImage,
+        assetName: String
+    ) -> Data? {
+        if assetName == lastBackgroundAssetName {
+            return image.jpegData(compressionQuality: 0.84)
+        }
+
+        return image.pngData()
+    }
+    #endif
 
     func publishCurrentSnapshot(
         backgroundAssetName: String? = nil,
@@ -455,6 +984,128 @@ final class MeMoWatchConnectivityBridge: NSObject, ObservableObject {
     }
 
     #if os(watchOS)
+    private func requestMissingDynamicAssets(
+        for snapshot: MeMoWatchSnapshot,
+        now: Date = Date()
+    ) {
+        let requiredNames = Self.requiredDynamicAssetNames(for: snapshot)
+        let missingNames = requiredNames.filter { assetName in
+            guard !MeMoWatchBridgeDynamicAssetDiskStore.containsAsset(named: assetName) else {
+                dynamicAssetLastRequestDates.removeValue(forKey: assetName)
+                return false
+            }
+
+            guard let lastRequestDate = dynamicAssetLastRequestDates[assetName] else {
+                return true
+            }
+
+            return now.timeIntervalSince(lastRequestDate)
+                >= Self.dynamicAssetRequestRetryInterval
+        }
+
+        guard !missingNames.isEmpty else { return }
+
+        for assetName in missingNames {
+            dynamicAssetLastRequestDates[assetName] = now
+        }
+
+        sendWatchEvent(
+            "requestAssets",
+            payload: ["assetNames": missingNames]
+        )
+        scheduleDynamicAssetRetryIfNeeded()
+    }
+
+    private func scheduleDynamicAssetRetryIfNeeded() {
+        guard dynamicAssetRetryTask == nil else { return }
+
+        dynamicAssetRetryTask = Task { @MainActor [weak self] in
+            guard let self else { return }
+
+            do {
+                try await Task.sleep(
+                    nanoseconds: UInt64(
+                        Self.dynamicAssetRequestRetryInterval * 1_000_000_000
+                    )
+                )
+            } catch {
+                self.dynamicAssetRetryTask = nil
+                return
+            }
+
+            self.dynamicAssetRetryTask = nil
+            self.requestMissingDynamicAssets(
+                for: self.latestSnapshot
+            )
+        }
+    }
+    #endif
+
+    private static func criticalDynamicAssetNames(
+        for snapshot: MeMoWatchSnapshot
+    ) -> [String] {
+        var orderedNames: [String] = []
+        var seenNames = Set<String>()
+
+        func append(_ rawName: String?) {
+            guard let rawName else { return }
+            let name = rawName.trimmingCharacters(in: .whitespacesAndNewlines)
+            guard !name.isEmpty, seenNames.insert(name).inserted else { return }
+            orderedNames.append(name)
+        }
+
+        let baseCharacterName = snapshot.characterAssetName
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+
+        if snapshot.hasToiletFlag == true, !baseCharacterName.isEmpty {
+            append("\(baseCharacterName)_wc")
+        } else {
+            append(baseCharacterName)
+        }
+
+        append(String(min(40, max(0, snapshot.happinessLevel))))
+        append(snapshot.backgroundAssetName)
+        append(snapshot.desiredFoodAssetName)
+
+        if !baseCharacterName.isEmpty {
+            append("\(baseCharacterName)_idle_blink_0001")
+            append("\(baseCharacterName)_idle_blink_0002")
+        }
+
+        return orderedNames
+    }
+
+    private static func requiredDynamicAssetNames(
+        for snapshot: MeMoWatchSnapshot
+    ) -> [String] {
+        var orderedNames = criticalDynamicAssetNames(for: snapshot)
+        var seenNames = Set(orderedNames)
+
+        func append(_ rawName: String?) {
+            guard let rawName else { return }
+            let name = rawName.trimmingCharacters(in: .whitespacesAndNewlines)
+            guard !name.isEmpty, seenNames.insert(name).inserted else { return }
+            orderedNames.append(name)
+        }
+
+        let baseCharacterName = snapshot.characterAssetName
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+
+        append(baseCharacterName)
+        if !baseCharacterName.isEmpty {
+            append("\(baseCharacterName)_wc")
+            append("\(baseCharacterName)_idle_blink_0001")
+            append("\(baseCharacterName)_idle_blink_0002")
+        }
+
+        for food in snapshot.ownedFoods ?? [] {
+            append(food.assetName)
+        }
+
+        return orderedNames
+    }
+
+    #if os(watchOS)
     private func sendWatchEvent(
         _ event: String,
         payload: [String: Any] = [:]
@@ -503,6 +1154,10 @@ final class MeMoWatchConnectivityBridge: NSObject, ObservableObject {
     private func apply(_ snapshot: MeMoWatchSnapshot) {
         latestSnapshot = snapshot
         Self.store(snapshot, key: Self.userDefaultsKey)
+
+        #if os(watchOS)
+        requestMissingDynamicAssets(for: snapshot)
+        #endif
     }
 
     private func send(_ snapshot: MeMoWatchSnapshot) {
@@ -525,6 +1180,8 @@ final class MeMoWatchConnectivityBridge: NSObject, ObservableObject {
                 errorHandler: nil
             )
         }
+
+        proactivelyTransferDynamicAssetsIfNeeded(for: snapshot)
         #endif
         #endif
     }
@@ -576,6 +1233,23 @@ final class MeMoWatchConnectivityBridge: NSObject, ObservableObject {
                 progress: progress
             )
 
+        case "requestAssets":
+            guard let assetNames = dictionary["assetNames"] as? [String] else {
+                return
+            }
+
+            let immediateNames = sendImmediateDynamicAssetsToWatch(
+                assetNames: assetNames
+            )
+            proactivelySentImmediateAssetNames.formUnion(immediateNames)
+
+            let fallbackNames = assetNames.filter {
+                !immediateNames.contains($0)
+            }
+            _ = transferDynamicAssetsToWatch(
+                assetNames: fallbackNames
+            )
+
         case "requestSnapshot":
             Task { @MainActor [weak self] in
                 guard let self else { return }
@@ -587,6 +1261,24 @@ final class MeMoWatchConnectivityBridge: NSObject, ObservableObject {
         }
         #endif
     }
+
+    #if os(watchOS)
+    private func handleStoredDynamicAsset(
+        assetName: String,
+        didStore: Bool
+    ) {
+        dynamicAssetLastRequestDates.removeValue(forKey: assetName)
+
+        if didStore {
+            NotificationCenter.default.post(
+                name: Notification.Name("memo.watch.dynamicAssetStored"),
+                object: assetName
+            )
+        }
+
+        requestMissingDynamicAssets(for: latestSnapshot)
+    }
+    #endif
 
     #if os(iOS)
     private func enqueuePendingWatchEvent(_ dictionary: [String: Any]) {
@@ -700,6 +1392,24 @@ extension MeMoWatchConnectivityBridge: WCSessionDelegate {
     nonisolated func sessionDidDeactivate(_ session: WCSession) {
         session.activate()
     }
+
+    nonisolated func session(
+        _ session: WCSession,
+        didFinish fileTransfer: WCSessionFileTransfer,
+        error: Error?
+    ) {
+        let assetName = fileTransfer.file.metadata?[
+            MeMoWatchDynamicAssetTransferConstants.assetNameMetadataKey
+        ] as? String
+
+        try? FileManager.default.removeItem(at: fileTransfer.file.fileURL)
+
+        guard error != nil, let assetName else { return }
+
+        Task { @MainActor in
+            self.proactivelyScheduledDynamicAssetNames.remove(assetName)
+        }
+    }
     #endif
 
     nonisolated func session(
@@ -719,6 +1429,74 @@ extension MeMoWatchConnectivityBridge: WCSessionDelegate {
     ) {
         Task { @MainActor in
             self.handleIncomingOnMainActor(dictionary: userInfo)
+        }
+    }
+
+    nonisolated func session(
+        _ session: WCSession,
+        didReceive file: WCSessionFile
+    ) {
+        #if os(watchOS)
+        guard let assetName = file.metadata?[MeMoWatchDynamicAssetTransferConstants.assetNameMetadataKey] as? String else {
+            return
+        }
+
+        let didStore = MeMoWatchBridgeDynamicAssetDiskStore.storeReceivedFile(
+            from: file.fileURL,
+            assetName: assetName
+        )
+
+        Task { @MainActor in
+            self.handleStoredDynamicAsset(
+                assetName: assetName,
+                didStore: didStore
+            )
+        }
+        #endif
+    }
+
+    nonisolated func session(
+        _ session: WCSession,
+        didReceiveMessageData messageData: Data
+    ) {
+        #if os(watchOS)
+        guard let envelope = try? PropertyListDecoder().decode(
+            MeMoWatchImmediateDynamicAssetEnvelope.self,
+            from: messageData
+        ) else {
+            return
+        }
+
+        let didStore = MeMoWatchBridgeDynamicAssetDiskStore.storeReceivedData(
+            envelope.payload,
+            assetName: envelope.assetName
+        )
+
+        Task { @MainActor in
+            self.handleStoredDynamicAsset(
+                assetName: envelope.assetName,
+                didStore: didStore
+            )
+        }
+        #endif
+    }
+
+    nonisolated func sessionReachabilityDidChange(
+        _ session: WCSession
+    ) {
+        guard session.isReachable else { return }
+
+        Task { @MainActor in
+            #if os(iOS)
+            self.proactivelyTransferDynamicAssetsIfNeeded(
+                for: self.latestSnapshot
+            )
+            #elseif os(watchOS)
+            self.requestCurrentSnapshot()
+            self.requestMissingDynamicAssets(
+                for: self.latestSnapshot
+            )
+            #endif
         }
     }
 
