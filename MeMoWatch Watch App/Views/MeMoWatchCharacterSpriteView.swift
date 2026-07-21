@@ -263,6 +263,9 @@ final class MeMoWatchCharacterSpriteScene: SKScene {
 
         if shouldRunIdle(for: configuration) {
             names.insert(configuration.baseAssetName)
+        }
+
+        if shouldRunBlink(for: configuration) {
             names.insert("\(configuration.baseAssetName)_idle_blink_0001")
             names.insert("\(configuration.baseAssetName)_idle_blink_0002")
         }
@@ -296,9 +299,14 @@ final class MeMoWatchCharacterSpriteScene: SKScene {
             && configuration.assetName == configuration.baseAssetName
     }
 
-    private var canRunCurrentIdle: Bool {
+    private func shouldRunBlink(for configuration: Configuration) -> Bool {
+        shouldRunIdle(for: configuration)
+            && !configuration.assetName.hasSuffix("_wc")
+    }
+
+    private var canRunCurrentBlink: Bool {
         guard let configuration else { return false }
-        return shouldRunIdle(for: configuration)
+        return shouldRunBlink(for: configuration)
     }
 
     private func texture(named assetName: String) -> SKTexture? {
@@ -389,6 +397,7 @@ final class MeMoWatchCharacterSpriteScene: SKScene {
 
     private func startBlinkLoopIfNeeded() {
         guard blinkTask == nil else { return }
+        guard canRunCurrentBlink else { return }
         guard blinkTexturesAreAvailable else { return }
 
         blinkTask = Task { @MainActor [weak self] in
@@ -400,7 +409,7 @@ final class MeMoWatchCharacterSpriteScene: SKScene {
                 // artificially increasing the apparent blink frequency on Watch.
                 let wait = Double.random(in: 2.2...6.0)
                 guard await self.sleep(seconds: wait) else { break }
-                guard self.canRunCurrentIdle else { break }
+                guard self.canRunCurrentBlink else { break }
 
                 let shouldDoubleBlink = Double.random(in: 0...1) < 0.18
                 guard await self.playBlinkSequence() else { break }
@@ -408,7 +417,7 @@ final class MeMoWatchCharacterSpriteScene: SKScene {
                 if shouldDoubleBlink {
                     let gap = Double.random(in: 0.18...0.45)
                     guard await self.sleep(seconds: gap) else { break }
-                    guard self.canRunCurrentIdle else { break }
+                    guard self.canRunCurrentBlink else { break }
                     guard await self.playBlinkSequence() else { break }
                 }
             }
@@ -419,6 +428,7 @@ final class MeMoWatchCharacterSpriteScene: SKScene {
 
     private var blinkTexturesAreAvailable: Bool {
         guard let configuration else { return false }
+        guard shouldRunBlink(for: configuration) else { return false }
 
         return textureIsAvailable(
             named: "\(configuration.baseAssetName)_idle_blink_0001"
@@ -455,7 +465,7 @@ final class MeMoWatchCharacterSpriteScene: SKScene {
         guard !Task.isCancelled else { return false }
         guard let configuration else { return false }
 
-        return shouldRunIdle(for: configuration)
+        return shouldRunBlink(for: configuration)
             && configuration.baseAssetName == baseAssetName
     }
 
