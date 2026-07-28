@@ -98,9 +98,9 @@ enum MemoOnboardingScreen: String, CaseIterable, Identifiable, Codable, Hashable
         case .settings:
             return "設定を整えよう"
         case .workFocusRewardIntro:
-            return "集中時間で部屋をゲットしよう！"
+            return "魚を集めて壁紙をゲット！"
         case .workRouteRecordIntro:
-            return "ウォーキング・ランを記録しよう！"
+            return "ミーモと放置釣りを楽しもう！"
         case .cameraCapture:
             return "ミーモと思い出写真を撮ろう！"
         case .toiletTutorialIntro:
@@ -110,7 +110,7 @@ enum MemoOnboardingScreen: String, CaseIterable, Identifiable, Codable, Hashable
         case .home:
             return "ミーモへようこそ"
         case .step:
-            return "歩くことが力になるよ"
+            return "ミーモと釣りを楽しもう"
         case .gacha:
             return "はじめてのガチャだね"
         case .foodTutorialIntro:
@@ -159,9 +159,9 @@ enum MemoOnboardingScreen: String, CaseIterable, Identifiable, Codable, Hashable
         case .settings:
             return "通知や音などを調整できるよ。\n自分なりにカスタマイズしてみよう。"
         case .workFocusRewardIntro:
-            return "タイマーが動いた累計集中時間（読書・勉強・仕事など）に応じて新しい部屋をゲットできるよ！\nコツコツ集中していろんなお部屋をゲットしてね！"
+            return "釣った魚は種類に応じてフィッシュポイントに変わるよ！\nポイントを集めて、好きな壁紙と交換してね！"
         case .workRouteRecordIntro:
-            return "位置情報の共有をONにして「スタート」すると、移動したコース（ルート）が記録されるよ！\n記録したコースでミーモと一緒に写真を撮って頑張りを保存しよう！"
+            return "お世話中のミーモが湖で自動的に釣りをするよ！\nアプリを閉じている間も釣果がたまり、魚かごからまとめて受け取れるよ！"
         case .cameraCapture:
             return "お世話中のミーモと一緒に写真を撮って思い出を記録しよう！\n撮影した写真は「思い出」に保存されるよ！\n位置情報の共有をONにすると撮影場所もわかるようになるよ！"
         case .toiletTutorialIntro:
@@ -171,7 +171,7 @@ enum MemoOnboardingScreen: String, CaseIterable, Identifiable, Codable, Hashable
         case .home:
             return "このアプリでは、歩数がコインのような役割になるよ。\n歩いて、ガチャをして、ごはんやキャラクターを集めながら、楽しく健康管理していこう！"
         case .step:
-            return "今日の歩数を見られるよ。歩いたぶんだけ、ミーモで使える通貨が増えていくよ。"
+            return "お世話中のミーモが湖で自動的に釣りをするよ。釣れた魚は種類に応じてフィッシュポイントへ変わるよ。"
         case .gacha:
             return "歩数を使って、ごはんやキャラクターが手に入るよ。"
         case .foodTutorialIntro:
