@@ -605,7 +605,7 @@ private struct FishingSceneryView: View {
 
         // fishing_lakeレイヤー全体の縦位置。
         // 負の値ほど上方向、正の値ほど下方向へ移動する。
-        static let lakeVerticalOffset: CGFloat = -14
+        static let lakeVerticalOffset: CGFloat = -16
     }
 
     var body: some View {
