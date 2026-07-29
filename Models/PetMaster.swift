@@ -162,7 +162,7 @@ enum PetMaster {
         .init(id: "food_gyoza", name: "餃子"),
         .init(id: "food_hamburger", name: "ハンバーガー"),
         .init(id: "food_juice", name: "オレンジジュース"),
-        .init(id: "food_maguro", name: "マグロ寿司"),
+        .init(id: "food_maguro", name: "マグ郎"),
         .init(id: "food_pancake", name: "パンケーキ"),
         .init(id: "food_pizza", name: "ピザ"),
         .init(id: "food_poteto", name: "ポテト"),
@@ -261,7 +261,7 @@ enum PetMaster {
         case "food_gyoza": return "gyoza"
         case "food_hamburger": return "hamburger"
         case "food_juice": return "juice"
-        case "food_maguro": return "maguro"
+        case "food_maguro": return "magurou"
         case "food_pancake": return "pancake"
         case "food_pizza": return "pizza"
         case "food_poteto": return "poteto"

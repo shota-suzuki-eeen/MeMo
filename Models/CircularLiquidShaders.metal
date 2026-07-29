@@ -5,9 +5,12 @@
 //  円形メーター内の液体部分だけを描画するMetalシェーダーです。
 //  アセット画像へのマスク処理は行いません。
 //
-//  2026/07/14 update:
-//  15fpsでも連続して見えるよう波の速度と振幅を調整し、
-//  気泡数とハイライト計算量を抑えてフラグメント負荷を軽減しました。
+//  2026/07/29 update:
+//  iPhoneとApple Watchのメーター表現を統一するため、描画を
+//  「2つの波・3色グラデーション・薄い白波・軽いハイライト」へ
+//  簡略化しました。
+//  気泡、コースティクス、液面フォーム、側面ライティングの
+//  ピクセル計算を廃止し、既存のMetal基盤と省電力制御は維持します。
 //
 
 #include <metal_stdlib>
@@ -16,12 +19,10 @@ using namespace metal;
 struct CircularLiquidUniforms {
     float time;
     float fillFraction;
-    float aspectRatio;
-    float motionScale;
+    float2 padding;
     float4 mainColor;
     float4 deepColor;
     float4 highlightColor;
-    float4 foamColor;
 };
 
 struct VertexOut {
@@ -56,8 +57,33 @@ static inline float saturateValue(float value) {
     return clamp(value, 0.0, 1.0);
 }
 
-static inline float hash11(float seed) {
-    return fract(sin(seed) * 43758.5453123);
+static inline float watchStyleWave(
+    float normalizedX,
+    float phase,
+    float amplitude
+) {
+    constexpr float primaryFrequency =
+        6.91150384; // 2π × 1.10
+    constexpr float secondaryFrequency =
+        13.5088484; // 2π × 2.15
+
+    float primary =
+        sin(
+            normalizedX * primaryFrequency +
+            phase
+        ) *
+        amplitude;
+
+    float secondary =
+        sin(
+            normalizedX * secondaryFrequency -
+            phase * 0.76 +
+            1.4
+        ) *
+        amplitude *
+        0.45;
+
+    return primary + secondary;
 }
 
 fragment float4 circularLiquidFragment(
@@ -65,138 +91,115 @@ fragment float4 circularLiquidFragment(
     constant CircularLiquidUniforms& u [[buffer(0)]]
 ) {
     float2 uv = in.uv;
-    float fill = saturateValue(u.fillFraction);
+    float fill =
+        saturateValue(u.fillFraction);
 
-    // 位相はRenderer側ですでに実時間とmotionScaleを反映しています。
-    float time = u.time;
+    // Renderer側のrenderedTimeは実時間差分で進み、
+    // 低電力・温度状態に応じたmotionScaleも反映済みです。
+    float phase = u.time * 1.35;
+    constexpr float amplitude = 0.045;
 
-    float surface = 1.0 - fill;
-    surface +=
-        sin(uv.x * 7.10 + time * 0.92) * 0.032;
-    surface +=
-        sin(uv.x * 13.40 - time * 0.61 + 1.20) * 0.015;
-    surface +=
-        sin(
-            (uv.x + uv.y * 0.16) * 20.0 +
-            time * 0.43
-        ) * 0.006;
+    float surface =
+        1.0 -
+        fill +
+        watchStyleWave(
+            uv.x,
+            phase,
+            amplitude
+        );
 
-    float alpha = smoothstep(
-        surface - 0.020,
-        surface + 0.010,
-        uv.y
-    );
-    if (alpha <= 0.001) {
+    float liquidAlpha =
+        smoothstep(
+            surface - 0.012,
+            surface + 0.008,
+            uv.y
+        );
+
+    if (liquidAlpha <= 0.001) {
         return float4(0.0);
     }
 
-    float depth = saturateValue(
-        (uv.y - surface) /
-        max(1.0 - surface, 0.001)
-    );
-
-    float4 color = mix(
-        u.highlightColor,
-        u.mainColor,
-        smoothstep(0.02, 0.32, depth)
-    );
-    color = mix(
-        color,
-        u.deepColor,
-        smoothstep(0.50, 1.0, depth)
-    );
-
-    float surfaceFoam =
-        exp(-abs(uv.y - surface) * 68.0);
-    color.rgb +=
-        u.foamColor.rgb * surfaceFoam * 0.22;
-
-    float shimmerA =
-        sin(
-            uv.x * 28.0 +
-            uv.y * 16.0 +
-            time * 1.12
-        ) * 0.5 + 0.5;
-
-    float shimmerB =
-        sin(
-            uv.x * 15.0 -
-            uv.y * 25.0 -
-            time * 0.74
-        ) * 0.5 + 0.5;
-
-    float caustics =
-        pow(shimmerA * shimmerB, 3.0) *
-        0.11 *
-        smoothstep(0.08, 0.78, depth);
-
-    color.rgb +=
-        u.highlightColor.rgb * caustics;
-
-    float bubbleAmount = 0.0;
-
-    // 8個から5個へ減らし、見た目を維持しながら負荷を軽減します。
-    for (int i = 0; i < 5; i++) {
-        float seed = float(i) + 1.0;
-        float bx = hash11(seed * 14.31);
-        float radius = mix(
-            0.011,
-            0.025,
-            hash11(seed * 2.17)
+    float depth =
+        saturateValue(
+            (uv.y - surface) /
+            max(1.0 - surface, 0.001)
         );
-        float speed = mix(
-            0.040,
-            0.095,
-            hash11(seed * 7.77)
-        );
-        float start = hash11(seed * 19.83);
-        float by = fract(
-            1.0 + start - time * speed
-        );
-        by = mix(surface + 0.065, 0.98, by);
 
-        float2 delta = uv - float2(bx, by);
-        delta.x *= u.aspectRatio;
-
-        float distanceToBubble = length(delta);
-        float bubble = 1.0 - smoothstep(
-            radius * 0.68,
-            radius,
-            distanceToBubble
-        );
-        float ring =
+    // Watch版と同じ、上部・中央・下部の
+    // 3色による縦方向グラデーションです。
+    float4 color =
+        mix(
+            u.highlightColor,
+            u.mainColor,
             smoothstep(
-                radius,
-                radius * 0.72,
-                distanceToBubble
-            ) *
-            smoothstep(
-                radius * 0.38,
-                radius * 0.62,
-                distanceToBubble
-            );
-        float insideLiquid = smoothstep(
-            surface + 0.030,
-            surface + 0.060,
-            by
+                0.02,
+                0.34,
+                depth
+            )
         );
 
-        bubbleAmount +=
-            (bubble * 0.34 + ring * 0.58) *
-            insideLiquid;
-    }
+    color =
+        mix(
+            color,
+            u.deepColor,
+            smoothstep(
+                0.48,
+                1.0,
+                depth
+            )
+        );
 
-    color.rgb = mix(
-        color.rgb,
-        u.foamColor.rgb,
-        saturateValue(bubbleAmount) * 0.42
-    );
+    // Watch版の2枚目の白い波レイヤーを、
+    // 追加のShapeを生成せず同一Fragment内で再現します。
+    float secondaryFill =
+        max(0.0, fill - 0.02);
 
-    float sideLight =
-        smoothstep(0.0, 0.25, uv.x) *
-        smoothstep(1.0, 0.75, uv.x);
-    color.rgb *= mix(0.86, 1.05, sideLight);
+    float secondarySurface =
+        1.0 -
+        secondaryFill +
+        watchStyleWave(
+            uv.x,
+            phase + 1.65,
+            amplitude * 1.35
+        );
 
-    color.a *= alpha;
+    float secondaryAlpha =
+        smoothstep(
+            secondarySurface - 0.012,
+            secondarySurface + 0.008,
+            uv.y
+        ) *
+        liquidAlpha;
+
+    color.rgb =
+        mix(
+            color.rgb,
+            float3(1.0),
+            secondaryAlpha * 0.10
+        );
+
+    // Watch版のRadialGradient相当。
+    // 気泡やコースティクスより大幅に軽い1回の距離計算のみです。
+    float radialHighlight =
+        1.0 -
+        smoothstep(
+            0.0,
+            0.72,
+            distance(
+                uv,
+                float2(0.24, 0.18)
+            )
+        );
+
+    color.rgb +=
+        u.highlightColor.rgb *
+        radialHighlight *
+        0.055 *
+        liquidAlpha;
+
+    color.rgb =
+        saturate(color.rgb);
+    color.a *= liquidAlpha;
+
     return color;
 }

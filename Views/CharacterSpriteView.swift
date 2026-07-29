@@ -39,7 +39,7 @@ struct CharacterSpriteView: View {
     var body: some View {
         SpriteView(
             scene: scene,
-            preferredFramesPerSecond: 60,
+            preferredFramesPerSecond: 30,
             options: [.allowsTransparency]
         )
         .frame(
