@@ -18,6 +18,10 @@ struct RootView: View {
     @Environment(\.modelContext) private var modelContext
     @Query private var appStates: [AppState]
 
+    @AppStorage(WallpaperCatalog.selectedHomeWallpaperAssetNameKey)
+    private var selectedHomeWallpaperAssetName: String =
+        WallpaperCatalog.defaultWallpaper.assetName
+
     @StateObject private var hk = HealthKitManager()
     @StateObject private var viewModel = RootViewModel()
     @State private var onboardingViewModel = MemoOnboardingViewModel()
@@ -102,7 +106,8 @@ struct RootView: View {
                     )
                     .installMeMoWatchBridge(
                         appState: sharedState,
-                        healthKitManager: hk
+                        healthKitManager: hk,
+                        backgroundAssetName: selectedHomeWallpaperAssetName
                     )
                     .onAppear {
                         lastObservedWalletSteps = sharedState.walletSteps
