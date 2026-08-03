@@ -1,8 +1,7 @@
 //
-//  WorkTimerPreparationView.swift
+//  ShopView.swift
 //  MeMo
 //
-//  旧集中タイマーの呼び出し口を維持しながら、
 //  フィッシュポイントでアイテム・壁紙を交換するショップ画面。
 //
 
@@ -10,7 +9,7 @@ import SwiftUI
 import SwiftData
 import UIKit
 
-struct WorkTimerPreparationView: View {
+struct ShopView: View {
     @Environment(\.dismiss) private var dismiss
     @Environment(\.modelContext) private var modelContext
     @EnvironmentObject private var bgmManager: BGMManager

@@ -1,9 +1,8 @@
 //
-//  StepView.swift
+//  FishingView.swift
 //  MeMo
 //
-//  放置釣り機能。
-//  旧ランニング画面の呼び出し口を維持しながら、独立した釣り画面へ置き換える。
+//  放置釣り機能を提供する独立した釣り画面。
 //
 
 import SwiftUI
@@ -301,7 +300,7 @@ final class FishingStore: ObservableObject {
 
 // MARK: - Fishing screen
 
-struct StepView: View {
+struct FishingView: View {
     @Environment(\.dismiss) private var dismiss
     @Environment(\.scenePhase) private var scenePhase
     @EnvironmentObject private var bgmManager: BGMManager
@@ -314,7 +313,7 @@ struct StepView: View {
 
     @State private var now = Date()
     @State private var claimResult: FishingClaimResult?
-    @State private var showExchange = false
+    @State private var showShop = false
     @State private var isLowPowerModeEnabled = ProcessInfo.processInfo.isLowPowerModeEnabled
 
     private let secondTimer = Timer.publish(every: 1, on: .main, in: .common).autoconnect()
@@ -324,7 +323,7 @@ struct StepView: View {
     }
 
     private var shouldAnimateLake: Bool {
-        scenePhase == .active && claimResult == nil && !showExchange
+        scenePhase == .active && claimResult == nil && !showShop
     }
 
     private var preferredAnimationFramesPerSecond: Int {
@@ -385,8 +384,8 @@ struct StepView: View {
         .onReceive(NotificationCenter.default.publisher(for: .NSProcessInfoPowerStateDidChange)) { _ in
             isLowPowerModeEnabled = ProcessInfo.processInfo.isLowPowerModeEnabled
         }
-        .fullScreenCover(isPresented: $showExchange) {
-            WorkTimerPreparationView()
+        .fullScreenCover(isPresented: $showShop) {
+            ShopView()
                 .environmentObject(bgmManager)
                 .memoIPadPresentedPhoneCanvas()
         }
@@ -464,7 +463,7 @@ struct StepView: View {
 
             Button {
                 bgmManager.playSE(.push)
-                showExchange = true
+                showShop = true
             } label: {
                 Image(systemName: "storefront.fill")
                     .font(.system(size: 18, weight: .bold))

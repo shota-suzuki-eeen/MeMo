@@ -35,8 +35,8 @@ struct HomeView: View {
 
     @State private var showPicoStyleCamera: Bool = false
 
-    @State private var workOnboardingViewModel = MemoOnboardingViewModel()
-    @State private var stepOnboardingViewModel = MemoOnboardingViewModel()
+    @State private var shopOnboardingViewModel = MemoOnboardingViewModel()
+    @State private var fishingOnboardingViewModel = MemoOnboardingViewModel()
     @State private var cameraOnboardingViewModel = MemoOnboardingViewModel()
 
     @State private var displayedStepProgress: Double = 0
@@ -50,10 +50,10 @@ struct HomeView: View {
     @State private var lastCareTimelineTickSecond: Int64?
     @State private var isCareTimelineTickInProgress: Bool = false
 
-    @State private var showStepEnjoy: Bool = false
+    @State private var showFishingView: Bool = false
     @State private var showGachaView: Bool = false
 
-    @State private var showWorkTimerPreparation: Bool = false
+    @State private var showShopView: Bool = false
     @State private var showRightMenuPopup: Bool = false
     @State private var activeTopInfoPopup: TopInfoPopup?
     @State private var showSleepModePopup: Bool = false
@@ -789,11 +789,11 @@ struct HomeView: View {
                 picoStyleCameraOverlay
             }
             .statusBarHidden(showPicoStyleCamera)
-            .fullScreenCover(isPresented: $showWorkTimerPreparation) {
-                WorkTimerPreparationView()
-                    .memoOnboardingRoot(state: state, viewModel: workOnboardingViewModel)
+            .fullScreenCover(isPresented: $showShopView) {
+                ShopView()
+                    .memoOnboardingRoot(state: state, viewModel: shopOnboardingViewModel)
                     .onAppear {
-                        workOnboardingViewModel.presentIfNeeded(.workFocusRewardIntro, state: state)
+                        shopOnboardingViewModel.presentIfNeeded(.workFocusRewardIntro, state: state)
                     }
                     .memoIPadPresentedPhoneCanvas()
             }
@@ -802,8 +802,8 @@ struct HomeView: View {
                     .environmentObject(bgmManager)
                     .memoIPadPresentedPhoneCanvas()
             }
-            .fullScreenCover(isPresented: $showStepEnjoy) {
-                stepEnjoyPresentedView
+            .fullScreenCover(isPresented: $showFishingView) {
+                fishingPresentedView
             }
     }
 
@@ -841,25 +841,25 @@ struct HomeView: View {
     }
 
     @ViewBuilder
-    private var stepEnjoyPresentedView: some View {
+    private var fishingPresentedView: some View {
         if MemoDevice.isIPad {
             // iPadのみ、UIKit側で切り抜くのではなく SwiftUI ルート側で phone canvas を作る。
-            // これにより StepView 内部の ScrollView / topBar / screenSwitcher が最初から393幅でレイアウトされ、
-            // アクティビティ画面の左右見切れを防ぐ。
-            StepView(state: state, hk: hk, onSave: { save() })
-                .memoOnboardingRoot(state: state, viewModel: stepOnboardingViewModel)
+            // これにより FishingView 内部の ScrollView / topBar / screenSwitcher が最初から393幅でレイアウトされ、
+            // 釣り画面の左右見切れを防ぐ。
+            FishingView(state: state, hk: hk, onSave: { save() })
+                .memoOnboardingRoot(state: state, viewModel: fishingOnboardingViewModel)
                 .onAppear {
-                    stepOnboardingViewModel.presentIfNeeded(.workRouteRecordIntro, state: state)
+                    fishingOnboardingViewModel.presentIfNeeded(.workRouteRecordIntro, state: state)
                 }
                 .memoIPadPresentedPhoneCanvas()
         } else {
             // iPhoneは既存仕様を維持。
             NavigationStack {
-                StepView(state: state, hk: hk, onSave: { save() })
+                FishingView(state: state, hk: hk, onSave: { save() })
             }
-            .memoOnboardingRoot(state: state, viewModel: stepOnboardingViewModel)
+            .memoOnboardingRoot(state: state, viewModel: fishingOnboardingViewModel)
             .onAppear {
-                stepOnboardingViewModel.presentIfNeeded(.workRouteRecordIntro, state: state)
+                fishingOnboardingViewModel.presentIfNeeded(.workRouteRecordIntro, state: state)
             }
         }
     }
@@ -1320,11 +1320,11 @@ struct HomeView: View {
                 onGatya: {
                     showGachaView = true
                 },
-                onWork: {
-                    showWorkTimerPreparation = true
+                onShop: {
+                    showShopView = true
                 },
-                onStep: {
-                    onTapStep()
+                onFishing: {
+                    onTapFishing()
                 },
                 showsGachaBadge: canPerformTenGacha(now: now),
                 isToiletLocked: isToiletLocked,
@@ -3354,13 +3354,13 @@ struct HomeView: View {
     }
 
     @MainActor
-    private func onTapStep() {
+    private func onTapFishing() {
         guard !isToiletLocked else {
             showToiletLockedMessage()
             return
         }
 
-        showStepEnjoy = true
+        showFishingView = true
     }
 
     @MainActor
@@ -5061,8 +5061,8 @@ private struct BottomButtons: View {
 
     let onMenu: () -> Void
     let onGatya: () -> Void
-    let onWork: () -> Void
-    let onStep: () -> Void
+    let onShop: () -> Void
+    let onFishing: () -> Void
     let showsGachaBadge: Bool
 
     let isToiletLocked: Bool
@@ -5095,23 +5095,23 @@ private struct BottomButtons: View {
             }
 
             BottomActionButton(
-                imageName: "work_button",
+                imageName: "shop_button",
                 buttonSize: buttonSize,
                 showsNotificationBadge: false
             ) {
                 bgmManager.playSE(.push)
                 if isToiletLocked { onBlocked(); return }
-                onWork()
+                onShop()
             }
 
             BottomActionButton(
-                imageName: "step_button",
+                imageName: "fishing_button",
                 buttonSize: buttonSize,
                 showsNotificationBadge: false
             ) {
                 bgmManager.playSE(.push)
                 if isToiletLocked { onBlocked(); return }
-                onStep()
+                onFishing()
             }
         }
         .padding(.horizontal, HomeView.Layout.bottomBarHorizontalPadding)

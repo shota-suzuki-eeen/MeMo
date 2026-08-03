@@ -198,7 +198,7 @@ struct MemoTutorialZukanSwitchView: View {
             .opacity(0.55)
 
             TutorialBottomActionButton(
-                imageName: "work_button",
+                imageName: "shop_button",
                 isHighlighted: false,
                 isPulsing: false,
                 action: {}
@@ -206,7 +206,7 @@ struct MemoTutorialZukanSwitchView: View {
             .opacity(0.55)
 
             TutorialBottomActionButton(
-                imageName: "step_button",
+                imageName: "fishing_button",
                 isHighlighted: false,
                 isPulsing: false,
                 action: {}
