@@ -5,6 +5,7 @@
 //  Created by shota suzuki on 2026/03/20.
 //  2026/06 update: おやすみモード広告は起動時ではなくポップアップ表示時に画面単位プリロードします。
 //  2026/06 update: カメラ画面は fullScreenCover を使わず、ホーム上の overlay として表示します。
+//  2026/08 update: SPご飯タブ、金色表示、幸せ度25、満腹度最大の給餌仕様に対応。
 //
 
 import SwiftUI
@@ -159,7 +160,7 @@ struct HomeView: View {
     }
 
     private var ownedFoods: [FoodCatalog.FoodItem] {
-        FoodCatalog.all.filter { state.foodCount(foodId: $0.id) > 0 }
+        FoodCatalog.allIncludingSpecial.filter { state.foodCount(foodId: $0.id) > 0 }
     }
 
     private var currentFoodSelectorFoods: [FoodCatalog.FoodItem] {
@@ -299,11 +300,19 @@ struct HomeView: View {
     fileprivate enum FoodSelectorRarityTab: String, CaseIterable, Identifiable {
         case normal = "N"
         case rare = "R"
+        case special = "SP"
 
         var id: String { rawValue }
 
         var next: FoodSelectorRarityTab {
-            self == .normal ? .rare : .normal
+            switch self {
+            case .normal:
+                return .rare
+            case .rare:
+                return .special
+            case .special:
+                return .normal
+            }
         }
 
         var accentColor: Color {
@@ -312,6 +321,8 @@ struct HomeView: View {
                 return Color(red: 0.24, green: 0.56, blue: 0.98)
             case .rare:
                 return Color(red: 0.97, green: 0.34, blue: 0.38)
+            case .special:
+                return Color(red: 0.93, green: 0.69, blue: 0.12)
             }
         }
 
@@ -329,6 +340,12 @@ struct HomeView: View {
                     Color(red: 0.97, green: 0.32, blue: 0.36).opacity(0.38),
                     .clear
                 ]
+            case .special:
+                return [
+                    Color(red: 1.0, green: 0.86, blue: 0.30).opacity(0.86),
+                    Color(red: 0.94, green: 0.68, blue: 0.08).opacity(0.48),
+                    .clear
+                ]
             }
         }
 
@@ -338,15 +355,19 @@ struct HomeView: View {
                 return "Nのご飯は持っていません"
             case .rare:
                 return "Rのご飯は持っていません"
+            case .special:
+                return "SPのご飯は持っていません"
             }
         }
 
         func matches(_ food: FoodCatalog.FoodItem) -> Bool {
             switch self {
             case .normal:
-                return food.isShopEligible
+                return food.rarity == .normal
             case .rare:
-                return !food.isShopEligible
+                return food.rarity == .rare
+            case .special:
+                return food.rarity == .special
             }
         }
     }
@@ -2249,7 +2270,15 @@ struct HomeView: View {
             return false
         }
 
-        selectedFoodRarityTab = desiredFood.isShopEligible ? .normal : .rare
+        switch desiredFood.rarity {
+        case .normal:
+            selectedFoodRarityTab = .normal
+        case .rare:
+            selectedFoodRarityTab = .rare
+        case .special:
+            selectedFoodRarityTab = .special
+        }
+
         selectedFoodID = desiredFoodID
         pendingFoodFeedID = nil
         return true
@@ -2608,7 +2637,9 @@ struct HomeView: View {
         }
 
         let selectedFoodID = selectedFood.id
-        let shouldShowHeartEffect = !selectedFood.isShopEligible || state.isDesiredFood(foodID: selectedFoodID)
+        let shouldShowHeartEffect =
+            selectedFood.rarity != .normal
+            || state.isDesiredFood(foodID: selectedFoodID)
 
         pendingFoodFeedID = selectedFoodID
         isFoodFeedingAnimationRunning = true
@@ -2842,20 +2873,34 @@ struct HomeView: View {
             return false
         }
 
-        let feedResult = state.feedOnce(now: now)
-        guard feedResult.didFeed else {
-            syncDisplayedFullness(now: now)
-            syncFoodSelectorSelection()
-            return false
+        if food.fillsFullnessToMaximum {
+            state.satisfactionLevel = AppState.fullnessMaxLevel
+            state.satisfactionLastUpdatedAt = now
+        } else {
+            let feedResult = state.feedOnce(now: now)
+            guard feedResult.didFeed else {
+                syncDisplayedFullness(now: now)
+                syncFoodSelectorSelection()
+                return false
+            }
         }
 
         _ = state.resolveFood(now: now)
 
-        let happinessBonus = state.happinessBonusPoints(forFoodID: food.id)
-            + state.desiredFoodAdditionalHappinessBonus(forFoodID: food.id)
+        let happinessBonus: Int
 
-        _ = state.registerDesiredFoodFeedingResult(foodID: food.id)
-        displayedDesiredFoodID = state.desiredFoodID
+        if food.isSpecial {
+            // SPは「食べたいご飯」と一致していても追加5ポイントを加えず、
+            // 常にFoodCatalogで定義された25ポイントだけを付与する。
+            happinessBonus = food.happinessBonusPoints
+            displayedDesiredFoodID = state.desiredFoodID
+        } else {
+            happinessBonus = state.happinessBonusPoints(forFoodID: food.id)
+                + state.desiredFoodAdditionalHappinessBonus(forFoodID: food.id)
+
+            _ = state.registerDesiredFoodFeedingResult(foodID: food.id)
+            displayedDesiredFoodID = state.desiredFoodID
+        }
 
         if happinessBonus > 0 {
             _ = state.addHappinessPoints(happinessBonus, now: now)
@@ -5410,7 +5455,7 @@ private struct FoodRarityToggleButton: View {
         .buttonStyle(.plain)
         .shadow(color: .black, radius: 8, x: -2, y: 4)
         .accessibilityLabel("ご飯表示切り替え")
-        .accessibilityHint("タップするたびにNとRを切り替えます")
+        .accessibilityHint("タップするたびにN、R、SPを切り替えます")
     }
 }
 
@@ -5483,7 +5528,14 @@ private struct FoodCarouselCard: View {
     let onTap: () -> Void
 
     private var rarityTab: HomeView.FoodSelectorRarityTab {
-        item.isShopEligible ? .normal : .rare
+        switch item.rarity {
+        case .normal:
+            return .normal
+        case .rare:
+            return .rare
+        case .special:
+            return .special
+        }
     }
 
     private var clampedPosition: Double {
@@ -5586,7 +5638,14 @@ private struct PendingFoodSelectionCard: View {
     @State private var startDate: Date = Date()
 
     private var rarityTab: HomeView.FoodSelectorRarityTab {
-        item.isShopEligible ? .normal : .rare
+        switch item.rarity {
+        case .normal:
+            return .normal
+        case .rare:
+            return .rare
+        case .special:
+            return .special
+        }
     }
 
     private var dragFollowOffsetY: CGFloat {

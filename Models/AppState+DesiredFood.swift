@@ -28,7 +28,8 @@ extension AppState {
     var desiredFoodID: String? {
         get {
             guard let foodID = desiredFoodDefaults.string(forKey: DesiredFoodStorageKeys.currentFoodID),
-                  FoodCatalog.byId(foodID) != nil else {
+                  let food = FoodCatalog.byId(foodID),
+                  !food.isSpecial else {
                 return nil
             }
             return foodID
@@ -36,7 +37,9 @@ extension AppState {
         set {
             let previousValue = desiredFoodID
 
-            if let newValue, FoodCatalog.byId(newValue) != nil {
+            if let newValue,
+               let food = FoodCatalog.byId(newValue),
+               !food.isSpecial {
                 desiredFoodDefaults.set(newValue, forKey: DesiredFoodStorageKeys.currentFoodID)
             } else {
                 desiredFoodDefaults.removeObject(forKey: DesiredFoodStorageKeys.currentFoodID)
@@ -52,12 +55,11 @@ extension AppState {
         return FoodCatalog.byId(desiredFoodID)
     }
 
-    /// アプリ内に存在するすべてのごはんからランダム選択する。
-    /// 所持していないごはんも対象。直前と同じごはんは、候補が1つだけの場合を除き避ける。
+    /// N / R からランダム選択する。SPは「食べたいご飯」の抽選対象外。
     @discardableResult
     func refreshDesiredFood(excluding excludedFoodID: String? = nil) -> FoodCatalog.FoodItem? {
         let currentID = desiredFoodID
-        let allFoods = FoodCatalog.all
+        let allFoods = FoodCatalog.all.filter { !$0.isSpecial }
 
         guard !allFoods.isEmpty else {
             desiredFoodID = nil
@@ -91,7 +93,6 @@ extension AppState {
         return nextFood
     }
 
-    /// 表示対象が未設定またはカタログから消えた場合だけ補完する。
     @discardableResult
     func ensureDesiredFoodIfNeeded() -> FoodCatalog.FoodItem? {
         if let desiredFood {
@@ -105,13 +106,18 @@ extension AppState {
     }
 
     func desiredFoodAdditionalHappinessBonus(forFoodID foodID: String) -> Int {
-        isDesiredFood(foodID: foodID) ? AppState.desiredFoodMatchBonusPoints : 0
+        guard let food = FoodCatalog.byId(foodID), !food.isSpecial else {
+            return 0
+        }
+        return isDesiredFood(foodID: foodID) ? AppState.desiredFoodMatchBonusPoints : 0
     }
 
-    /// ごはんを正常に食べ、満腹度が増えた後に呼び出す。
-    /// ボーナス計算はこのメソッドの前に行うこと。ここで次の食べたいごはんへ切り替えるため。
     @discardableResult
     func registerDesiredFoodFeedingResult(foodID: String) -> Bool {
+        guard let food = FoodCatalog.byId(foodID), !food.isSpecial else {
+            return false
+        }
+
         let matched = isDesiredFood(foodID: foodID)
 
         if matched {
