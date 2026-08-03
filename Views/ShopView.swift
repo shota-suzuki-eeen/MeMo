@@ -210,8 +210,6 @@ struct ShopView: View {
 
     private func itemCard(_ offer: FishingItemOffer) -> some View {
         let canAfford = fishingStore.pointBalance >= offer.price
-        let remainingBalance = max(0, fishingStore.pointBalance - offer.price)
-        let shortage = max(0, offer.price - fishingStore.pointBalance)
 
         return HStack(spacing: 14) {
             Image(offer.assetName)
@@ -240,36 +238,54 @@ struct ShopView: View {
                 .font(.system(size: 14, weight: .bold))
                 .foregroundStyle(.secondary)
 
-                Text(canAfford ? "交換後 \(remainingBalance) pt" : "あと \(shortage) pt必要")
+                Text("現在の所持数：\(currentOwnedText(for: offer))")
                     .font(.system(size: 11, weight: .bold))
-                    .foregroundStyle(canAfford ? Color.secondary : Color.red)
+                    .foregroundStyle(.secondary)
                     .monospacedDigit()
             }
             .frame(maxWidth: .infinity, alignment: .leading)
             .allowsHitTesting(false)
 
-            Button {
-                requestExchange(.item(offer))
-            } label: {
-                Text("交換")
-                    .font(.system(size: 14, weight: .black))
-                    .foregroundStyle(.white)
-                    .frame(minWidth: 74, minHeight: 42)
-                    .background(
-                        canAfford
-                            ? Color(red: 0.10, green: 0.63, blue: 0.88)
-                            : Color.gray,
-                        in: Capsule()
-                    )
-                    .contentShape(Capsule())
+            VStack(spacing: 10) {
+                Button {
+                    bgmManager.playSE(.push)
+                    presentedExchangeModal = .information(offer)
+                } label: {
+                    Image(systemName: "info.circle")
+                        .font(.system(size: 17, weight: .semibold))
+                        .foregroundStyle(Color.secondary.opacity(0.72))
+                        .frame(width: 34, height: 34)
+                        .contentShape(Circle())
+                }
+                .buttonStyle(.plain)
+                .accessibilityLabel("\(offer.name)の情報を表示")
+
+                Spacer(minLength: 2)
+
+                Button {
+                    requestExchange(.item(offer))
+                } label: {
+                    Text("交換")
+                        .font(.system(size: 14, weight: .black))
+                        .foregroundStyle(.white)
+                        .frame(minWidth: 74, minHeight: 42)
+                        .background(
+                            canAfford
+                                ? Color(red: 0.10, green: 0.63, blue: 0.88)
+                                : Color.gray,
+                            in: Capsule()
+                        )
+                        .contentShape(Capsule())
+                }
+                .buttonStyle(.plain)
+                .accessibilityLabel("\(offer.name)を\(offer.price)ポイントで交換")
+                .accessibilityHint(
+                    canAfford
+                        ? "交換内容を確認します"
+                        : "不足しているポイント数を表示します"
+                )
             }
-            .buttonStyle(.plain)
-            .accessibilityLabel("\(offer.name)を\(offer.price)ポイントで交換")
-            .accessibilityHint(
-                canAfford
-                    ? "交換内容を確認します"
-                    : "不足しているポイント数を表示します"
-            )
+            .frame(minHeight: 102)
         }
         .padding(14)
         .background(.ultraThinMaterial, in: RoundedRectangle(cornerRadius: 22, style: .continuous))
@@ -281,12 +297,32 @@ struct ShopView: View {
         .shadow(color: .black.opacity(0.16), radius: 10, x: 0, y: 6)
     }
 
+    private func currentOwnedText(for offer: FishingItemOffer) -> String {
+        guard let appState else {
+            switch offer.reward {
+            case .steps:
+                return "0歩"
+            case .food, .toilet:
+                return "0個"
+            }
+        }
+
+        switch offer.reward {
+        case .food(let foodID, _):
+            return "\(appState.foodCount(foodId: foodID))個"
+
+        case .toilet:
+            return "\(appState.gachaSpecialItemCount(id: "wc"))個"
+
+        case .steps:
+            return "\(max(0, appState.walletSteps))歩"
+        }
+    }
+
     private func wallpaperCard(_ offer: FishingWallpaperOffer) -> some View {
         let isUnlocked = fishingStore.isWallpaperUnlocked(assetName: offer.wallpaper.assetName)
         let isSelected = selectedHomeWallpaperAssetName == offer.wallpaper.assetName
         let canAfford = fishingStore.pointBalance >= offer.price
-        let remainingBalance = max(0, fishingStore.pointBalance - offer.price)
-        let shortage = max(0, offer.price - fishingStore.pointBalance)
 
         return VStack(spacing: 0) {
             ZStack(alignment: .topTrailing) {
@@ -322,13 +358,6 @@ struct ShopView: View {
                     }
                     .font(.system(size: 14, weight: .bold))
                     .foregroundStyle(.secondary)
-
-                    if !isUnlocked {
-                        Text(canAfford ? "交換後 \(remainingBalance) pt" : "あと \(shortage) pt必要")
-                            .font(.system(size: 11, weight: .bold))
-                            .foregroundStyle(canAfford ? Color.secondary : Color.red)
-                            .monospacedDigit()
-                    }
                 }
                 .allowsHitTesting(false)
 
@@ -570,6 +599,10 @@ struct ShopView: View {
         let tint: Color
 
         switch modal {
+        case .information:
+            iconName = "info.circle.fill"
+            tint = Color(red: 0.10, green: 0.63, blue: 0.88)
+
         case .confirmation:
             iconName = "arrow.left.arrow.right.circle.fill"
             tint = Color(red: 0.10, green: 0.63, blue: 0.88)
@@ -599,6 +632,9 @@ struct ShopView: View {
     @ViewBuilder
     private func modalButtons(_ modal: FishingShopExchangeModal) -> some View {
         switch modal {
+        case .information:
+            closeModalButton
+
         case .confirmation(let target, _):
             VStack(spacing: 10) {
                 Button {
@@ -717,6 +753,7 @@ private struct FishingItemOffer: Identifiable, Hashable {
     let name: String
     let assetName: String
     let detailText: String
+    let informationText: String
     let price: Int
     let reward: FishingShopReward
 
@@ -726,6 +763,7 @@ private struct FishingItemOffer: Identifiable, Hashable {
             name: "焼肉定食",
             assetName: "food_yakiniku",
             detailText: "SPの焼肉定食を1個獲得します。",
+            informationText: "お腹が空いている時に食べさせてあげると一個で満腹になり、幸せ度を25pt獲得できるスペシャルなご飯。月一で食べたくなるよね...",
             price: 150,
             reward: .food(foodID: "yakiniku", count: 1)
         ),
@@ -734,6 +772,7 @@ private struct FishingItemOffer: Identifiable, Hashable {
             name: "トイレ",
             assetName: "wc",
             detailText: "既存のトイレアイテムを1個獲得します。",
+            informationText: "消費することで一発でうんちを掃除してくれる必需品。現実にも欲しすぎる。",
             price: 50,
             reward: .toilet(count: 1)
         ),
@@ -742,6 +781,7 @@ private struct FishingItemOffer: Identifiable, Hashable {
             name: "歩数",
             assetName: "shoes",
             detailText: "所持歩数を500歩追加します。",
+            informationText: "500歩分の歩数を獲得できる。今日はご褒美で楽してガチャしよう！",
             price: 100,
             reward: .steps(amount: 500)
         )
@@ -790,6 +830,7 @@ private enum FishingShopExchangeTarget: Identifiable, Hashable {
 }
 
 private enum FishingShopExchangeModal: Identifiable {
+    case information(FishingItemOffer)
     case confirmation(FishingShopExchangeTarget, remainingBalance: Int)
     case exchanged(FishingShopExchangeTarget, remainingBalance: Int)
     case insufficient(FishingShopExchangeTarget, shortage: Int)
@@ -798,6 +839,8 @@ private enum FishingShopExchangeModal: Identifiable {
 
     var id: String {
         switch self {
+        case .information(let offer):
+            return "information.\(offer.id)"
         case .confirmation(let target, _):
             return "confirmation.\(target.id)"
         case .exchanged(let target, _):
@@ -813,6 +856,8 @@ private enum FishingShopExchangeModal: Identifiable {
 
     var title: String {
         switch self {
+        case .information(let offer):
+            return offer.name
         case .confirmation(let target, _):
             return "\(target.exchangeNoun)と交換しますか？"
         case .exchanged(let target, _):
@@ -828,6 +873,11 @@ private enum FishingShopExchangeModal: Identifiable {
 
     var message: String {
         switch self {
+        case .information(let offer):
+            return offer.informationText
+                .replacingOccurrences(of: "。", with: "。\n")
+                .trimmingCharacters(in: .whitespacesAndNewlines)
+
         case .confirmation(let target, let remainingBalance):
             return "「\(target.name)」と交換します。\n交換後の残高は\(remainingBalance) ptです。"
 
