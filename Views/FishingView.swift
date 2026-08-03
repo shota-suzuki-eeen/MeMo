@@ -342,8 +342,8 @@ struct FishingView: View {
                     isActive: shouldAnimateLake,
                     preferredFramesPerSecond: preferredAnimationFramesPerSecond
                 )
-                    .frame(maxWidth: .infinity, maxHeight: .infinity)
-                    .allowsHitTesting(false)
+                .frame(maxWidth: .infinity, maxHeight: .infinity)
+                .allowsHitTesting(false)
 
                 characterLayer(in: geo.size)
                 interfaceLayer(in: geo)
@@ -598,7 +598,7 @@ private struct FishingSceneryView: View {
 
     private enum Layout {
         // fishing_background / fishing_lake は同一キャンバス前提。
-        // 上側43%は空・山・森で、水面描画対象外としてMTKView自体を配置しない。
+        // 上側40.5%は空・山・森で、水面描画対象外としてMTKView自体を配置しない。
         // fishing_lake は実際の水面として描画し、同じ画像から境界マスクも生成する。
         static let lakeTopRatio: CGFloat = 0.405
 
@@ -690,9 +690,32 @@ private struct FishingCharacterSpriteView: View {
     }
 }
 
+/// 釣り竿・ウキを画像アセットで表示する釣り画面専用レイヤー。
+/// 糸は描画せず、ウキは下側をマスクして水中へ沈んでいるように見せる。
 private struct FishingRodAndBobberView: View {
     let isActive: Bool
     let preferredFramesPerSecond: Int
+
+    private enum Layout {
+        // キャラクターの右手付近に竿の持ち手が来るよう、全体を右下へ寄せる。
+        // 併せて竿・ウキともにさらに小さく表示する。
+        static let rodWidthRatio: CGFloat = 0.24
+        static let rodCenterXRatio: CGFloat = 0.32
+        static let rodCenterYRatio: CGFloat = 0.72
+
+        static let bobberWidthRatio: CGFloat = 0.048
+        static let bobberCenterXRatio: CGFloat = 0.68
+        static let bobberWaterlineYRatio: CGFloat = 0.69
+
+        // アセット比率は初回だけ取得し、TimelineViewのフレーム更新ごとの画像参照を避ける。
+        static let bobberAspectRatio: CGFloat = {
+            guard let image = UIImage(named: "bobber"), image.size.width > 0 else { return 1 }
+            return image.size.height / image.size.width
+        }()
+
+        // 上側62%だけを見せ、下側38%は水面より下へ沈んでいる扱いにする。
+        static let bobberVisibleRatio: CGFloat = 0.62
+    }
 
     var body: some View {
         TimelineView(
@@ -703,52 +726,61 @@ private struct FishingRodAndBobberView: View {
         ) { timeline in
             GeometryReader { geo in
                 let time = timeline.date.timeIntervalSinceReferenceDate
-                let bob = CGFloat(sin(time * 2.1)) * 3.2
-                let tip = CGPoint(x: geo.size.width * 0.42, y: geo.size.height * 0.48)
-                let handle = CGPoint(x: geo.size.width * 0.28, y: geo.size.height * 0.78)
-                let bobber = CGPoint(x: geo.size.width * 0.67, y: geo.size.height * 0.61 + bob)
+                let activeTime = isActive ? time : 0
+
+                let verticalBob = CGFloat(sin(activeTime * 1.85)) * 2.8
+                let horizontalDrift = CGFloat(sin(activeTime * 0.82 + 0.7)) * 1.2
+                let rotation = Double(sin(activeTime * 1.25 + 0.45)) * 1.35
+                let rippleScale = 1 + CGFloat(sin(activeTime * 1.85)) * 0.045
+
+                let rodWidth = min(max(geo.size.width * Layout.rodWidthRatio, 92), 175)
+                let bobberWidth = min(max(geo.size.width * Layout.bobberWidthRatio, 16), 26)
+                let bobberHeight = bobberWidth * Layout.bobberAspectRatio
+                let visibleBobberHeight = bobberHeight * Layout.bobberVisibleRatio
+                let bobberX = geo.size.width * Layout.bobberCenterXRatio + horizontalDrift
+                let waterlineY = geo.size.height * Layout.bobberWaterlineYRatio
 
                 ZStack {
-                    Path { path in
-                        path.move(to: handle)
-                        path.addQuadCurve(
-                            to: tip,
-                            control: CGPoint(x: geo.size.width * 0.37, y: geo.size.height * 0.60)
+                    Image("fishingRod")
+                        .resizable()
+                        .scaledToFit()
+                        .frame(width: rodWidth)
+                        .position(
+                            x: geo.size.width * Layout.rodCenterXRatio,
+                            y: geo.size.height * Layout.rodCenterYRatio
                         )
-                    }
-                    .stroke(
-                        LinearGradient(
-                            colors: [Color(red: 0.34, green: 0.17, blue: 0.06), Color(red: 0.70, green: 0.42, blue: 0.16)],
-                            startPoint: .bottom,
-                            endPoint: .top
-                        ),
-                        style: StrokeStyle(lineWidth: 6, lineCap: .round)
-                    )
+                        .shadow(color: .black.opacity(0.18), radius: 3, x: 0, y: 2)
 
-                    Path { path in
-                        path.move(to: tip)
-                        path.addQuadCurve(
-                            to: bobber,
-                            control: CGPoint(x: geo.size.width * 0.56, y: geo.size.height * 0.50)
-                        )
-                    }
-                    .stroke(Color.white.opacity(0.86), style: StrokeStyle(lineWidth: 1.3, lineCap: .round))
+                    // 波紋は水面位置に固定し、ウキ本体だけがわずかに上下する。
+                    Ellipse()
+                        .stroke(Color.white.opacity(0.30), lineWidth: 1.1)
+                        .frame(width: bobberWidth * 1.28, height: max(4, bobberWidth * 0.20))
+                        .scaleEffect(x: rippleScale, y: 1)
+                        .position(x: bobberX, y: waterlineY)
 
-                    Capsule()
-                        .fill(Color.red)
-                        .overlay(
-                            Capsule()
-                                .fill(Color.white)
-                                .frame(height: 10)
-                                .offset(y: 5)
+                    Image("bobber")
+                        .resizable()
+                        .scaledToFit()
+                        .frame(width: bobberWidth, height: bobberHeight)
+                        .rotationEffect(.degrees(rotation), anchor: .bottom)
+                        .offset(y: verticalBob)
+                        .frame(
+                            width: bobberWidth * 1.22,
+                            height: visibleBobberHeight,
+                            alignment: .top
                         )
-                        .frame(width: 13, height: 25)
-                        .position(bobber)
-                        .shadow(color: .black.opacity(0.26), radius: 3, x: 0, y: 2)
+                        .clipped()
+                        .position(
+                            x: bobberX,
+                            y: waterlineY - (visibleBobberHeight / 2)
+                        )
+                        .shadow(color: .black.opacity(0.22), radius: 2.5, x: 0, y: 1.5)
                 }
+                .frame(width: geo.size.width, height: geo.size.height)
             }
         }
         .allowsHitTesting(false)
+        .accessibilityHidden(true)
     }
 }
 
