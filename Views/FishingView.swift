@@ -92,6 +92,14 @@ struct FishingClaimResult: Identifiable, Hashable {
     let newPointBalance: Int
 }
 
+struct FishingSingleClaimResult: Identifiable, Hashable {
+    let id = UUID()
+    let fish: FishDefinition
+    let previousPointBalance: Int
+    let earnedPoints: Int
+    let newPointBalance: Int
+}
+
 // MARK: - Fishing persistence
 
 final class FishingStore: ObservableObject {
@@ -193,6 +201,70 @@ final class FishingStore: ObservableObject {
         persist()
     }
 
+    /// 保留中の魚から1匹をランダムに選び、1匹分だけ受け取る。
+    /// 満杯状態から受け取った場合は、その時点から次の20分計測を再開する。
+    @discardableResult
+    func claimOnePendingCatch(now: Date = Date()) -> FishingSingleClaimResult? {
+        refresh(now: now)
+
+        let totalCount = pendingCatchCount
+        guard totalCount > 0 else { return nil }
+
+        let wasBasketFull = isBasketFull
+        var selectedIndex = Int.random(in: 0..<totalCount)
+        var selectedFish: FishDefinition?
+
+        for fish in FishCatalog.all {
+            let count = max(0, pendingCounts[fish.id] ?? 0)
+            guard count > 0 else { continue }
+
+            if selectedIndex < count {
+                selectedFish = fish
+                break
+            }
+            selectedIndex -= count
+        }
+
+        guard let fish = selectedFish else { return nil }
+
+        var nextPendingCounts = pendingCounts
+        let remainingCount = max(0, (nextPendingCounts[fish.id] ?? 0) - 1)
+        if remainingCount == 0 {
+            nextPendingCounts.removeValue(forKey: fish.id)
+        } else {
+            nextPendingCounts[fish.id] = remainingCount
+        }
+        pendingCounts = nextPendingCounts
+
+        let previousBalance = max(0, pointBalance)
+        let earnedPoints = max(0, fish.pointValue)
+        pointBalance = previousBalance + earnedPoints
+
+        var nextLifetime = lifetimeCaughtCounts
+        nextLifetime[fish.id, default: 0] += 1
+        lifetimeCaughtCounts = nextLifetime
+
+        if firstCaughtDates[fish.id] == nil {
+            var nextFirstDates = firstCaughtDates
+            nextFirstDates[fish.id] = now
+            firstCaughtDates = nextFirstDates
+        }
+
+        if wasBasketFull {
+            lastCalculatedAt = now
+        }
+
+        persist()
+
+        return FishingSingleClaimResult(
+            fish: fish,
+            previousPointBalance: previousBalance,
+            earnedPoints: earnedPoints,
+            newPointBalance: pointBalance
+        )
+    }
+
+    /// 旧UIとの互換性を維持するため、一括受取APIも残す。
     @discardableResult
     func claimPendingCatches(now: Date = Date()) -> FishingClaimResult? {
         refresh(now: now)
@@ -312,8 +384,10 @@ struct FishingView: View {
     @ObservedObject private var fishingStore = FishingStore.shared
 
     @State private var now = Date()
-    @State private var claimResult: FishingClaimResult?
     @State private var showShop = false
+    @State private var showFishingInformation = false
+    @State private var floatingRewards: [FishingFloatingReward] = []
+    @State private var continuousClaimTask: Task<Void, Never>?
     @State private var isLowPowerModeEnabled = ProcessInfo.processInfo.isLowPowerModeEnabled
 
     private let secondTimer = Timer.publish(every: 1, on: .main, in: .common).autoconnect()
@@ -323,7 +397,7 @@ struct FishingView: View {
     }
 
     private var shouldAnimateLake: Bool {
-        scenePhase == .active && claimResult == nil && !showShop
+        scenePhase == .active && !showShop && !showFishingInformation
     }
 
     private var preferredAnimationFramesPerSecond: Int {
@@ -348,10 +422,11 @@ struct FishingView: View {
                 characterLayer(in: geo.size)
                 interfaceLayer(in: geo)
 
-                if let claimResult {
-                    FishingResultOverlay(result: claimResult) {
+                if showFishingInformation {
+                    FishingInformationOverlay {
+                        bgmManager.playSE(.push)
                         withAnimation(.easeInOut(duration: 0.2)) {
-                            self.claimResult = nil
+                            showFishingInformation = false
                         }
                     }
                     .transition(.opacity)
@@ -370,6 +445,7 @@ struct FishingView: View {
             fishingStore.refresh(now: now)
         }
         .onDisappear {
+            stopContinuousClaiming()
             bgmManager.restoreDefaultBackground()
         }
         .onReceive(secondTimer) { date in
@@ -377,7 +453,10 @@ struct FishingView: View {
             fishingStore.refresh(now: date)
         }
         .onChange(of: scenePhase) { _, newPhase in
-            guard newPhase == .active else { return }
+            guard newPhase == .active else {
+                stopContinuousClaiming()
+                return
+            }
             now = Date()
             fishingStore.refresh(now: now)
         }
@@ -429,7 +508,7 @@ struct FishingView: View {
 
             receiveArea
                 .padding(.horizontal, 20)
-                .padding(.bottom, max(geo.safeAreaInsets.bottom, 18) + 12)
+                .padding(.bottom, max(geo.safeAreaInsets.bottom, 18) + 2)
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
         .zIndex(100)
@@ -477,75 +556,132 @@ struct FishingView: View {
     }
 
     private var statusArea: some View {
-        HStack(spacing: 10) {
-            FishingStatusCard(
-                icon: "fish.fill",
-                title: "魚かご",
-                value: "\(fishingStore.pendingCatchCount) / \(FishingStore.basketCapacity)"
-            )
+        VStack(alignment: .trailing, spacing: 8) {
+            HStack(spacing: 10) {
+                FishingStatusCard(
+                    icon: "fish.fill",
+                    title: "魚かご",
+                    value: "\(fishingStore.pendingCatchCount) / \(FishingStore.basketCapacity)"
+                )
 
-            FishingStatusCard(
-                icon: "clock.fill",
-                title: fishingStore.isBasketFull ? "釣りは停止中" : "次の釣果",
-                value: fishingStore.isBasketFull
-                    ? "満杯"
-                    : Self.timeText(seconds: fishingStore.secondsUntilNextCatch(now: now) ?? 0)
-            )
+                FishingStatusCard(
+                    icon: "clock.fill",
+                    title: fishingStore.isBasketFull ? "釣りは停止中" : "次の釣果",
+                    value: fishingStore.isBasketFull
+                        ? "満杯"
+                        : Self.timeText(seconds: fishingStore.secondsUntilNextCatch(now: now) ?? 0)
+                )
 
-            FishingStatusCard(
-                icon: "sparkles",
-                title: "フィッシュpt",
-                value: "\(fishingStore.pointBalance)"
-            )
-        }
-    }
-
-    private var receiveArea: some View {
-        VStack(spacing: 9) {
-            if fishingStore.pendingCatchCount > 0 {
-                Text("魚の種類ごとに釣果を確認できます")
-                    .font(.system(size: 13, weight: .bold))
-                    .foregroundStyle(.white.opacity(0.92))
-                    .shadow(color: .black.opacity(0.3), radius: 3)
-            } else {
-                Text("20分ごとに魚が1匹釣れます")
-                    .font(.system(size: 13, weight: .bold))
-                    .foregroundStyle(.white.opacity(0.92))
-                    .shadow(color: .black.opacity(0.3), radius: 3)
+                FishingStatusCard(
+                    icon: "sparkles",
+                    title: "フィッシュpt",
+                    value: "\(fishingStore.pointBalance)"
+                )
             }
 
             Button {
                 bgmManager.playSE(.push)
-                guard let result = fishingStore.claimPendingCatches(now: Date()) else { return }
+                stopContinuousClaiming()
                 withAnimation(.easeInOut(duration: 0.2)) {
-                    claimResult = result
+                    showFishingInformation = true
                 }
             } label: {
-                HStack(spacing: 10) {
-                    Image(systemName: "basket.fill")
-                    Text(fishingStore.pendingCatchCount > 0 ? "釣果を受け取る" : "釣り中…")
-                }
-                .font(.system(size: 19, weight: .black, design: .rounded))
-                .foregroundStyle(fishingStore.pendingCatchCount > 0 ? Color.white : Color.white.opacity(0.72))
-                .frame(maxWidth: .infinity)
-                .frame(height: 58)
-                .background(
-                    RoundedRectangle(cornerRadius: 22, style: .continuous)
-                        .fill(
-                            fishingStore.pendingCatchCount > 0
-                                ? Color(red: 0.10, green: 0.63, blue: 0.88)
-                                : Color.black.opacity(0.38)
-                        )
-                )
-                .overlay(
-                    RoundedRectangle(cornerRadius: 22, style: .continuous)
-                        .stroke(Color.white.opacity(0.48), lineWidth: 1.5)
-                )
-                .shadow(color: .black.opacity(0.24), radius: 12, x: 0, y: 7)
+                Image(systemName: "info.circle.fill")
+                    .font(.system(size: 23, weight: .bold))
+                    .foregroundStyle(.white)
+                    .frame(width: 38, height: 38)
+                    .background(Color.black.opacity(0.42), in: Circle())
+                    .overlay(
+                        Circle()
+                            .stroke(Color.white.opacity(0.32), lineWidth: 1)
+                    )
             }
             .buttonStyle(.plain)
-            .disabled(fishingStore.pendingCatchCount == 0)
+            .accessibilityLabel("釣りの説明")
         }
+    }
+
+    private var receiveArea: some View {
+        ZStack(alignment: .bottom) {
+            ForEach(floatingRewards) { reward in
+                FishingFloatingRewardView(reward: reward)
+                    .offset(x: reward.xOffset, y: reward.yOffset)
+                    .transition(.scale(scale: 0.72).combined(with: .opacity))
+                    .allowsHitTesting(false)
+            }
+
+            FishingBucketReceiveControl(
+                caughtCount: fishingStore.pendingCatchCount,
+                capacity: FishingStore.basketCapacity,
+                onTap: claimOneFish,
+                onLongPressBegan: startContinuousClaiming,
+                onLongPressEnded: stopContinuousClaiming
+            )
+        }
+        .frame(maxWidth: .infinity)
+        // 獲得表示を円形メーターの上へ完全に逃がすため、
+        // メーター上側に十分な表示領域を確保する。
+        .frame(height: 285)
+    }
+
+    private func claimOneFish() {
+        guard let result = fishingStore.claimOnePendingCatch(now: Date()) else {
+            stopContinuousClaiming()
+            return
+        }
+
+        bgmManager.playSE(.push)
+
+        let reward = FishingFloatingReward(
+            result: result,
+            xOffset: CGFloat.random(in: -62...62),
+            // 円形メーター（174pt）の上端よりさらに上へ配置し、
+            // 魚アセット・pt表示がメーターと重ならないようにする。
+            yOffset: CGFloat.random(in: -250 ... -200)
+        )
+
+        withAnimation(.spring(response: 0.28, dampingFraction: 0.72)) {
+            floatingRewards.append(reward)
+            if floatingRewards.count > 6 {
+                floatingRewards.removeFirst(floatingRewards.count - 6)
+            }
+        }
+
+        Task { @MainActor in
+            try? await Task.sleep(nanoseconds: 1_250_000_000)
+            withAnimation(.easeOut(duration: 0.24)) {
+                floatingRewards.removeAll(where: { $0.id == reward.id })
+            }
+        }
+
+        if fishingStore.pendingCatchCount == 0 {
+            stopContinuousClaiming()
+        }
+    }
+
+    private func startContinuousClaiming() {
+        guard continuousClaimTask == nil else { return }
+        guard fishingStore.pendingCatchCount > 0 else { return }
+
+        claimOneFish()
+        guard fishingStore.pendingCatchCount > 0 else { return }
+
+        continuousClaimTask = Task { @MainActor in
+            while !Task.isCancelled {
+                try? await Task.sleep(nanoseconds: 300_000_000)
+                guard !Task.isCancelled else { return }
+                guard fishingStore.pendingCatchCount > 0 else {
+                    continuousClaimTask = nil
+                    return
+                }
+                claimOneFish()
+            }
+        }
+    }
+
+    private func stopContinuousClaiming() {
+        continuousClaimTask?.cancel()
+        continuousClaimTask = nil
     }
 
     private static func timeText(seconds: TimeInterval) -> String {
@@ -553,6 +689,256 @@ struct FishingView: View {
         let minutes = safe / 60
         let remainingSeconds = safe % 60
         return String(format: "%02d:%02d", minutes, remainingSeconds)
+    }
+}
+
+// MARK: - Bucket receive UI
+
+private struct FishingFloatingReward: Identifiable, Hashable {
+    let id = UUID()
+    let result: FishingSingleClaimResult
+    let xOffset: CGFloat
+    let yOffset: CGFloat
+}
+
+private struct FishingBucketReceiveControl: View {
+    let caughtCount: Int
+    let capacity: Int
+    let onTap: () -> Void
+    let onLongPressBegan: () -> Void
+    let onLongPressEnded: () -> Void
+
+    @State private var didRecognizeLongPress = false
+
+    private var safeCount: Int {
+        min(max(0, caughtCount), max(1, capacity))
+    }
+
+    private var progress: CGFloat {
+        CGFloat(safeCount) / CGFloat(max(1, capacity))
+    }
+
+    private var bucketAssetName: String {
+        if safeCount == 0 {
+            return "bucket"
+        }
+        if safeCount >= max(1, capacity) {
+            return "bucket_full"
+        }
+        return "bucket_mid"
+    }
+
+    var body: some View {
+        ZStack {
+            Circle()
+                .stroke(Color.black.opacity(0.32), lineWidth: 9)
+                .frame(width: 154, height: 154)
+
+            Circle()
+                .trim(from: 0, to: progress)
+                .stroke(
+                    AngularGradient(
+                        colors: [
+                            Color(red: 0.24, green: 0.82, blue: 1.00),
+                            Color.white,
+                            Color(red: 0.18, green: 0.68, blue: 0.96)
+                        ],
+                        center: .center
+                    ),
+                    style: StrokeStyle(lineWidth: 9, lineCap: .round, lineJoin: .round)
+                )
+                .rotationEffect(.degrees(-90))
+                .animation(.easeInOut(duration: 0.25), value: progress)
+                .frame(width: 154, height: 154)
+                .shadow(color: .black.opacity(0.28), radius: 4, x: 0, y: 2)
+
+            Image(bucketAssetName)
+                .resizable()
+                .scaledToFit()
+                .frame(width: 124, height: 124)
+                .contentShape(Circle())
+                .shadow(color: .black.opacity(0.25), radius: 8, x: 0, y: 6)
+
+            Text("\(max(0, caughtCount))")
+                .font(.system(size: 16, weight: .black, design: .rounded))
+                .foregroundStyle(.white)
+                .monospacedDigit()
+                .frame(minWidth: 31, minHeight: 31)
+                .padding(.horizontal, caughtCount >= 100 ? 4 : 0)
+                .background(Color.red, in: Circle())
+                .overlay(
+                    Circle()
+                        .stroke(Color.white, lineWidth: 2)
+                )
+                .shadow(color: .black.opacity(0.32), radius: 4, x: 0, y: 2)
+                .offset(x: 57, y: -57)
+        }
+        .frame(width: 174, height: 174)
+        .contentShape(Circle())
+        .opacity(caughtCount > 0 ? 1 : 0.82)
+        .scaleEffect(didRecognizeLongPress ? 0.96 : 1)
+        .animation(.easeInOut(duration: 0.12), value: didRecognizeLongPress)
+        .onTapGesture {
+            guard !didRecognizeLongPress else { return }
+            onTap()
+        }
+        .onLongPressGesture(
+            minimumDuration: 0.35,
+            maximumDistance: 55,
+            pressing: { isPressing in
+                if !isPressing {
+                    onLongPressEnded()
+                    // 長押し解除直後にTapGestureが発火して余分に1匹取得しないよう、
+                    // フラグ解除をわずかに遅らせる。
+                    DispatchQueue.main.asyncAfter(deadline: .now() + 0.12) {
+                        didRecognizeLongPress = false
+                    }
+                }
+            },
+            perform: {
+                didRecognizeLongPress = true
+                onLongPressBegan()
+            }
+        )
+        .accessibilityElement(children: .ignore)
+        .accessibilityLabel("釣れた魚を受け取る")
+        .accessibilityValue("\(max(0, caughtCount))匹")
+        .accessibilityHint("タップで1匹、長押しで連続して受け取ります")
+    }
+}
+
+private struct FishingFloatingRewardView: View {
+    let reward: FishingFloatingReward
+
+    var body: some View {
+        HStack(spacing: 8) {
+            Image(reward.result.fish.assetName)
+                .resizable()
+                .scaledToFit()
+                .frame(width: 52, height: 52)
+
+            Text("+\(reward.result.earnedPoints) pt")
+                .font(.system(size: 17, weight: .black, design: .rounded))
+                .foregroundStyle(.white)
+                .monospacedDigit()
+        }
+        .padding(.leading, 8)
+        .padding(.trailing, 13)
+        .padding(.vertical, 7)
+        .background(Color.black.opacity(0.68), in: Capsule())
+        .overlay(
+            Capsule()
+                .stroke(reward.result.fish.rarity.accentColor.opacity(0.92), lineWidth: 2)
+        )
+        .shadow(color: .black.opacity(0.28), radius: 7, x: 0, y: 4)
+    }
+}
+
+private struct FishingInformationOverlay: View {
+    let onClose: () -> Void
+
+    var body: some View {
+        GeometryReader { geo in
+            ZStack {
+                Color.black.opacity(0.60)
+                    .ignoresSafeArea()
+                    .onTapGesture(perform: onClose)
+
+                VStack(spacing: 14) {
+                    HStack {
+                        Text("釣果の受け取り方")
+                            .font(.system(size: 23, weight: .black, design: .rounded))
+
+                        Spacer()
+
+                        Button(action: onClose) {
+                            Image(systemName: "xmark")
+                                .font(.system(size: 15, weight: .black))
+                                .foregroundStyle(.primary)
+                                .frame(width: 34, height: 34)
+                                .background(Color.black.opacity(0.08), in: Circle())
+                        }
+                        .buttonStyle(.plain)
+                    }
+
+                    HStack(alignment: .top, spacing: 10) {
+                        Image(systemName: "hand.tap.fill")
+                            .font(.system(size: 25, weight: .bold))
+                            .foregroundStyle(Color(red: 0.10, green: 0.63, blue: 0.88))
+
+                        Text("魚かごは、タップすると1匹ずつ受け取れます。\n長押しすると連続で受け取れます。")
+                            .font(.system(size: 14, weight: .bold))
+                            .frame(maxWidth: .infinity, alignment: .leading)
+                    }
+                    .padding(13)
+                    .background(Color.black.opacity(0.055), in: RoundedRectangle(cornerRadius: 16, style: .continuous))
+
+                    Text("魚の種類と獲得ポイント")
+                        .font(.system(size: 17, weight: .black, design: .rounded))
+                        .frame(maxWidth: .infinity, alignment: .leading)
+
+                    ScrollView(.vertical, showsIndicators: false) {
+                        LazyVStack(spacing: 9) {
+                            ForEach(FishCatalog.all) { fish in
+                                FishingInformationFishRow(fish: fish)
+                            }
+                        }
+                        .padding(.vertical, 2)
+                    }
+                }
+                .padding(18)
+                .frame(maxWidth: 430)
+                .frame(maxHeight: min(geo.size.height * 0.78, 650))
+                .background(.regularMaterial, in: RoundedRectangle(cornerRadius: 28, style: .continuous))
+                .overlay(
+                    RoundedRectangle(cornerRadius: 28, style: .continuous)
+                        .stroke(Color.white.opacity(0.32), lineWidth: 1)
+                )
+                .shadow(color: .black.opacity(0.32), radius: 24, x: 0, y: 14)
+                .padding(.horizontal, 18)
+            }
+            .frame(width: geo.size.width, height: geo.size.height)
+        }
+    }
+}
+
+private struct FishingInformationFishRow: View {
+    let fish: FishDefinition
+
+    var body: some View {
+        HStack(spacing: 12) {
+            Image(fish.assetName)
+                .resizable()
+                .scaledToFit()
+                .frame(width: 52, height: 52)
+                .padding(4)
+                .background(Color.white.opacity(0.72), in: RoundedRectangle(cornerRadius: 13, style: .continuous))
+
+            VStack(alignment: .leading, spacing: 4) {
+                Text(fish.name)
+                    .font(.system(size: 16, weight: .black, design: .rounded))
+
+                Text(fish.rarity.displayName)
+                    .font(.system(size: 10, weight: .black))
+                    .foregroundStyle(.white)
+                    .padding(.horizontal, 7)
+                    .padding(.vertical, 2)
+                    .background(fish.rarity.accentColor, in: Capsule())
+            }
+
+            Spacer(minLength: 8)
+
+            Text("+\(fish.pointValue) pt")
+                .font(.system(size: 17, weight: .black, design: .rounded))
+                .monospacedDigit()
+        }
+        .padding(.horizontal, 10)
+        .padding(.vertical, 8)
+        .background(Color.white.opacity(0.76), in: RoundedRectangle(cornerRadius: 17, style: .continuous))
+        .overlay(
+            RoundedRectangle(cornerRadius: 17, style: .continuous)
+                .stroke(fish.rarity.accentColor.opacity(0.24), lineWidth: 1)
+        )
     }
 }
 
@@ -784,172 +1170,6 @@ private struct FishingRodAndBobberView: View {
     }
 }
 
-// MARK: - Catch result overlay
-
-private struct FishingResultOverlay: View {
-    let result: FishingClaimResult
-    let onClose: () -> Void
-
-    @State private var visibleRowCount = 0
-    @State private var displayedEarnedPoints = 0
-    @State private var animationTask: Task<Void, Never>?
-
-    var body: some View {
-        GeometryReader { geo in
-            ZStack {
-                Color.black.opacity(0.58)
-                    .ignoresSafeArea()
-                    .onTapGesture { finishAnimations() }
-
-                VStack(spacing: 16) {
-                    Text("釣果発表！")
-                        .font(.system(size: 30, weight: .black, design: .rounded))
-                        .foregroundStyle(.white)
-
-                    ScrollView(.vertical, showsIndicators: false) {
-                        LazyVStack(spacing: 12) {
-                            ForEach(Array(result.summaries.enumerated()), id: \.element.id) { index, summary in
-                                FishingResultRow(summary: summary)
-                                    .opacity(index < visibleRowCount ? 1 : 0)
-                                    .offset(y: index < visibleRowCount ? 0 : 16)
-                            }
-                        }
-                        .padding(.vertical, 4)
-                    }
-
-                    VStack(spacing: 8) {
-                        HStack {
-                            Text("獲得ポイント")
-                            Spacer()
-                            Text("+\(displayedEarnedPoints) pt")
-                                .monospacedDigit()
-                        }
-                        .font(.system(size: 20, weight: .black, design: .rounded))
-
-                        HStack {
-                            Text("所持ポイント")
-                            Spacer()
-                            Text("\(result.previousPointBalance) → \(result.previousPointBalance + displayedEarnedPoints) pt")
-                                .monospacedDigit()
-                        }
-                        .font(.system(size: 15, weight: .bold))
-                        .foregroundStyle(.secondary)
-                    }
-                    .padding(.horizontal, 18)
-                    .padding(.vertical, 16)
-                    .background(Color.white.opacity(0.90), in: RoundedRectangle(cornerRadius: 20, style: .continuous))
-
-                    Button {
-                        finishAnimations()
-                        onClose()
-                    } label: {
-                        Text(displayedEarnedPoints >= result.earnedPoints ? "受け取った！" : "スキップ")
-                            .font(.system(size: 18, weight: .black, design: .rounded))
-                            .foregroundStyle(.white)
-                            .frame(maxWidth: .infinity)
-                            .frame(height: 54)
-                            .background(Color(red: 0.10, green: 0.63, blue: 0.88), in: RoundedRectangle(cornerRadius: 20, style: .continuous))
-                    }
-                    .buttonStyle(.plain)
-                }
-                .padding(.horizontal, 18)
-                .padding(.top, max(geo.safeAreaInsets.top, 18) + 10)
-                .padding(.bottom, max(geo.safeAreaInsets.bottom, 18) + 4)
-                .frame(maxWidth: 440, maxHeight: geo.size.height * 0.92)
-                .background(.ultraThinMaterial, in: RoundedRectangle(cornerRadius: 30, style: .continuous))
-                .overlay(
-                    RoundedRectangle(cornerRadius: 30, style: .continuous)
-                        .stroke(Color.white.opacity(0.30), lineWidth: 1)
-                )
-                .padding(.horizontal, 14)
-            }
-        }
-        .onAppear { startAnimations() }
-        .onDisappear {
-            animationTask?.cancel()
-            animationTask = nil
-        }
-    }
-
-    private func startAnimations() {
-        animationTask?.cancel()
-        visibleRowCount = 0
-        displayedEarnedPoints = 0
-
-        animationTask = Task { @MainActor in
-            for index in result.summaries.indices {
-                guard !Task.isCancelled else { return }
-                withAnimation(.spring(response: 0.30, dampingFraction: 0.78)) {
-                    visibleRowCount = index + 1
-                }
-                try? await Task.sleep(nanoseconds: 130_000_000)
-            }
-
-            let target = max(0, result.earnedPoints)
-            let steps = min(max(target, 1), 32)
-            for step in 1...steps {
-                guard !Task.isCancelled else { return }
-                displayedEarnedPoints = Int((Double(target) * Double(step) / Double(steps)).rounded())
-                try? await Task.sleep(nanoseconds: 30_000_000)
-            }
-            displayedEarnedPoints = target
-        }
-    }
-
-    private func finishAnimations() {
-        animationTask?.cancel()
-        animationTask = nil
-        visibleRowCount = result.summaries.count
-        displayedEarnedPoints = result.earnedPoints
-    }
-}
-
-private struct FishingResultRow: View {
-    let summary: FishingCatchSummary
-
-    var body: some View {
-        HStack(spacing: 14) {
-            Image(summary.fish.assetName)
-                .resizable()
-                .scaledToFit()
-                .frame(width: 82, height: 82)
-                .padding(5)
-                .background(Color.white.opacity(0.72), in: RoundedRectangle(cornerRadius: 18, style: .continuous))
-
-            VStack(alignment: .leading, spacing: 5) {
-                HStack(spacing: 7) {
-                    Text(summary.fish.name)
-                        .font(.system(size: 18, weight: .black, design: .rounded))
-
-                    Text(summary.fish.rarity.displayName)
-                        .font(.system(size: 11, weight: .black))
-                        .foregroundStyle(.white)
-                        .padding(.horizontal, 7)
-                        .padding(.vertical, 3)
-                        .background(summary.fish.rarity.accentColor, in: Capsule())
-                }
-
-                Text("× \(summary.count)")
-                    .font(.system(size: 22, weight: .black, design: .rounded))
-                    .monospacedDigit()
-
-                Text("\(summary.fish.pointValue) pt × \(summary.count) ＝ +\(summary.earnedPoints) pt")
-                    .font(.system(size: 13, weight: .bold))
-                    .foregroundStyle(.secondary)
-                    .monospacedDigit()
-            }
-
-            Spacer(minLength: 0)
-        }
-        .padding(12)
-        .background(Color.white.opacity(0.90), in: RoundedRectangle(cornerRadius: 22, style: .continuous))
-        .overlay(
-            RoundedRectangle(cornerRadius: 22, style: .continuous)
-                .stroke(summary.fish.rarity.accentColor.opacity(0.30), lineWidth: 1.5)
-        )
-    }
-}
-
 // MARK: - Metal lake water
 
 /// fishing_lake を実際の水面テクスチャとして最前面に表示し、画像そのものをShaderで揺らす。
@@ -959,7 +1179,7 @@ private struct FishingResultRow: View {
 /// - MTKViewは湖が存在する画面下部だけに配置する。
 /// - 1パス描画、30fps（低電力モード20fps）。
 /// - 透明部分はfragmentを破棄して合成対象を限定する。
-/// - バックグラウンド、釣果表示、交換所では描画を停止する。
+/// - バックグラウンド、説明表示、交換所では描画を停止する。
 private struct FishingLakeMetalView: UIViewRepresentable {
     let isActive: Bool
     let preferredFramesPerSecond: Int
