@@ -107,7 +107,7 @@ final class FishingStore: ObservableObject {
 
     static let catchInterval: TimeInterval = 20 * 60
     static let maximumAwayDuration: TimeInterval = 8 * 60 * 60
-    static let basketCapacity: Int = 24
+    static let basketCapacity: Int = 20
 
     @Published private(set) var pointBalance: Int = 0
     @Published private(set) var pendingCounts: [String: Int] = [:]
@@ -153,12 +153,32 @@ final class FishingStore: ObservableObject {
         guard !isBasketFull else { return nil }
         guard let lastCalculatedAt else { return Self.catchInterval }
 
+        // lastCalculatedAt は釣果生成のたびに次の区間へ進む基準日時。
+        // refresh前に境界を越えている場合は20:00へ巻き戻さず、0秒として表示する。
         let elapsed = max(0, now.timeIntervalSince(lastCalculatedAt))
-        let remainder = elapsed.truncatingRemainder(dividingBy: Self.catchInterval)
-        if remainder == 0, elapsed > 0 {
-            return Self.catchInterval
-        }
-        return max(0, Self.catchInterval - remainder)
+        guard elapsed < Self.catchInterval else { return 0 }
+        return max(0, Self.catchInterval - elapsed)
+    }
+
+    /// 次の釣果までの経過時間を進める。
+    /// 画面タップ用だが、保存基準日時を更新するためアプリ終了後も短縮結果を維持する。
+    /// 既に満杯の場合は釣りが停止しているため短縮しない。
+    @discardableResult
+    func shortenNextCatch(
+        by seconds: TimeInterval = 1,
+        now: Date = Date()
+    ) -> Bool {
+        let safeSeconds = max(0, seconds)
+        guard safeSeconds > 0 else { return false }
+        guard !isBasketFull else { return false }
+
+        bootstrapIfNeeded(now: now)
+        guard let lastCalculatedAt else { return false }
+
+        self.lastCalculatedAt = lastCalculatedAt.addingTimeInterval(-safeSeconds)
+        persist()
+        refresh(now: now)
+        return true
     }
 
     func refresh(now: Date = Date()) {
@@ -383,14 +403,12 @@ struct FishingView: View {
 
     @ObservedObject private var fishingStore = FishingStore.shared
 
-    @State private var now = Date()
     @State private var showShop = false
     @State private var showFishingInformation = false
     @State private var floatingRewards: [FishingFloatingReward] = []
     @State private var continuousClaimTask: Task<Void, Never>?
     @State private var isLowPowerModeEnabled = ProcessInfo.processInfo.isLowPowerModeEnabled
 
-    private let secondTimer = Timer.publish(every: 1, on: .main, in: .common).autoconnect()
 
     private var currentCharacterAssetName: String {
         PetMaster.assetName(for: state.normalizedCurrentPetID)
@@ -419,6 +437,14 @@ struct FishingView: View {
                 .frame(maxWidth: .infinity, maxHeight: .infinity)
                 .allowsHitTesting(false)
 
+                // 操作UIより背面に専用タップ面を置く。
+                // そのため魚かご・戻る・ショップ・説明の操作時には短縮処理が重複しない。
+                Color.clear
+                    .contentShape(Rectangle())
+                    .onTapGesture(perform: shortenFishingTimer)
+                    .accessibilityHidden(true)
+                    .zIndex(25)
+
                 characterLayer(in: geo.size)
                 interfaceLayer(in: geo)
 
@@ -441,27 +467,24 @@ struct FishingView: View {
         .onAppear {
             isLowPowerModeEnabled = ProcessInfo.processInfo.isLowPowerModeEnabled
             bgmManager.switchBackground(to: .main)
-            now = Date()
-            fishingStore.refresh(now: now)
+            fishingStore.refresh(now: Date())
         }
         .onDisappear {
             stopContinuousClaiming()
             bgmManager.restoreDefaultBackground()
-        }
-        .onReceive(secondTimer) { date in
-            now = date
-            fishingStore.refresh(now: date)
         }
         .onChange(of: scenePhase) { _, newPhase in
             guard newPhase == .active else {
                 stopContinuousClaiming()
                 return
             }
-            now = Date()
-            fishingStore.refresh(now: now)
+            fishingStore.refresh(now: Date())
         }
         .onReceive(NotificationCenter.default.publisher(for: .NSProcessInfoPowerStateDidChange)) { _ in
             isLowPowerModeEnabled = ProcessInfo.processInfo.isLowPowerModeEnabled
+        }
+        .task {
+            await runFishingCountdownRefreshLoop()
         }
         .fullScreenCover(isPresented: $showShop) {
             ShopView()
@@ -501,7 +524,7 @@ struct FishingView: View {
                 .padding(.horizontal, 18)
 
             statusArea
-                .padding(.top, 26)
+                .padding(.top, 18)
                 .padding(.horizontal, 18)
 
             Spacer()
@@ -537,6 +560,7 @@ struct FishingView: View {
                 .minimumScaleFactor(0.78)
                 .padding(.horizontal, 6)
                 .shadow(color: .black.opacity(0.35), radius: 4, x: 0, y: 2)
+                .allowsHitTesting(false)
 
             Spacer()
 
@@ -556,49 +580,72 @@ struct FishingView: View {
     }
 
     private var statusArea: some View {
-        VStack(alignment: .trailing, spacing: 8) {
-            HStack(spacing: 10) {
-                FishingStatusCard(
-                    icon: "fish.fill",
-                    title: "魚かご",
-                    value: "\(fishingStore.pendingCatchCount) / \(FishingStore.basketCapacity)"
-                )
+        VStack(alignment: .trailing, spacing: 10) {
+            pointBalancePill
 
-                FishingStatusCard(
-                    icon: "clock.fill",
-                    title: fishingStore.isBasketFull ? "釣りは停止中" : "次の釣果",
-                    value: fishingStore.isBasketFull
-                        ? "満杯"
-                        : Self.timeText(seconds: fishingStore.secondsUntilNextCatch(now: now) ?? 0)
-                )
+            ZStack(alignment: .trailing) {
+                // TimelineViewが表示時刻を直接供給するため、画面操作がなくても毎秒再描画される。
+                // FishingStoreの更新通知とは独立してカウントダウン表示を進める。
+                TimelineView(.periodic(from: .now, by: 1)) { context in
+                    let remainingSeconds = fishingStore.secondsUntilNextCatch(now: context.date) ?? 0
 
-                FishingStatusCard(
-                    icon: "sparkles",
-                    title: "フィッシュpt",
-                    value: "\(fishingStore.pointBalance)"
-                )
-            }
-
-            Button {
-                bgmManager.playSE(.push)
-                stopContinuousClaiming()
-                withAnimation(.easeInOut(duration: 0.2)) {
-                    showFishingInformation = true
-                }
-            } label: {
-                Image(systemName: "info.circle.fill")
-                    .font(.system(size: 23, weight: .bold))
-                    .foregroundStyle(.white)
-                    .frame(width: 38, height: 38)
-                    .background(Color.black.opacity(0.42), in: Circle())
-                    .overlay(
-                        Circle()
-                            .stroke(Color.white.opacity(0.32), lineWidth: 1)
+                    FishingNextCatchTimerView(
+                        isBasketFull: fishingStore.isBasketFull,
+                        timeText: Self.timeText(seconds: remainingSeconds),
+                        remainingSeconds: remainingSeconds,
+                        totalSeconds: FishingStore.catchInterval
                     )
+                }
+                .frame(maxWidth: .infinity)
+                .padding(.horizontal, 44)
+
+                Button {
+                    bgmManager.playSE(.push)
+                    stopContinuousClaiming()
+                    withAnimation(.easeInOut(duration: 0.2)) {
+                        showFishingInformation = true
+                    }
+                } label: {
+                    Image(systemName: "info.circle.fill")
+                        .font(.system(size: 23, weight: .bold))
+                        .foregroundStyle(.white)
+                        .frame(width: 38, height: 38)
+                        .background(Color.black.opacity(0.42), in: Circle())
+                        .overlay(
+                            Circle()
+                                .stroke(Color.white.opacity(0.32), lineWidth: 1)
+                        )
+                }
+                .buttonStyle(.plain)
+                .accessibilityLabel("釣りの説明")
             }
-            .buttonStyle(.plain)
-            .accessibilityLabel("釣りの説明")
         }
+    }
+
+    /// ショップ画面の所持フィッシュpt表示と同じ形式。
+    private var pointBalancePill: some View {
+        HStack(spacing: 7) {
+            Image(systemName: "fish.fill")
+                .font(.system(size: 15, weight: .black))
+
+            Text("\(fishingStore.pointBalance) pt")
+                .font(.system(size: 16, weight: .black, design: .rounded))
+                .monospacedDigit()
+                .lineLimit(1)
+                .minimumScaleFactor(0.72)
+        }
+        .foregroundStyle(.white)
+        .padding(.horizontal, 12)
+        .frame(minHeight: 40)
+        .background(Color.black.opacity(0.48), in: Capsule())
+        .overlay {
+            Capsule()
+                .stroke(Color.white.opacity(0.32), lineWidth: 1)
+                .allowsHitTesting(false)
+        }
+        .allowsHitTesting(false)
+        .accessibilityElement(children: .combine)
+        .accessibilityLabel("所持フィッシュポイント \(fishingStore.pointBalance)ポイント")
     }
 
     private var receiveArea: some View {
@@ -622,6 +669,29 @@ struct FishingView: View {
         // 獲得表示を円形メーターの上へ完全に逃がすため、
         // メーター上側に十分な表示領域を確保する。
         .frame(height: 285)
+    }
+
+    private func shortenFishingTimer() {
+        guard !showShop, !showFishingInformation else { return }
+        guard !fishingStore.isBasketFull else { return }
+
+        let date = Date()
+        fishingStore.shortenNextCatch(by: 1, now: date)
+    }
+
+    /// 表示用TimelineViewとは別に、釣果生成の判定を毎秒実行する。
+    /// Timer.publishへ依存しないため、タップ操作がなくても釣果到達時に状態を更新できる。
+    @MainActor
+    private func runFishingCountdownRefreshLoop() async {
+        while !Task.isCancelled {
+            fishingStore.refresh(now: Date())
+
+            do {
+                try await Task.sleep(nanoseconds: 1_000_000_000)
+            } catch {
+                return
+            }
+        }
     }
 
     private func claimOneFish() {
@@ -846,7 +916,7 @@ private struct FishingInformationOverlay: View {
 
                 VStack(spacing: 14) {
                     HStack {
-                        Text("釣果の受け取り方")
+                        Text("釣りの遊び方")
                             .font(.system(size: 23, weight: .black, design: .rounded))
 
                         Spacer()
@@ -873,6 +943,18 @@ private struct FishingInformationOverlay: View {
                     .padding(13)
                     .background(Color.black.opacity(0.055), in: RoundedRectangle(cornerRadius: 16, style: .continuous))
 
+                    HStack(alignment: .top, spacing: 10) {
+                        Image(systemName: "timer")
+                            .font(.system(size: 25, weight: .bold))
+                            .foregroundStyle(Color(red: 0.98, green: 0.47, blue: 0.24))
+
+                        Text("魚かご以外の画面をタップすると、次の釣果までの時間を短縮できます。")
+                            .font(.system(size: 14, weight: .bold))
+                            .frame(maxWidth: .infinity, alignment: .leading)
+                    }
+                    .padding(13)
+                    .background(Color.black.opacity(0.055), in: RoundedRectangle(cornerRadius: 16, style: .continuous))
+
                     Text("魚の種類と獲得ポイント")
                         .font(.system(size: 17, weight: .black, design: .rounded))
                         .frame(maxWidth: .infinity, alignment: .leading)
@@ -888,7 +970,7 @@ private struct FishingInformationOverlay: View {
                 }
                 .padding(18)
                 .frame(maxWidth: 430)
-                .frame(maxHeight: min(geo.size.height * 0.78, 650))
+                .frame(maxHeight: min(geo.size.height * 0.82, 690))
                 .background(.regularMaterial, in: RoundedRectangle(cornerRadius: 28, style: .continuous))
                 .overlay(
                     RoundedRectangle(cornerRadius: 28, style: .continuous)
@@ -944,37 +1026,122 @@ private struct FishingInformationFishRow: View {
 
 // MARK: - Fishing scene views
 
-private struct FishingStatusCard: View {
-    let icon: String
-    let title: String
-    let value: String
+private struct FishingNextCatchTimerView: View {
+    let isBasketFull: Bool
+    let timeText: String
+    let remainingSeconds: TimeInterval
+    let totalSeconds: TimeInterval
+
+    private var title: String {
+        isBasketFull ? "釣りは停止中" : "次の釣果まで"
+    }
+
+    private var displayedValue: String {
+        isBasketFull ? "満杯" : timeText
+    }
+
+    /// 20分から0秒へ向かって減少する、カウントダウンの残量。
+    private var countdownProgress: CGFloat {
+        guard !isBasketFull else { return 1 }
+
+        let safeTotal = max(1, totalSeconds)
+        let normalized = remainingSeconds / safeTotal
+        return CGFloat(min(max(normalized, 0), 1))
+    }
 
     var body: some View {
-        VStack(spacing: 5) {
-            Image(systemName: icon)
-                .font(.system(size: 16, weight: .bold))
+        VStack(spacing: 7) {
+            HStack(spacing: 6) {
+                Image(systemName: isBasketFull ? "pause.fill" : "timer")
+                    .font(.system(size: 14, weight: .black))
 
-            Text(title)
-                .font(.system(size: 10, weight: .bold))
-                .lineLimit(1)
-                .minimumScaleFactor(0.72)
+                Text(title)
+                    .font(.system(size: 14, weight: .black, design: .rounded))
+            }
+            .foregroundStyle(.white.opacity(0.98))
 
-            Text(value)
-                .font(.system(size: 16, weight: .black, design: .rounded))
-                .monospacedDigit()
-                .lineLimit(1)
-                .minimumScaleFactor(0.65)
+            ClayTimerText(text: displayedValue)
+
+            GeometryReader { geo in
+                ZStack(alignment: .leading) {
+                    Capsule()
+                        .fill(Color.black.opacity(0.20))
+
+                    Capsule()
+                        .fill(
+                            LinearGradient(
+                                colors: [
+                                    Color.white.opacity(0.96),
+                                    Color(red: 0.36, green: 0.86, blue: 1.00)
+                                ],
+                                startPoint: .leading,
+                                endPoint: .trailing
+                            )
+                        )
+                        .frame(width: geo.size.width * countdownProgress)
+                }
+            }
+            .frame(height: 7)
+            .opacity(isBasketFull ? 0.48 : 1)
+            .animation(.linear(duration: 0.20), value: countdownProgress)
         }
-        .foregroundStyle(.white)
-        .frame(maxWidth: .infinity)
-        .padding(.vertical, 11)
-        .padding(.horizontal, 5)
-        .background(.ultraThinMaterial, in: RoundedRectangle(cornerRadius: 18, style: .continuous))
-        .overlay(
-            RoundedRectangle(cornerRadius: 18, style: .continuous)
-                .stroke(Color.white.opacity(0.28), lineWidth: 1)
+        .padding(.horizontal, 18)
+        .padding(.vertical, 12)
+        .frame(maxWidth: 260, minHeight: 110)
+        .background(
+            LinearGradient(
+                colors: [
+                    Color(red: 0.12, green: 0.61, blue: 0.94),
+                    Color(red: 0.04, green: 0.29, blue: 0.68)
+                ],
+                startPoint: .topLeading,
+                endPoint: .bottomTrailing
+            ),
+            in: RoundedRectangle(cornerRadius: 25, style: .continuous)
         )
-        .shadow(color: .black.opacity(0.14), radius: 8, x: 0, y: 5)
+        .overlay {
+            RoundedRectangle(cornerRadius: 25, style: .continuous)
+                .stroke(Color.white.opacity(0.48), lineWidth: 1.2)
+        }
+        .shadow(color: Color(red: 0.01, green: 0.14, blue: 0.36).opacity(0.42), radius: 11, x: 0, y: 7)
+        .allowsHitTesting(false)
+        .accessibilityElement(children: .ignore)
+        .accessibilityLabel("\(title) 残り\(displayedValue)")
+    }
+}
+
+/// 丸い太字・下側の厚み・表面の光沢を重ね、青い粘土を盛ったように見せる。
+private struct ClayTimerText: View {
+    let text: String
+
+    var body: some View {
+        ZStack {
+            Text(text)
+                .foregroundStyle(Color(red: 0.01, green: 0.13, blue: 0.36))
+                .offset(y: 5)
+
+            Text(text)
+                .foregroundStyle(Color(red: 0.04, green: 0.34, blue: 0.73))
+                .offset(y: 2)
+
+            Text(text)
+                .foregroundStyle(
+                    LinearGradient(
+                        colors: [
+                            Color(red: 0.78, green: 0.96, blue: 1.00),
+                            Color(red: 0.23, green: 0.72, blue: 0.98)
+                        ],
+                        startPoint: .top,
+                        endPoint: .bottom
+                    )
+                )
+                .shadow(color: .white.opacity(0.68), radius: 0.8, x: 0, y: -1.5)
+                .shadow(color: Color(red: 0.01, green: 0.12, blue: 0.34).opacity(0.48), radius: 2.5, x: 0, y: 2)
+        }
+        .font(.system(size: 48, weight: .black, design: .rounded))
+        .monospacedDigit()
+        .lineLimit(1)
+        .minimumScaleFactor(0.62)
     }
 }
 
