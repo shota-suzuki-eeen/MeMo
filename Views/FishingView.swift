@@ -406,6 +406,7 @@ struct FishingView: View {
     @State private var showShop = false
     @State private var showFishingInformation = false
     @State private var floatingRewards: [FishingFloatingReward] = []
+    @State private var tapShortenIndicators: [FishingTapShortenIndicator] = []
     @State private var continuousClaimTask: Task<Void, Never>?
     @State private var isLowPowerModeEnabled = ProcessInfo.processInfo.isLowPowerModeEnabled
 
@@ -441,11 +442,33 @@ struct FishingView: View {
                 // そのため魚かご・戻る・ショップ・説明の操作時には短縮処理が重複しない。
                 Color.clear
                     .contentShape(Rectangle())
-                    .onTapGesture(perform: shortenFishingTimer)
+                    .gesture(
+                        SpatialTapGesture()
+                            .onEnded { value in
+                                shortenFishingTimer(
+                                    at: value.location,
+                                    in: geo.size
+                                )
+                            }
+                    )
                     .accessibilityHidden(true)
                     .zIndex(25)
 
                 characterLayer(in: geo.size)
+
+                ForEach(tapShortenIndicators) { indicator in
+                    FishingTapShortenIndicatorView(indicator: indicator)
+                        .position(indicator.position)
+                        .transition(
+                            .asymmetric(
+                                insertion: .scale(scale: 0.72).combined(with: .opacity),
+                                removal: .offset(y: -28).combined(with: .opacity)
+                            )
+                        )
+                        .allowsHitTesting(false)
+                        .zIndex(90)
+                }
+
                 interfaceLayer(in: geo)
 
                 if showFishingInformation {
@@ -671,12 +694,61 @@ struct FishingView: View {
         .frame(height: 285)
     }
 
-    private func shortenFishingTimer() {
+    private func shortenFishingTimer(
+        at location: CGPoint,
+        in availableSize: CGSize
+    ) {
         guard !showShop, !showFishingInformation else { return }
         guard !fishingStore.isBasketFull else { return }
 
+        let shortenedSeconds = 1
         let date = Date()
-        fishingStore.shortenNextCatch(by: 1, now: date)
+        guard fishingStore.shortenNextCatch(
+            by: TimeInterval(shortenedSeconds),
+            now: date
+        ) else {
+            return
+        }
+
+        let feedbackGenerator = UIImpactFeedbackGenerator(style: .light)
+        feedbackGenerator.prepare()
+        feedbackGenerator.impactOccurred(intensity: 0.72)
+
+        // タップ地点を起点に、毎回少し異なる位置へ短縮秒数を表示する。
+        // 画面端では文字が外へ逃げすぎないよう表示位置だけを制限する。
+        let randomX = CGFloat.random(in: -38...38)
+        let randomY = CGFloat.random(in: -34...24)
+        let horizontalMargin: CGFloat = 30
+        let verticalMargin: CGFloat = 24
+        let indicatorPosition = CGPoint(
+            x: min(
+                max(location.x + randomX, horizontalMargin),
+                max(horizontalMargin, availableSize.width - horizontalMargin)
+            ),
+            y: min(
+                max(location.y + randomY, verticalMargin),
+                max(verticalMargin, availableSize.height - verticalMargin)
+            )
+        )
+
+        let indicator = FishingTapShortenIndicator(
+            position: indicatorPosition,
+            shortenedSeconds: shortenedSeconds
+        )
+
+        withAnimation(.spring(response: 0.22, dampingFraction: 0.72)) {
+            tapShortenIndicators.append(indicator)
+            if tapShortenIndicators.count > 12 {
+                tapShortenIndicators.removeFirst(tapShortenIndicators.count - 12)
+            }
+        }
+
+        Task { @MainActor in
+            try? await Task.sleep(nanoseconds: 620_000_000)
+            withAnimation(.easeOut(duration: 0.24)) {
+                tapShortenIndicators.removeAll(where: { $0.id == indicator.id })
+            }
+        }
     }
 
     /// 表示用TimelineViewとは別に、釣果生成の判定を毎秒実行する。
@@ -763,6 +835,24 @@ struct FishingView: View {
 }
 
 // MARK: - Bucket receive UI
+
+private struct FishingTapShortenIndicator: Identifiable, Hashable {
+    let id = UUID()
+    let position: CGPoint
+    let shortenedSeconds: Int
+}
+
+private struct FishingTapShortenIndicatorView: View {
+    let indicator: FishingTapShortenIndicator
+
+    var body: some View {
+        Text("-\(indicator.shortenedSeconds)秒")
+            .font(.system(size: 17, weight: .black, design: .rounded))
+            .foregroundStyle(.black)
+            .monospacedDigit()
+            .accessibilityHidden(true)
+    }
+}
 
 private struct FishingFloatingReward: Identifiable, Hashable {
     let id = UUID()
