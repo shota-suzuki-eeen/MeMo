@@ -2,7 +2,7 @@
 //  ShopView.swift
 //  MeMo
 //
-//  フィッシュポイントでアイテム・壁紙を交換するショップ画面。
+//  釣り具の強化と、フィッシュポイントによるアイテム・壁紙交換を提供するショップ画面。
 //
 
 import SwiftUI
@@ -20,14 +20,19 @@ struct ShopView: View {
     @AppStorage(WallpaperCatalog.selectedHomeWallpaperAssetNameKey)
     private var selectedHomeWallpaperAssetName: String = WallpaperCatalog.defaultWallpaper.assetName
 
-    @State private var selectedCategory: FishingShopCategory = .item
+    @State private var selectedCategory: FishingShopCategory = .gear
     @State private var presentedExchangeModal: FishingShopExchangeModal?
+    @State private var presentedGearUpgradeModal: FishingGearUpgradeModal?
 
     private let itemOffers = FishingItemOffer.defaultOffers
     private let wallpaperOffers = FishingWallpaperOffer.defaultOffers
 
     private var appState: AppState? {
         appStates.first
+    }
+
+    private var isModalPresented: Bool {
+        presentedExchangeModal != nil || presentedGearUpgradeModal != nil
     }
 
     var body: some View {
@@ -54,6 +59,11 @@ struct ShopView: View {
                     ScrollView(.vertical, showsIndicators: false) {
                         LazyVStack(spacing: 14) {
                             switch selectedCategory {
+                            case .gear:
+                                ForEach(FishingGearKind.allCases) { gear in
+                                    gearCard(gear)
+                                }
+
                             case .item:
                                 ForEach(itemOffers) { offer in
                                     itemCard(offer)
@@ -72,16 +82,23 @@ struct ShopView: View {
                 }
                 .padding(.top, max(resolvedSafeAreaTop, 54) + 22)
                 .padding(.bottom, max(geo.safeAreaInsets.bottom, 18))
-                .allowsHitTesting(presentedExchangeModal == nil)
+                .allowsHitTesting(!isModalPresented)
 
                 if let presentedExchangeModal {
                     exchangeModalOverlay(presentedExchangeModal)
                         .zIndex(10_000)
                         .transition(.opacity.combined(with: .scale(scale: 0.97)))
                 }
+
+                if let presentedGearUpgradeModal {
+                    gearUpgradeModalOverlay(presentedGearUpgradeModal)
+                        .zIndex(10_000)
+                        .transition(.opacity.combined(with: .scale(scale: 0.97)))
+                }
             }
             .frame(width: geo.size.width, height: geo.size.height)
             .animation(.easeInOut(duration: 0.18), value: presentedExchangeModal?.id)
+            .animation(.easeInOut(duration: 0.18), value: presentedGearUpgradeModal?.id)
         }
         .ignoresSafeArea()
         .onAppear {
@@ -111,7 +128,7 @@ struct ShopView: View {
 
                 Spacer()
 
-                pointBalancePill
+                balancePill
             }
 
             Text("ショップ")
@@ -123,6 +140,41 @@ struct ShopView: View {
                 .allowsHitTesting(false)
         }
         .frame(minHeight: 48)
+    }
+
+    @ViewBuilder
+    private var balancePill: some View {
+        if selectedCategory == .gear {
+            stepBalancePill
+        } else {
+            pointBalancePill
+        }
+    }
+
+    private var stepBalancePill: some View {
+        let steps = max(0, appState?.walletSteps ?? 0)
+
+        return HStack(spacing: 7) {
+            Image(systemName: "figure.walk")
+                .font(.system(size: 15, weight: .black))
+
+            Text("\(steps)歩")
+                .font(.system(size: 16, weight: .black, design: .rounded))
+                .monospacedDigit()
+                .lineLimit(1)
+                .minimumScaleFactor(0.62)
+        }
+        .foregroundStyle(.white)
+        .padding(.horizontal, 12)
+        .frame(minHeight: 40)
+        .background(Color.black.opacity(0.48), in: Capsule())
+        .overlay {
+            Capsule()
+                .stroke(Color.white.opacity(0.32), lineWidth: 1)
+                .allowsHitTesting(false)
+        }
+        .accessibilityElement(children: .combine)
+        .accessibilityLabel("所持歩数 \(steps)歩")
     }
 
     private var pointBalancePill: some View {
@@ -207,6 +259,192 @@ struct ShopView: View {
         }
         .padding(.vertical, 2)
     }
+
+    // MARK: - Fishing gear
+
+    private func gearCard(_ gear: FishingGearKind) -> some View {
+        let level = fishingStore.level(for: gear)
+        let nextLevel = level + 1
+        let price = fishingStore.nextUpgradeCost(for: gear)
+        let isMaximum = fishingStore.isMaximumLevel(gear)
+        let canAfford = price.map { (appState?.walletSteps ?? 0) >= $0 } ?? false
+
+        return HStack(spacing: 14) {
+            Image(gear.assetName)
+                .resizable()
+                .scaledToFit()
+                .frame(width: 86, height: 86)
+                .padding(8)
+                .background(Color.white.opacity(0.56), in: RoundedRectangle(cornerRadius: 18, style: .continuous))
+                .allowsHitTesting(false)
+
+            VStack(alignment: .leading, spacing: 7) {
+                HStack(spacing: 8) {
+                    Text(gear.displayName)
+                        .font(.system(size: 19, weight: .black, design: .rounded))
+                        .foregroundStyle(.primary)
+
+                    Text("Lv.\(level)")
+                        .font(.system(size: 12, weight: .black, design: .rounded))
+                        .foregroundStyle(.white)
+                        .padding(.horizontal, 8)
+                        .padding(.vertical, 4)
+                        .background(Color.black.opacity(0.56), in: Capsule())
+                        .monospacedDigit()
+                }
+
+                Text(gearStatusText(gear, level: level))
+                    .font(.system(size: 13, weight: .bold, design: .rounded))
+                    .foregroundStyle(.primary)
+                    .monospacedDigit()
+
+                if !isMaximum {
+                    HStack(spacing: 4) {
+                        Text("次のLv:")
+
+                        Text(gearStatusText(gear, level: nextLevel))
+                            .monospacedDigit()
+                    }
+                    .font(.system(size: 11, weight: .bold, design: .rounded))
+                    .foregroundStyle(.secondary)
+                } else {
+                    Text("強化完了")
+                        .font(.system(size: 11, weight: .bold, design: .rounded))
+                        .foregroundStyle(.secondary)
+                }
+            }
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .allowsHitTesting(false)
+
+            Button {
+                requestGearUpgrade(gear)
+            } label: {
+                VStack(spacing: 3) {
+                    if let price {
+                        Text("Lvアップ")
+                            .font(.system(size: 12, weight: .black, design: .rounded))
+                        Text("\(price)歩")
+                            .font(.system(size: 12, weight: .black, design: .rounded))
+                            .monospacedDigit()
+                    } else {
+                        Text("完了")
+                            .font(.system(size: 12, weight: .black, design: .rounded))
+                    }
+                }
+                .foregroundStyle(.white)
+                .frame(minWidth: 78, minHeight: 48)
+                .background(
+                    isMaximum
+                        ? Color.gray
+                        : (canAfford ? Color(red: 0.10, green: 0.63, blue: 0.88) : Color.gray),
+                    in: Capsule()
+                )
+                .contentShape(Capsule())
+            }
+            .buttonStyle(.plain)
+            .disabled(isMaximum)
+            .accessibilityLabel(
+                isMaximum
+                    ? "\(gear.displayName)は強化完了"
+                    : "\(gear.displayName)を\(price ?? 0)歩で強化"
+            )
+        }
+        .padding(14)
+        .background(.ultraThinMaterial, in: RoundedRectangle(cornerRadius: 22, style: .continuous))
+        .overlay {
+            RoundedRectangle(cornerRadius: 22, style: .continuous)
+                .stroke(Color.white.opacity(0.30), lineWidth: 1)
+                .allowsHitTesting(false)
+        }
+        .shadow(color: .black.opacity(0.16), radius: 10, x: 0, y: 6)
+    }
+
+    private func gearStatusText(_ gear: FishingGearKind, level: Int) -> String {
+        switch gear {
+        case .rod:
+            return "1タップ  -\(fishingStore.tapShortenSeconds(at: level))秒"
+
+        case .bobber:
+            return String(format: "毎秒  -%.2f秒", fishingStore.timeProgressMultiplier(at: level))
+
+        case .basket:
+            return "最大  \(fishingStore.basketCapacity(at: level))匹"
+        }
+    }
+
+    private func requestGearUpgrade(_ gear: FishingGearKind) {
+        bgmManager.playSE(.push)
+
+        guard let price = fishingStore.nextUpgradeCost(for: gear) else {
+            presentedGearUpgradeModal = .maximum(gear)
+            return
+        }
+
+        guard let appState else {
+            presentedGearUpgradeModal = .failed(gear)
+            return
+        }
+
+        let shortage = max(0, price - max(0, appState.walletSteps))
+        guard shortage == 0 else {
+            presentedGearUpgradeModal = .insufficient(gear, shortage: shortage)
+            return
+        }
+
+        presentedGearUpgradeModal = .confirmation(
+            gear,
+            price: price,
+            remainingSteps: max(0, appState.walletSteps - price)
+        )
+    }
+
+    private func completeGearUpgrade(_ gear: FishingGearKind, expectedPrice: Int) {
+        guard let appState else {
+            presentedGearUpgradeModal = .failed(gear)
+            return
+        }
+
+        guard let currentPrice = fishingStore.nextUpgradeCost(for: gear),
+              currentPrice == expectedPrice
+        else {
+            presentedGearUpgradeModal = fishingStore.isMaximumLevel(gear) ? .maximum(gear) : .failed(gear)
+            return
+        }
+
+        let shortage = max(0, currentPrice - max(0, appState.walletSteps))
+        guard shortage == 0 else {
+            presentedGearUpgradeModal = .insufficient(gear, shortage: shortage)
+            return
+        }
+
+        // SwiftData側の歩数を先に確定し、保存に失敗した場合は釣り具レベルを上げない。
+        appState.walletSteps = max(0, appState.walletSteps - currentPrice)
+
+        do {
+            try modelContext.save()
+        } catch {
+            appState.walletSteps += currentPrice
+            try? modelContext.save()
+            presentedGearUpgradeModal = .failed(gear)
+            return
+        }
+
+        guard fishingStore.upgrade(gear, now: Date()) else {
+            appState.walletSteps += currentPrice
+            try? modelContext.save()
+            presentedGearUpgradeModal = .failed(gear)
+            return
+        }
+
+        bgmManager.playSE(.push)
+        presentedGearUpgradeModal = .upgraded(
+            gear,
+            level: fishingStore.level(for: gear),
+            remainingSteps: max(0, appState.walletSteps)
+        )
+    }
+
+    // MARK: - Item cards
 
     private func itemCard(_ offer: FishingItemOffer) -> some View {
         let canAfford = fishingStore.pointBalance >= offer.price
@@ -319,6 +557,8 @@ struct ShopView: View {
         }
     }
 
+    // MARK: - Wallpaper cards
+
     private func wallpaperCard(_ offer: FishingWallpaperOffer) -> some View {
         let isUnlocked = fishingStore.isWallpaperUnlocked(assetName: offer.wallpaper.assetName)
         let isSelected = selectedHomeWallpaperAssetName == offer.wallpaper.assetName
@@ -419,6 +659,8 @@ struct ShopView: View {
         }
         .shadow(color: .black.opacity(0.17), radius: 10, x: 0, y: 6)
     }
+
+    // MARK: - Existing fish-point exchange
 
     private func requestExchange(_ target: FishingShopExchangeTarget) {
         bgmManager.playSE(.push)
@@ -551,6 +793,95 @@ struct ShopView: View {
 
         return true
     }
+
+    // MARK: - Gear upgrade modal
+
+    @ViewBuilder
+    private func gearUpgradeModalOverlay(_ modal: FishingGearUpgradeModal) -> some View {
+        ZStack {
+            Color.black.opacity(0.48)
+                .ignoresSafeArea()
+                .contentShape(Rectangle())
+                .onTapGesture {
+                    presentedGearUpgradeModal = nil
+                }
+
+            VStack(spacing: 18) {
+                Image(systemName: modal.iconName)
+                    .font(.system(size: 46, weight: .bold))
+                    .foregroundStyle(modal.iconTint)
+
+                VStack(spacing: 8) {
+                    Text(modal.title)
+                        .font(.system(size: 22, weight: .black, design: .rounded))
+                        .multilineTextAlignment(.center)
+
+                    Text(modal.message)
+                        .font(.system(size: 15, weight: .semibold))
+                        .foregroundStyle(.secondary)
+                        .multilineTextAlignment(.center)
+                        .lineSpacing(3)
+                }
+
+                gearUpgradeModalButtons(modal)
+            }
+            .padding(.horizontal, 22)
+            .padding(.vertical, 24)
+            .frame(maxWidth: 340)
+            .background(.regularMaterial, in: RoundedRectangle(cornerRadius: 28, style: .continuous))
+            .overlay {
+                RoundedRectangle(cornerRadius: 28, style: .continuous)
+                    .stroke(Color.white.opacity(0.38), lineWidth: 1)
+                    .allowsHitTesting(false)
+            }
+            .shadow(color: .black.opacity(0.28), radius: 24, x: 0, y: 14)
+            .padding(.horizontal, 26)
+        }
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
+    }
+
+    @ViewBuilder
+    private func gearUpgradeModalButtons(_ modal: FishingGearUpgradeModal) -> some View {
+        switch modal {
+        case .confirmation(let gear, let price, _):
+            VStack(spacing: 10) {
+                Button {
+                    completeGearUpgrade(gear, expectedPrice: price)
+                } label: {
+                    Text("\(price)歩で強化")
+                        .font(.system(size: 16, weight: .black))
+                        .foregroundStyle(.white)
+                        .frame(maxWidth: .infinity, minHeight: 48)
+                        .background(Color(red: 0.10, green: 0.63, blue: 0.88), in: Capsule())
+                }
+                .buttonStyle(.plain)
+
+                Button {
+                    presentedGearUpgradeModal = nil
+                } label: {
+                    Text("キャンセル")
+                        .font(.system(size: 15, weight: .bold))
+                        .foregroundStyle(.secondary)
+                        .frame(maxWidth: .infinity, minHeight: 44)
+                }
+                .buttonStyle(.plain)
+            }
+
+        case .upgraded, .insufficient, .maximum, .failed:
+            Button {
+                presentedGearUpgradeModal = nil
+            } label: {
+                Text("閉じる")
+                    .font(.system(size: 16, weight: .black))
+                    .foregroundStyle(.white)
+                    .frame(maxWidth: .infinity, minHeight: 48)
+                    .background(Color.secondary, in: Capsule())
+            }
+            .buttonStyle(.plain)
+        }
+    }
+
+    // MARK: - Existing exchange modal
 
     @ViewBuilder
     private func exchangeModalOverlay(_ modal: FishingShopExchangeModal) -> some View {
@@ -727,6 +1058,7 @@ struct ShopView: View {
 }
 
 private enum FishingShopCategory: String, CaseIterable, Identifiable {
+    case gear
     case item
     case wallpaper
 
@@ -734,10 +1066,97 @@ private enum FishingShopCategory: String, CaseIterable, Identifiable {
 
     var title: String {
         switch self {
+        case .gear:
+            return "釣り具"
         case .item:
             return "アイテム"
         case .wallpaper:
             return "壁紙"
+        }
+    }
+}
+
+private enum FishingGearUpgradeModal: Identifiable {
+    case confirmation(FishingGearKind, price: Int, remainingSteps: Int)
+    case upgraded(FishingGearKind, level: Int, remainingSteps: Int)
+    case insufficient(FishingGearKind, shortage: Int)
+    case maximum(FishingGearKind)
+    case failed(FishingGearKind)
+
+    var id: String {
+        switch self {
+        case .confirmation(let gear, let price, _):
+            return "gear.confirmation.\(gear.id).\(price)"
+        case .upgraded(let gear, let level, _):
+            return "gear.upgraded.\(gear.id).\(level)"
+        case .insufficient(let gear, let shortage):
+            return "gear.insufficient.\(gear.id).\(shortage)"
+        case .maximum(let gear):
+            return "gear.maximum.\(gear.id)"
+        case .failed(let gear):
+            return "gear.failed.\(gear.id)"
+        }
+    }
+
+    var title: String {
+        switch self {
+        case .confirmation(let gear, _, _):
+            return "\(gear.displayName)を強化しますか？"
+        case .upgraded(let gear, _, _):
+            return "\(gear.displayName)を強化しました"
+        case .insufficient:
+            return "歩数が足りません"
+        case .maximum(let gear):
+            return "\(gear.displayName)は強化完了です"
+        case .failed:
+            return "強化できませんでした"
+        }
+    }
+
+    var message: String {
+        switch self {
+        case .confirmation(let gear, let price, let remainingSteps):
+            return "\(price)歩を消費して\(gear.displayName)を1レベル強化します。\n強化後の所持歩数：\(remainingSteps)歩"
+
+        case .upgraded(let gear, let level, let remainingSteps):
+            return "\(gear.displayName)がLv.\(level)になりました。\n残りの所持歩数：\(remainingSteps)歩"
+
+        case .insufficient(let gear, let shortage):
+            return "\(gear.displayName)の強化には、あと\(shortage)歩必要です。"
+
+        case .maximum:
+            return "これ以上は強化できません。"
+
+        case .failed(let gear):
+            return "\(gear.displayName)の強化処理を完了できませんでした。所持歩数を確認して、もう一度お試しください。"
+        }
+    }
+
+    var iconName: String {
+        switch self {
+        case .confirmation:
+            return "arrow.up.circle.fill"
+        case .upgraded:
+            return "checkmark.circle.fill"
+        case .insufficient:
+            return "exclamationmark.circle.fill"
+        case .maximum:
+            return "checkmark.seal.fill"
+        case .failed:
+            return "xmark.circle.fill"
+        }
+    }
+
+    var iconTint: Color {
+        switch self {
+        case .confirmation:
+            return Color(red: 0.10, green: 0.63, blue: 0.88)
+        case .upgraded, .maximum:
+            return .green
+        case .insufficient:
+            return .orange
+        case .failed:
+            return .red
         }
     }
 }

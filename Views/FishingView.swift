@@ -74,6 +74,32 @@ enum FishCatalog {
     }
 }
 
+// MARK: - Fishing gear
+
+enum FishingGearKind: String, CaseIterable, Identifiable, Hashable {
+    case rod
+    case bobber
+    case basket
+
+    var id: String { rawValue }
+
+    var displayName: String {
+        switch self {
+        case .rod: return "釣り竿"
+        case .bobber: return "ウキ"
+        case .basket: return "カゴ"
+        }
+    }
+
+    var assetName: String {
+        switch self {
+        case .rod: return "fishingRod"
+        case .bobber: return "bobber"
+        case .basket: return "bucket"
+        }
+    }
+}
+
 // MARK: - Fishing result models
 
 struct FishingCatchSummary: Identifiable, Hashable {
@@ -105,9 +131,22 @@ struct FishingSingleClaimResult: Identifiable, Hashable {
 final class FishingStore: ObservableObject {
     static let shared = FishingStore()
 
-    static let catchInterval: TimeInterval = 20 * 60
+    // Lv.1 は従来仕様と完全に同じ値。
+    static let baseCatchInterval: TimeInterval = 20 * 60
     static let maximumAwayDuration: TimeInterval = 8 * 60 * 60
-    static let basketCapacity: Int = 20
+    static let baseBasketCapacity: Int = 20
+    static let maximumGearLevel: Int = 10
+
+    // 現在Lv -> 次Lvへの強化に必要な歩数。
+    private static let rodUpgradeCosts = [
+        2_000, 4_000, 7_000, 11_000, 17_000, 26_000, 40_000, 60_000, 90_000
+    ]
+    private static let bobberUpgradeCosts = [
+        4_000, 7_000, 11_000, 17_000, 26_000, 40_000, 60_000, 90_000, 130_000
+    ]
+    private static let basketUpgradeCosts = [
+        3_000, 5_000, 8_000, 13_000, 20_000, 30_000, 45_000, 65_000, 95_000
+    ]
 
     @Published private(set) var pointBalance: Int = 0
     @Published private(set) var pendingCounts: [String: Int] = [:]
@@ -115,12 +154,19 @@ final class FishingStore: ObservableObject {
     @Published private(set) var firstCaughtDates: [String: Date] = [:]
     @Published private(set) var lastCalculatedAt: Date?
 
+    @Published private(set) var rodLevel: Int = 1
+    @Published private(set) var bobberLevel: Int = 1
+    @Published private(set) var basketLevel: Int = 1
+
     private enum Key {
         static let pointBalance = "memo.fishing.pointBalance"
         static let pendingCounts = "memo.fishing.pendingCounts"
         static let lifetimeCaughtCounts = "memo.fishing.lifetimeCaughtCounts"
         static let firstCaughtDates = "memo.fishing.firstCaughtDates"
         static let lastCalculatedAt = "memo.fishing.lastCalculatedAt"
+        static let rodLevel = "memo.fishing.gear.rodLevel"
+        static let bobberLevel = "memo.fishing.gear.bobberLevel"
+        static let basketLevel = "memo.fishing.gear.basketLevel"
     }
 
     private let defaults: UserDefaults
@@ -138,8 +184,22 @@ final class FishingStore: ObservableObject {
         pendingCounts.values.reduce(0) { $0 + max(0, $1) }
     }
 
+    var tapShortenSeconds: Int {
+        level(for: .rod)
+    }
+
+    /// 現実の1秒につき、釣りタイマーが何秒進むか。
+    /// Lv.1 = 1.00、Lv.10 = 1.45。
+    var timeProgressMultiplier: Double {
+        1.0 + (Double(level(for: .bobber) - 1) * 0.05)
+    }
+
+    var basketCapacity: Int {
+        Self.baseBasketCapacity + ((level(for: .basket) - 1) * 2)
+    }
+
     var isBasketFull: Bool {
-        pendingCatchCount >= Self.basketCapacity
+        pendingCatchCount >= basketCapacity
     }
 
     var pendingEstimatedMinimumPoints: Int {
@@ -149,20 +209,105 @@ final class FishingStore: ObservableObject {
         }
     }
 
-    func secondsUntilNextCatch(now: Date = Date()) -> TimeInterval? {
-        guard !isBasketFull else { return nil }
-        guard let lastCalculatedAt else { return Self.catchInterval }
-
-        // lastCalculatedAt は釣果生成のたびに次の区間へ進む基準日時。
-        // refresh前に境界を越えている場合は20:00へ巻き戻さず、0秒として表示する。
-        let elapsed = max(0, now.timeIntervalSince(lastCalculatedAt))
-        guard elapsed < Self.catchInterval else { return 0 }
-        return max(0, Self.catchInterval - elapsed)
+    func level(for gear: FishingGearKind) -> Int {
+        switch gear {
+        case .rod:
+            return clampGearLevel(rodLevel)
+        case .bobber:
+            return clampGearLevel(bobberLevel)
+        case .basket:
+            return clampGearLevel(basketLevel)
+        }
     }
 
-    /// 次の釣果までの経過時間を進める。
-    /// 画面タップ用だが、保存基準日時を更新するためアプリ終了後も短縮結果を維持する。
-    /// 既に満杯の場合は釣りが停止しているため短縮しない。
+    func isMaximumLevel(_ gear: FishingGearKind) -> Bool {
+        level(for: gear) >= Self.maximumGearLevel
+    }
+
+    func nextUpgradeCost(for gear: FishingGearKind) -> Int? {
+        let currentLevel = level(for: gear)
+        guard currentLevel < Self.maximumGearLevel else { return nil }
+
+        let index = currentLevel - 1
+        switch gear {
+        case .rod:
+            return Self.rodUpgradeCosts.indices.contains(index) ? Self.rodUpgradeCosts[index] : nil
+        case .bobber:
+            return Self.bobberUpgradeCosts.indices.contains(index) ? Self.bobberUpgradeCosts[index] : nil
+        case .basket:
+            return Self.basketUpgradeCosts.indices.contains(index) ? Self.basketUpgradeCosts[index] : nil
+        }
+    }
+
+    func tapShortenSeconds(at level: Int) -> Int {
+        clampGearLevel(level)
+    }
+
+    func timeProgressMultiplier(at level: Int) -> Double {
+        1.0 + (Double(clampGearLevel(level) - 1) * 0.05)
+    }
+
+    func basketCapacity(at level: Int) -> Int {
+        Self.baseBasketCapacity + ((clampGearLevel(level) - 1) * 2)
+    }
+
+    /// 歩数の消費自体はAppStateを所有するショップ側で行う。
+    /// ここではレベル更新と、更新後の釣り進行状態の整合だけを担当する。
+    @discardableResult
+    func upgrade(_ gear: FishingGearKind, now: Date = Date()) -> Bool {
+        guard !isMaximumLevel(gear) else { return false }
+
+        // 強化直前までの釣果を旧性能で確定してから新性能へ切り替える。
+        refresh(now: now)
+
+        let wasBasketFull = isBasketFull
+        let oldMultiplier = timeProgressMultiplier
+        let oldProgressSeconds: TimeInterval = {
+            guard !wasBasketFull, let lastCalculatedAt else { return 0 }
+            let elapsed = max(0, now.timeIntervalSince(lastCalculatedAt))
+            return min(Self.baseCatchInterval, elapsed * oldMultiplier)
+        }()
+
+        switch gear {
+        case .rod:
+            rodLevel = clampGearLevel(rodLevel + 1)
+
+        case .bobber:
+            bobberLevel = clampGearLevel(bobberLevel + 1)
+
+        case .basket:
+            basketLevel = clampGearLevel(basketLevel + 1)
+        }
+
+        if gear == .bobber, !wasBasketFull, lastCalculatedAt != nil {
+            // 強化前に進んでいた割合を維持し、強化操作だけで釣果が突然発生しないようにする。
+            let newMultiplier = max(0.01, timeProgressMultiplier)
+            self.lastCalculatedAt = now.addingTimeInterval(-oldProgressSeconds / newMultiplier)
+        }
+
+        if gear == .basket, wasBasketFull, !isBasketFull {
+            // 満杯で停止していた時間は遡って報酬化せず、強化した瞬間から釣りを再開する。
+            self.lastCalculatedAt = now
+        }
+
+        persist()
+        return true
+    }
+
+    /// 表示する残り時間は「釣りタイマー上の秒数」。
+    /// ウキを強化すると現実の1秒あたり1.05〜1.45秒ずつ減少する。
+    func secondsUntilNextCatch(now: Date = Date()) -> TimeInterval? {
+        guard !isBasketFull else { return nil }
+        guard let lastCalculatedAt else { return Self.baseCatchInterval }
+
+        let elapsed = max(0, now.timeIntervalSince(lastCalculatedAt))
+        let progressedSeconds = elapsed * timeProgressMultiplier
+        guard progressedSeconds < Self.baseCatchInterval else { return 0 }
+        return max(0, Self.baseCatchInterval - progressedSeconds)
+    }
+
+    /// 次の釣果までの釣りタイマーを指定秒数ぶん短縮する。
+    /// ウキ倍率とは独立して「表示される秒数」が指定量だけ減るよう、実時間へ換算して基準日時を動かす。
     @discardableResult
     func shortenNextCatch(
         by seconds: TimeInterval = 1,
@@ -175,7 +320,8 @@ final class FishingStore: ObservableObject {
         bootstrapIfNeeded(now: now)
         guard let lastCalculatedAt else { return false }
 
-        self.lastCalculatedAt = lastCalculatedAt.addingTimeInterval(-safeSeconds)
+        let realSeconds = safeSeconds / max(0.01, timeProgressMultiplier)
+        self.lastCalculatedAt = lastCalculatedAt.addingTimeInterval(-realSeconds)
         persist()
         refresh(now: now)
         return true
@@ -194,10 +340,11 @@ final class FishingStore: ObservableObject {
         }
 
         let elapsed = min(rawElapsed, Self.maximumAwayDuration)
-        let generatedCount = Int(elapsed / Self.catchInterval)
+        let progressedSeconds = elapsed * timeProgressMultiplier
+        let generatedCount = Int(progressedSeconds / Self.baseCatchInterval)
         guard generatedCount > 0 else { return }
 
-        let availableSpace = max(0, Self.basketCapacity - pendingCatchCount)
+        let availableSpace = max(0, basketCapacity - pendingCatchCount)
         let actualCount = min(generatedCount, availableSpace)
         guard actualCount > 0 else { return }
 
@@ -209,12 +356,13 @@ final class FishingStore: ObservableObject {
 
         pendingCounts = nextCounts
 
-        if pendingCatchCount >= Self.basketCapacity {
+        if pendingCatchCount >= basketCapacity {
             // 満杯以降の時間は報酬へ変換しない。受け取り時から釣りを再開する。
             self.lastCalculatedAt = now
         } else {
+            let realSecondsPerCatch = Self.baseCatchInterval / max(0.01, timeProgressMultiplier)
             self.lastCalculatedAt = lastCalculatedAt.addingTimeInterval(
-                TimeInterval(actualCount) * Self.catchInterval
+                TimeInterval(actualCount) * realSecondsPerCatch
             )
         }
 
@@ -222,7 +370,7 @@ final class FishingStore: ObservableObject {
     }
 
     /// 保留中の魚から1匹をランダムに選び、1匹分だけ受け取る。
-    /// 満杯状態から受け取った場合は、その時点から次の20分計測を再開する。
+    /// 満杯状態から受け取った場合は、その時点から次の計測を再開する。
     @discardableResult
     func claimOnePendingCatch(now: Date = Date()) -> FishingSingleClaimResult? {
         refresh(now: now)
@@ -359,6 +507,10 @@ final class FishingStore: ObservableObject {
         persist()
     }
 
+    private func clampGearLevel(_ level: Int) -> Int {
+        min(Self.maximumGearLevel, max(1, level))
+    }
+
     private func unlockedWallpaperAssetNames() -> Set<String> {
         Set(defaults.stringArray(forKey: WallpaperCatalog.focusUnlockedRewardAssetNamesKey) ?? [])
     }
@@ -369,11 +521,23 @@ final class FishingStore: ObservableObject {
         lifetimeCaughtCounts = decode([String: Int].self, key: Key.lifetimeCaughtCounts) ?? [:]
         firstCaughtDates = decode([String: Date].self, key: Key.firstCaughtDates) ?? [:]
         lastCalculatedAt = defaults.object(forKey: Key.lastCalculatedAt) as? Date
+
+        rodLevel = storedGearLevel(forKey: Key.rodLevel)
+        bobberLevel = storedGearLevel(forKey: Key.bobberLevel)
+        basketLevel = storedGearLevel(forKey: Key.basketLevel)
+    }
+
+    private func storedGearLevel(forKey key: String) -> Int {
+        guard defaults.object(forKey: key) != nil else { return 1 }
+        return clampGearLevel(defaults.integer(forKey: key))
     }
 
     private func persist() {
         defaults.set(max(0, pointBalance), forKey: Key.pointBalance)
         defaults.set(lastCalculatedAt, forKey: Key.lastCalculatedAt)
+        defaults.set(clampGearLevel(rodLevel), forKey: Key.rodLevel)
+        defaults.set(clampGearLevel(bobberLevel), forKey: Key.bobberLevel)
+        defaults.set(clampGearLevel(basketLevel), forKey: Key.basketLevel)
         encode(pendingCounts, key: Key.pendingCounts)
         encode(lifetimeCaughtCounts, key: Key.lifetimeCaughtCounts)
         encode(firstCaughtDates, key: Key.firstCaughtDates)
@@ -409,7 +573,6 @@ struct FishingView: View {
     @State private var tapShortenIndicators: [FishingTapShortenIndicator] = []
     @State private var continuousClaimTask: Task<Void, Never>?
     @State private var isLowPowerModeEnabled = ProcessInfo.processInfo.isLowPowerModeEnabled
-
 
     private var currentCharacterAssetName: String {
         PetMaster.assetName(for: state.normalizedCurrentPetID)
@@ -604,7 +767,7 @@ struct FishingView: View {
 
     private var statusArea: some View {
         VStack(alignment: .trailing, spacing: 10) {
-            pointBalancePill
+            fishingStatusBar
 
             ZStack(alignment: .trailing) {
                 // TimelineViewが表示時刻を直接供給するため、画面操作がなくても毎秒再描画される。
@@ -616,7 +779,7 @@ struct FishingView: View {
                         isBasketFull: fishingStore.isBasketFull,
                         timeText: Self.timeText(seconds: remainingSeconds),
                         remainingSeconds: remainingSeconds,
-                        totalSeconds: FishingStore.catchInterval
+                        totalSeconds: FishingStore.baseCatchInterval
                     )
                 }
                 .frame(maxWidth: .infinity)
@@ -645,21 +808,38 @@ struct FishingView: View {
         }
     }
 
-    /// ショップ画面の所持フィッシュpt表示と同じ形式。
-    private var pointBalancePill: some View {
-        HStack(spacing: 7) {
-            Image(systemName: "fish.fill")
-                .font(.system(size: 15, weight: .black))
+    /// フィッシュptと現在の釣り性能を、文字を読ませすぎない1本のステータスバーに集約する。
+    private var fishingStatusBar: some View {
+        HStack(spacing: 0) {
+            FishingStatusMetric(
+                icon: .system("fish.fill"),
+                value: "\(fishingStore.pointBalance)pt"
+            )
 
-            Text("\(fishingStore.pointBalance) pt")
-                .font(.system(size: 16, weight: .black, design: .rounded))
-                .monospacedDigit()
-                .lineLimit(1)
-                .minimumScaleFactor(0.72)
+            FishingStatusDivider()
+
+            FishingStatusMetric(
+                icon: .asset("fishingRod"),
+                value: "-\(fishingStore.tapShortenSeconds)秒 / タップ"
+            )
+
+            FishingStatusDivider()
+
+            FishingStatusMetric(
+                icon: .asset("bobber"),
+                value: String(format: "-%.2f/毎秒", fishingStore.timeProgressMultiplier)
+            )
+
+            FishingStatusDivider()
+
+            FishingStatusMetric(
+                icon: .asset("bucket"),
+                value: "最大/\(fishingStore.basketCapacity)"
+            )
         }
         .foregroundStyle(.white)
-        .padding(.horizontal, 12)
-        .frame(minHeight: 40)
+        .padding(.horizontal, 8)
+        .frame(maxWidth: .infinity, minHeight: 40)
         .background(Color.black.opacity(0.48), in: Capsule())
         .overlay {
             Capsule()
@@ -667,8 +847,13 @@ struct FishingView: View {
                 .allowsHitTesting(false)
         }
         .allowsHitTesting(false)
-        .accessibilityElement(children: .combine)
-        .accessibilityLabel("所持フィッシュポイント \(fishingStore.pointBalance)ポイント")
+        .accessibilityElement(children: .ignore)
+        .accessibilityLabel(
+            "所持フィッシュポイント \(fishingStore.pointBalance)ポイント、" +
+            "タップ短縮 \(fishingStore.tapShortenSeconds)秒、" +
+            "毎秒 \(String(format: "%.2f", fishingStore.timeProgressMultiplier))秒進行、" +
+            "カゴ上限 \(fishingStore.basketCapacity)匹"
+        )
     }
 
     private var receiveArea: some View {
@@ -682,7 +867,7 @@ struct FishingView: View {
 
             FishingBucketReceiveControl(
                 caughtCount: fishingStore.pendingCatchCount,
-                capacity: FishingStore.basketCapacity,
+                capacity: fishingStore.basketCapacity,
                 onTap: claimOneFish,
                 onLongPressBegan: startContinuousClaiming,
                 onLongPressEnded: stopContinuousClaiming
@@ -701,7 +886,7 @@ struct FishingView: View {
         guard !showShop, !showFishingInformation else { return }
         guard !fishingStore.isBasketFull else { return }
 
-        let shortenedSeconds = 1
+        let shortenedSeconds = fishingStore.tapShortenSeconds
         let date = Date()
         guard fishingStore.shortenNextCatch(
             by: TimeInterval(shortenedSeconds),
@@ -834,6 +1019,52 @@ struct FishingView: View {
     }
 }
 
+// MARK: - Compact fishing status
+
+private enum FishingStatusMetricIcon {
+    case system(String)
+    case asset(String)
+}
+
+private struct FishingStatusMetric: View {
+    let icon: FishingStatusMetricIcon
+    let value: String
+
+    var body: some View {
+        HStack(spacing: 4) {
+            Group {
+                switch icon {
+                case .system(let name):
+                    Image(systemName: name)
+                        .font(.system(size: 12, weight: .black))
+                case .asset(let name):
+                    Image(name)
+                        .resizable()
+                        .scaledToFit()
+                        .frame(width: 17, height: 17)
+                }
+            }
+            .frame(width: 18, height: 18)
+
+            Text(value)
+                .font(.system(size: 12, weight: .black, design: .rounded))
+                .monospacedDigit()
+                .lineLimit(1)
+                .minimumScaleFactor(0.62)
+        }
+        .frame(maxWidth: .infinity)
+    }
+}
+
+private struct FishingStatusDivider: View {
+    var body: some View {
+        Rectangle()
+            .fill(Color.white.opacity(0.22))
+            .frame(width: 1, height: 18)
+            .padding(.horizontal, 3)
+    }
+}
+
 // MARK: - Bucket receive UI
 
 private struct FishingTapShortenIndicator: Identifiable, Hashable {
@@ -962,7 +1193,7 @@ private struct FishingBucketReceiveControl: View {
         )
         .accessibilityElement(children: .ignore)
         .accessibilityLabel("釣れた魚を受け取る")
-        .accessibilityValue("\(max(0, caughtCount))匹")
+        .accessibilityValue("\(max(0, caughtCount))匹 / 最大\(max(1, capacity))匹")
         .accessibilityHint("タップで1匹、長押しで連続して受け取ります")
     }
 }
@@ -1038,7 +1269,7 @@ private struct FishingInformationOverlay: View {
                             .font(.system(size: 25, weight: .bold))
                             .foregroundStyle(Color(red: 0.98, green: 0.47, blue: 0.24))
 
-                        Text("魚かご以外の画面をタップすると、次の釣果までの時間を短縮できます。")
+                        Text("魚かご以外の画面をタップすると、次の釣果までの時間を短縮できます。釣り具はショップで歩数を使って強化できます。")
                             .font(.system(size: 14, weight: .bold))
                             .frame(maxWidth: .infinity, alignment: .leading)
                     }
@@ -1130,7 +1361,7 @@ private struct FishingNextCatchTimerView: View {
         isBasketFull ? "満杯" : timeText
     }
 
-    /// 20分から0秒へ向かって減少する、カウントダウンの残量。
+    /// 基準20分から0秒へ向かって減少する、カウントダウンの残量。
     private var countdownProgress: CGFloat {
         guard !isBasketFull else { return 1 }
 
