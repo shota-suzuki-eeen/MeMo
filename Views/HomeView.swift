@@ -5,7 +5,7 @@
 //  Created by shota suzuki on 2026/03/20.
 //  2026/06 update: おやすみモード広告は起動時ではなくポップアップ表示時に画面単位プリロードします。
 //  2026/06 update: カメラ画面は fullScreenCover を使わず、ホーム上の overlay として表示します。
-//  2026/08 update: SPご飯タブ、金色表示、幸せ度25、満腹度最大の給餌仕様に対応。
+//  2026/08 update: SPご飯タブ、金色表示、幸せ度25、満腹度最大の給餌仕様に対応.
 //
 
 import SwiftUI
@@ -1026,12 +1026,6 @@ struct HomeView: View {
                 : 0,
             y: Layout.characterTopOffset
         )
-        .animation(
-            shouldWiggleForToilet
-                ? .easeInOut(duration: Layout.toiletWiggleDuration).repeatForever(autoreverses: true)
-                : .default,
-            value: isToiletWiggleOn
-        )
         .zIndex(Layout.zCharacter - 1)
         .allowsHitTesting(false)
     }
@@ -1596,9 +1590,7 @@ struct HomeView: View {
         foodFeedResolutionTask?.cancel()
         foodFeedResolutionTask = nil
 
-
-        toiletWiggleActivationTask?.cancel()
-        toiletWiggleActivationTask = nil
+        stopToiletWiggle()
 
         happinessDecayAnimationTask?.cancel()
         happinessDecayAnimationTask = nil
@@ -2199,10 +2191,8 @@ struct HomeView: View {
         save()
 
         if !state.hasRemainingToiletPoops {
-            // 最後のpoopを消した瞬間に、repeatForeverの左右揺れを確実に停止する。
-            toiletWiggleActivationTask?.cancel()
-            toiletWiggleActivationTask = nil
-            isToiletWiggleOn = false
+            // 最後のpoopを消した入力方法に関係なく、左右揺れをその場で停止する。
+            stopToiletWiggle()
 
             toiletPoopActivePoint.removeAll()
             toiletPoopGestureStartPoint = nil
@@ -2711,24 +2701,54 @@ struct HomeView: View {
     }
 
     @MainActor
-    private func updateToiletWiggle() {
-        toiletWiggleActivationTask?.cancel()
+    private func setToiletWiggleStateImmediately(_ isOn: Bool) {
+        var transaction = Transaction(animation: nil)
+        transaction.disablesAnimations = true
 
-        if shouldWiggleForToilet {
-            isToiletWiggleOn = false
-            toiletWiggleActivationTask = scheduleMainActorTask(after: 0) {
-                guard shouldWiggleForToilet else {
-                    isToiletWiggleOn = false
-                    toiletWiggleActivationTask = nil
+        withTransaction(transaction) {
+            isToiletWiggleOn = isOn
+        }
+    }
+
+    @MainActor
+    private func stopToiletWiggle() {
+        toiletWiggleActivationTask?.cancel()
+        toiletWiggleActivationTask = nil
+        setToiletWiggleStateImmediately(false)
+    }
+
+    @MainActor
+    private func updateToiletWiggle() {
+        stopToiletWiggle()
+        guard shouldWiggleForToilet else { return }
+
+        // repeatForever の暗黙アニメーションを使わず、停止可能な Task で左右揺れを駆動する。
+        // これによりタップ・なぞり・トイレ使用のどの解消経路でも即座に停止できる。
+        setToiletWiggleStateImmediately(false)
+
+        toiletWiggleActivationTask = Task { @MainActor in
+            var nextState = true
+            await Task.yield()
+
+            while !Task.isCancelled && shouldWiggleForToilet {
+                withAnimation(.easeInOut(duration: Layout.toiletWiggleDuration)) {
+                    isToiletWiggleOn = nextState
+                }
+
+                do {
+                    try await Task.sleep(
+                        nanoseconds: UInt64(Layout.toiletWiggleDuration * 1_000_000_000)
+                    )
+                } catch {
                     return
                 }
 
-                isToiletWiggleOn = true
-                toiletWiggleActivationTask = nil
+                nextState.toggle()
             }
-        } else {
+
+            guard !Task.isCancelled else { return }
+            setToiletWiggleStateImmediately(false)
             toiletWiggleActivationTask = nil
-            isToiletWiggleOn = false
         }
     }
 
@@ -3345,6 +3365,7 @@ struct HomeView: View {
             isToiletTicketCleaning = false
 
             if !poops.isEmpty, !state.hasRemainingToiletPoops {
+                stopToiletWiggle()
                 bgmManager.playSE(.wc)
             }
 
@@ -3368,6 +3389,9 @@ struct HomeView: View {
         let now = Date()
         let r = state.resolveToilet(now: now)
         guard r.didResolve else { return }
+
+        // トイレ解消の入口を問わず、解消成立時点で必ず揺れタスクを停止する。
+        stopToiletWiggle()
         MemoOnboardingHomeHooks.toiletDidBecomeClean()
 
         toiletPoopActivePoint.removeAll()
@@ -3998,7 +4022,6 @@ enum HomeWidgetBridge {
         write(bathFlagAt, forKey: bathFlagAtKey, defaults: defaults)
         write(toiletNextSpawnAt, forKey: toiletNextSpawnAtKey, defaults: defaults)
         write(bathNextSpawnAt, forKey: bathNextSpawnAtKey, defaults: defaults)
-
         defaults.set(signature, forKey: lastSignatureKey)
         defaults.synchronize()
 
@@ -4997,7 +5020,6 @@ private struct RightSideButtons: View {
                 Button(action: {
                     bgmManager.playSE(.push)
                     if isToiletLocked {
-                        onBlocked()
                     } else {
                         onWalk()
                     }
