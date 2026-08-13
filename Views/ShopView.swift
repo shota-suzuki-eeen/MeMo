@@ -23,6 +23,7 @@ struct ShopView: View {
     @State private var selectedCategory: FishingShopCategory = .gear
     @State private var presentedExchangeModal: FishingShopExchangeModal?
     @State private var presentedGearUpgradeModal: FishingGearUpgradeModal?
+    @State private var selectedItemExchangeQuantity: Int = 1
 
     private let itemOffers = FishingItemOffer.defaultOffers
     private let wallpaperOffers = FishingWallpaperOffer.defaultOffers
@@ -516,10 +517,10 @@ struct ShopView: View {
                         .contentShape(Capsule())
                 }
                 .buttonStyle(.plain)
-                .accessibilityLabel("\(offer.name)を\(offer.price)ポイントで交換")
+                .accessibilityLabel("\(offer.name)を\(offer.price)ポイントからまとめて交換")
                 .accessibilityHint(
                     canAfford
-                        ? "交換内容を確認します"
+                        ? "交換する数量を選択します"
                         : "不足しているポイント数を表示します"
                 )
             }
@@ -660,32 +661,69 @@ struct ShopView: View {
         .shadow(color: .black.opacity(0.17), radius: 10, x: 0, y: 6)
     }
 
-    // MARK: - Existing fish-point exchange
+    // MARK: - Fish-point exchange
 
     private func requestExchange(_ target: FishingShopExchangeTarget) {
         bgmManager.playSE(.push)
 
-        if case .wallpaper(let offer) = target,
-           fishingStore.isWallpaperUnlocked(assetName: offer.wallpaper.assetName) {
-            presentedExchangeModal = .alreadyOwned(offer)
+        switch target {
+        case .wallpaper(let offer):
+            if fishingStore.isWallpaperUnlocked(assetName: offer.wallpaper.assetName) {
+                presentedExchangeModal = .alreadyOwned(offer)
+                return
+            }
+
+            let shortage = max(0, target.price - fishingStore.pointBalance)
+            guard shortage == 0 else {
+                presentedExchangeModal = .insufficient(target, shortage: shortage)
+                return
+            }
+
+            presentedExchangeModal = .confirmation(
+                target,
+                remainingBalance: max(0, fishingStore.pointBalance - target.price)
+            )
+
+        case .item(let offer):
+            guard appState != nil else {
+                presentedExchangeModal = .failed(target)
+                return
+            }
+
+            let maximumQuantity = maximumExchangeQuantity(for: offer)
+            guard maximumQuantity > 0 else {
+                presentedExchangeModal = .insufficient(
+                    target,
+                    shortage: max(0, offer.price - fishingStore.pointBalance)
+                )
+                return
+            }
+
+            selectedItemExchangeQuantity = 1
+            presentedExchangeModal = .quantitySelection(offer)
+        }
+    }
+
+    private func maximumExchangeQuantity(for offer: FishingItemOffer) -> Int {
+        let unitPrice = max(0, offer.price)
+        guard unitPrice > 0 else { return 0 }
+        return max(0, fishingStore.pointBalance) / unitPrice
+    }
+
+    private func displayedExchangeQuantity(for offer: FishingItemOffer) -> Int {
+        let maximumQuantity = maximumExchangeQuantity(for: offer)
+        guard maximumQuantity > 0 else { return 0 }
+        return min(max(1, selectedItemExchangeQuantity), maximumQuantity)
+    }
+
+    private func setItemExchangeQuantity(_ quantity: Int, for offer: FishingItemOffer) {
+        let maximumQuantity = maximumExchangeQuantity(for: offer)
+        guard maximumQuantity > 0 else {
+            selectedItemExchangeQuantity = 0
             return
         }
 
-        let shortage = max(0, target.price - fishingStore.pointBalance)
-        guard shortage == 0 else {
-            presentedExchangeModal = .insufficient(target, shortage: shortage)
-            return
-        }
-
-        if case .item = target, appState == nil {
-            presentedExchangeModal = .failed(target)
-            return
-        }
-
-        presentedExchangeModal = .confirmation(
-            target,
-            remainingBalance: max(0, fishingStore.pointBalance - target.price)
-        )
+        selectedItemExchangeQuantity = min(max(1, quantity), maximumQuantity)
     }
 
     private func completeExchange(_ target: FishingShopExchangeTarget) {
@@ -694,7 +732,7 @@ struct ShopView: View {
             completeWallpaperExchange(offer)
 
         case .item(let offer):
-            completeItemExchange(offer)
+            completeItemExchange(offer, quantity: 1)
         }
     }
 
@@ -725,34 +763,69 @@ struct ShopView: View {
         )
     }
 
-    private func completeItemExchange(_ offer: FishingItemOffer) {
+    private func completeItemExchange(_ offer: FishingItemOffer, quantity requestedQuantity: Int) {
         guard let appState else {
             presentedExchangeModal = .failed(.item(offer))
             return
         }
 
-        let shortage = max(0, offer.price - fishingStore.pointBalance)
-        guard shortage == 0 else {
-            presentedExchangeModal = .insufficient(.item(offer), shortage: shortage)
-            return
-        }
+        let quantity = max(1, requestedQuantity)
+        let maximumQuantity = maximumExchangeQuantity(for: offer)
 
-        guard consumeFishingPointsForItem(price: offer.price) else {
+        let (totalPrice, priceOverflow) = offer.price.multipliedReportingOverflow(by: quantity)
+        guard !priceOverflow, totalPrice > 0 else {
             presentedExchangeModal = .failed(.item(offer))
             return
         }
 
-        let didGrantReward: Bool
+        guard quantity <= maximumQuantity else {
+            presentedExchangeModal = .insufficient(
+                .item(offer),
+                shortage: max(0, totalPrice - fishingStore.pointBalance)
+            )
+            return
+        }
 
+        let didGrantReward: Bool
         switch offer.reward {
         case .food(let foodID, let count):
-            didGrantReward = appState.addFood(foodId: foodID, count: count)
+            let (totalCount, overflow) = count.multipliedReportingOverflow(by: quantity)
+            guard !overflow, totalCount > 0 else {
+                presentedExchangeModal = .failed(.item(offer))
+                return
+            }
+
+            guard consumeFishingPointsForItem(price: totalPrice) else {
+                presentedExchangeModal = .failed(.item(offer))
+                return
+            }
+            didGrantReward = appState.addFood(foodId: foodID, count: totalCount)
 
         case .toilet(let count):
-            didGrantReward = appState.gachaAddSpecialItem(id: "wc", count: count)
+            let (totalCount, overflow) = count.multipliedReportingOverflow(by: quantity)
+            guard !overflow, totalCount > 0 else {
+                presentedExchangeModal = .failed(.item(offer))
+                return
+            }
+
+            guard consumeFishingPointsForItem(price: totalPrice) else {
+                presentedExchangeModal = .failed(.item(offer))
+                return
+            }
+            didGrantReward = appState.gachaAddSpecialItem(id: "wc", count: totalCount)
 
         case .steps(let amount):
-            didGrantReward = appState.addWalletSteps(amount) == amount
+            let (totalAmount, overflow) = amount.multipliedReportingOverflow(by: quantity)
+            guard !overflow, totalAmount > 0 else {
+                presentedExchangeModal = .failed(.item(offer))
+                return
+            }
+
+            guard consumeFishingPointsForItem(price: totalPrice) else {
+                presentedExchangeModal = .failed(.item(offer))
+                return
+            }
+            didGrantReward = appState.addWalletSteps(totalAmount) == totalAmount
         }
 
         guard didGrantReward else {
@@ -763,8 +836,9 @@ struct ShopView: View {
         try? modelContext.save()
 
         bgmManager.playSE(.push)
-        presentedExchangeModal = .exchanged(
-            .item(offer),
+        presentedExchangeModal = .itemExchanged(
+            offer,
+            quantity: quantity,
             remainingBalance: fishingStore.pointBalance
         )
     }
@@ -881,7 +955,7 @@ struct ShopView: View {
         }
     }
 
-    // MARK: - Existing exchange modal
+    // MARK: - Exchange modal
 
     @ViewBuilder
     private func exchangeModalOverlay(_ modal: FishingShopExchangeModal) -> some View {
@@ -925,39 +999,48 @@ struct ShopView: View {
         .frame(maxWidth: .infinity, maxHeight: .infinity)
     }
 
+    @ViewBuilder
     private func modalIcon(_ modal: FishingShopExchangeModal) -> some View {
-        let iconName: String
-        let tint: Color
-
         switch modal {
+        case .quantitySelection(let offer):
+            // アイテムの交換数選択では、汎用の交換マークではなく
+            // 実際に交換するアイテムのアセットを表示する。
+            Image(offer.assetName)
+                .resizable()
+                .scaledToFit()
+                .frame(width: 82, height: 82)
+                .accessibilityHidden(true)
+
         case .information:
-            iconName = "info.circle.fill"
-            tint = Color(red: 0.10, green: 0.63, blue: 0.88)
+            Image(systemName: "info.circle.fill")
+                .font(.system(size: 46, weight: .bold))
+                .foregroundStyle(Color(red: 0.10, green: 0.63, blue: 0.88))
 
         case .confirmation:
-            iconName = "arrow.left.arrow.right.circle.fill"
-            tint = Color(red: 0.10, green: 0.63, blue: 0.88)
+            Image(systemName: "arrow.left.arrow.right.circle.fill")
+                .font(.system(size: 46, weight: .bold))
+                .foregroundStyle(Color(red: 0.10, green: 0.63, blue: 0.88))
 
-        case .exchanged:
-            iconName = "checkmark.circle.fill"
-            tint = .green
+        case .exchanged, .itemExchanged:
+            Image(systemName: "checkmark.circle.fill")
+                .font(.system(size: 46, weight: .bold))
+                .foregroundStyle(.green)
 
         case .insufficient:
-            iconName = "exclamationmark.circle.fill"
-            tint = .orange
+            Image(systemName: "exclamationmark.circle.fill")
+                .font(.system(size: 46, weight: .bold))
+                .foregroundStyle(.orange)
 
         case .alreadyOwned:
-            iconName = "checkmark.seal.fill"
-            tint = .green
+            Image(systemName: "checkmark.seal.fill")
+                .font(.system(size: 46, weight: .bold))
+                .foregroundStyle(.green)
 
         case .failed:
-            iconName = "xmark.circle.fill"
-            tint = .red
+            Image(systemName: "xmark.circle.fill")
+                .font(.system(size: 46, weight: .bold))
+                .foregroundStyle(.red)
         }
-
-        return Image(systemName: iconName)
-            .font(.system(size: 46, weight: .bold))
-            .foregroundStyle(tint)
     }
 
     @ViewBuilder
@@ -965,6 +1048,103 @@ struct ShopView: View {
         switch modal {
         case .information:
             closeModalButton
+
+        case .quantitySelection(let offer):
+            let maximumQuantity = maximumExchangeQuantity(for: offer)
+            let quantity = displayedExchangeQuantity(for: offer)
+            let totalPrice = quantity > 0 ? offer.price * quantity : 0
+            let remainingBalance = max(0, fishingStore.pointBalance - totalPrice)
+
+            VStack(spacing: 14) {
+                HStack(spacing: 18) {
+                    Button {
+                        bgmManager.playSE(.push)
+                        setItemExchangeQuantity(quantity - 1, for: offer)
+                    } label: {
+                        Image(systemName: "minus")
+                            .font(.system(size: 18, weight: .black))
+                            .foregroundStyle(.white)
+                            .frame(width: 46, height: 46)
+                            .background(quantity > 1 ? Color.red.opacity(0.55) : Color.gray.opacity(0.48), in: Circle())
+                    }
+                    .buttonStyle(.plain)
+                    .disabled(quantity <= 1)
+                    .accessibilityLabel("交換数を1減らす")
+
+                    VStack(spacing: 2) {
+                        Text("\(quantity)")
+                            .font(.system(size: 34, weight: .black, design: .rounded))
+                            .monospacedDigit()
+
+                        Text("個")
+                            .font(.system(size: 13, weight: .bold, design: .rounded))
+                            .foregroundStyle(.secondary)
+                    }
+                    .frame(minWidth: 76)
+
+                    Button {
+                        bgmManager.playSE(.push)
+                        setItemExchangeQuantity(quantity + 1, for: offer)
+                    } label: {
+                        Image(systemName: "plus")
+                            .font(.system(size: 18, weight: .black))
+                            .foregroundStyle(.white)
+                            .frame(width: 46, height: 46)
+                            .background(
+                                quantity < maximumQuantity
+                                    ? Color(red: 0.10, green: 0.63, blue: 0.88)
+                                    : Color.gray.opacity(0.48),
+                                in: Circle()
+                            )
+                    }
+                    .buttonStyle(.plain)
+                    .disabled(maximumQuantity <= 0 || quantity >= maximumQuantity)
+                    .accessibilityLabel("交換数を1増やす")
+                }
+
+                VStack(spacing: 5) {
+                    Text("最大 \(maximumQuantity)個まで交換できます")
+                        .font(.system(size: 12, weight: .bold, design: .rounded))
+                        .foregroundStyle(.secondary)
+                        .monospacedDigit()
+
+                    Text("合計 \(totalPrice) pt")
+                        .font(.system(size: 15, weight: .black, design: .rounded))
+                        .monospacedDigit()
+
+                    Text("交換後：\(remainingBalance) pt")
+                        .font(.system(size: 12, weight: .bold, design: .rounded))
+                        .foregroundStyle(.secondary)
+                        .monospacedDigit()
+                }
+
+                Button {
+                    completeItemExchange(offer, quantity: quantity)
+                } label: {
+                    Text("\(quantity)個を \(totalPrice) ptで交換")
+                        .font(.system(size: 16, weight: .black))
+                        .foregroundStyle(.white)
+                        .frame(maxWidth: .infinity, minHeight: 48)
+                        .background(
+                            maximumQuantity > 0
+                                ? Color(red: 0.10, green: 0.63, blue: 0.88)
+                                : Color.gray,
+                            in: Capsule()
+                        )
+                }
+                .buttonStyle(.plain)
+                .disabled(maximumQuantity <= 0 || quantity <= 0)
+
+                Button {
+                    presentedExchangeModal = nil
+                } label: {
+                    Text("キャンセル")
+                        .font(.system(size: 15, weight: .bold))
+                        .foregroundStyle(.secondary)
+                        .frame(maxWidth: .infinity, minHeight: 44)
+                }
+                .buttonStyle(.plain)
+            }
 
         case .confirmation(let target, _):
             VStack(spacing: 10) {
@@ -1020,6 +1200,9 @@ struct ShopView: View {
             case .item:
                 closeModalButton
             }
+
+        case .itemExchanged:
+            closeModalButton
 
         case .alreadyOwned(let offer):
             VStack(spacing: 10) {
@@ -1250,8 +1433,10 @@ private enum FishingShopExchangeTarget: Identifiable, Hashable {
 
 private enum FishingShopExchangeModal: Identifiable {
     case information(FishingItemOffer)
+    case quantitySelection(FishingItemOffer)
     case confirmation(FishingShopExchangeTarget, remainingBalance: Int)
     case exchanged(FishingShopExchangeTarget, remainingBalance: Int)
+    case itemExchanged(FishingItemOffer, quantity: Int, remainingBalance: Int)
     case insufficient(FishingShopExchangeTarget, shortage: Int)
     case alreadyOwned(FishingWallpaperOffer)
     case failed(FishingShopExchangeTarget)
@@ -1260,10 +1445,14 @@ private enum FishingShopExchangeModal: Identifiable {
         switch self {
         case .information(let offer):
             return "information.\(offer.id)"
+        case .quantitySelection(let offer):
+            return "quantitySelection.\(offer.id)"
         case .confirmation(let target, _):
             return "confirmation.\(target.id)"
         case .exchanged(let target, _):
             return "exchanged.\(target.id)"
+        case .itemExchanged(let offer, let quantity, _):
+            return "itemExchanged.\(offer.id).\(quantity)"
         case .insufficient(let target, _):
             return "insufficient.\(target.id)"
         case .alreadyOwned(let offer):
@@ -1277,10 +1466,14 @@ private enum FishingShopExchangeModal: Identifiable {
         switch self {
         case .information(let offer):
             return offer.name
+        case .quantitySelection(let offer):
+            return "\(offer.name)の交換数"
         case .confirmation(let target, _):
             return "\(target.exchangeNoun)と交換しますか？"
         case .exchanged(let target, _):
             return "\(target.exchangeNoun)と交換しました"
+        case .itemExchanged:
+            return "アイテムと交換しました"
         case .insufficient:
             return "ポイントが足りません"
         case .alreadyOwned:
@@ -1297,11 +1490,17 @@ private enum FishingShopExchangeModal: Identifiable {
                 .replacingOccurrences(of: "。", with: "。\n")
                 .trimmingCharacters(in: .whitespacesAndNewlines)
 
+        case .quantitySelection(let offer):
+            return "「\(offer.name)」をまとめて交換できます。\n交換する数量を選択してください。"
+
         case .confirmation(let target, let remainingBalance):
             return "「\(target.name)」と交換します。\n交換後の残高は\(remainingBalance) ptです。"
 
         case .exchanged(let target, let remainingBalance):
             return "「\(target.name)」を取得しました。\n残りのフィッシュポイント：\(remainingBalance) pt"
+
+        case .itemExchanged(let offer, let quantity, let remainingBalance):
+            return "「\(offer.name)」を\(quantity)個取得しました。\n残りのフィッシュポイント：\(remainingBalance) pt"
 
         case .insufficient(let target, let shortage):
             return "「\(target.name)」との交換には、あと\(shortage) pt必要です。"
