@@ -178,7 +178,7 @@ fileprivate enum GachaCatalog {
         .init(id: "food_gyoza", name: "餃子", assetName: "gyoza", rarity: .gold),
         .init(id: "food_hamburger", name: "ハンバーガー", assetName: "hamburger", rarity: .gold),
         .init(id: "food_juice", name: "オレンジジュース", assetName: "juice", rarity: .gold),
-        .init(id: "food_maguro", name: "マグロ寿司", assetName: "maguro", rarity: .gold),
+        .init(id: "food_maguro", name: "マグロ郎", assetName: "magurou", rarity: .gold),
         .init(id: "food_pancake", name: "パンケーキ", assetName: "pancake", rarity: .gold),
         .init(id: "food_pizza", name: "ピザ", assetName: "pizza", rarity: .gold),
         .init(id: "food_poteto", name: "ポテト", assetName: "poteto", rarity: .gold),
