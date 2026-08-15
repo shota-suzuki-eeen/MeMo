@@ -13,6 +13,7 @@
 //  初回表示あり → 2回目なし → 3回目表示ありの交互表示に調整。
 //  2026/07 update: 複数広告枠で30分以内8回以上ロード失敗した場合のみ、
 //  通信不良とは切り分けてAdMob一時停止モードへ移行する自動切り替えを追加。
+//  2026/08 update: 釣り画面の時間ブースト／タップブースト用リワード広告を中央管理へ統合。
 //
 
 import Foundation
@@ -37,6 +38,8 @@ enum AdUnitID {
     static let rewardWalkStartProd: String = "ca-app-pub-1093843343402854/2648339519"
     static let rewardWalkDoubleProd: String = "ca-app-pub-1093843343402854/9384714199"
     static let rewardSleepModeProd: String = "ca-app-pub-1093843343402854/7266688481"
+    static let rewardFishingTimeBoostProd: String = "ca-app-pub-1093843343402854/2439506203"
+    static let rewardFishingTapBoostProd: String = "ca-app-pub-1093843343402854/3561016180"
     static let interstitialCharacterSetProd: String = "ca-app-pub-1093843343402854/1430768838"
     static let interstitialGetProd: String = "ca-app-pub-1093843343402854/1732045372"
 
@@ -90,6 +93,22 @@ enum AdUnitID {
         return rewardedTest
         #else
         return rewardSleepModeProd
+        #endif
+    }
+
+    static var rewardFishingTimeBoost: String {
+        #if DEBUG
+        return rewardedTest
+        #else
+        return rewardFishingTimeBoostProd
+        #endif
+    }
+
+    static var rewardFishingTapBoost: String {
+        #if DEBUG
+        return rewardedTest
+        #else
+        return rewardFishingTapBoostProd
         #endif
     }
 
@@ -281,6 +300,18 @@ final class AdMobManager: ObservableObject {
     let rewardWalkStart = RewardedAdManager(adUnitID: AdUnitID.rewardWalkStart)
     let rewardWalkDouble = RewardedAdManager(adUnitID: AdUnitID.rewardWalkDouble)
     let rewardSleepMode = RewardedAdManager(adUnitID: AdUnitID.rewardSleepMode)
+
+    // 釣りブーストは効果時間中に同一報酬を再取得できないため、
+    // 視聴終了直後の自動リロードは行わず、FishingViewから終了直前にprepareする。
+    let rewardFishingTimeBoost = RewardedAdManager(
+        adUnitID: AdUnitID.rewardFishingTimeBoost,
+        automaticallyReloadAfterPresentation: false
+    )
+    let rewardFishingTapBoost = RewardedAdManager(
+        adUnitID: AdUnitID.rewardFishingTapBoost,
+        automaticallyReloadAfterPresentation: false
+    )
+
     // 図鑑のお世話キャラクター変更用。
     // 初回は表示対象、以降は「表示なし → 表示あり」を交互に繰り返す。
     let interstitialCharacterSet = InterstitialAdManager(
@@ -365,6 +396,7 @@ final class AdMobManager: ObservableObject {
 
         // リワード広告は画面単位でプリロードする。
         // 優先順: ガチャ → おやすみモード → お散歩開始 → 2倍獲得。
+        // 釣りブーストは釣り画面側で必要なタイミングにだけprepareする。
         if !shouldUseRewardedAds {
             markRewardedAdsAvailableWithoutAdIfAllowed()
         }
@@ -388,6 +420,14 @@ final class AdMobManager: ObservableObject {
 
     func prepareRewardWalkDouble() {
         prepareRewardedAd(rewardWalkDouble)
+    }
+
+    func prepareRewardFishingTimeBoost() {
+        prepareRewardedAd(rewardFishingTimeBoost)
+    }
+
+    func prepareRewardFishingTapBoost() {
+        prepareRewardedAd(rewardFishingTapBoost)
     }
 
     func prepareRewardedAdsInPreferredOrder() {
@@ -576,6 +616,8 @@ final class AdMobManager: ObservableObject {
         rewardWalkStart.markAvailableWithoutAd()
         rewardWalkDouble.markAvailableWithoutAd()
         rewardSleepMode.markAvailableWithoutAd()
+        rewardFishingTimeBoost.markAvailableWithoutAd()
+        rewardFishingTapBoost.markAvailableWithoutAd()
     }
 
     private func markRewardedAdsUnavailableForConnection() {
@@ -584,6 +626,8 @@ final class AdMobManager: ObservableObject {
         rewardWalkStart.markUnavailable(message: message)
         rewardWalkDouble.markUnavailable(message: message)
         rewardSleepMode.markUnavailable(message: message)
+        rewardFishingTimeBoost.markUnavailable(message: message)
+        rewardFishingTapBoost.markUnavailable(message: message)
     }
 
     private func refreshTemporaryPauseState() {
@@ -897,6 +941,7 @@ final class RewardedAdManager: NSObject, ObservableObject {
     @Published private(set) var isAvailableWithoutAd: Bool = false
 
     let adUnitID: String
+    private let automaticallyReloadAfterPresentation: Bool
     private var pendingReward: (() -> Void)?
     private var pendingUnavailable: (() -> Void)?
     private var didEarnRewardDuringPresentation: Bool = false
@@ -907,8 +952,12 @@ final class RewardedAdManager: NSObject, ObservableObject {
     private var rewardedAd: RewardedAd?
     #endif
 
-    init(adUnitID: String) {
+    init(
+        adUnitID: String,
+        automaticallyReloadAfterPresentation: Bool = true
+    ) {
         self.adUnitID = adUnitID
+        self.automaticallyReloadAfterPresentation = automaticallyReloadAfterPresentation
         super.init()
 
         if !AdRuntimePolicy.canTouchAdvertisingSDK {
@@ -1125,7 +1174,9 @@ final class RewardedAdManager: NSObject, ObservableObject {
             unavailable?()
         }
 
-        loadIfNeeded()
+        if automaticallyReloadAfterPresentation {
+            loadIfNeeded()
+        }
     }
 }
 

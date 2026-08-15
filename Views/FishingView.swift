@@ -137,6 +137,13 @@ final class FishingStore: ObservableObject {
     static let baseBasketCapacity: Int = 20
     static let maximumGearLevel: Int = 10
 
+    // リワード広告による釣りブースト。
+    // 時間ブーストは現在のウキ性能を3時間だけ2倍、
+    // タップブーストは現在の釣り竿性能を5分だけ2倍にする。
+    static let boostMultiplier: Double = 2.0
+    static let timeBoostDuration: TimeInterval = 3 * 60 * 60
+    static let tapBoostDuration: TimeInterval = 5 * 60
+
     // 現在Lv -> 次Lvへの強化に必要な歩数。
     private static let rodUpgradeCosts = [
         2_000, 4_000, 7_000, 11_000, 17_000, 26_000, 40_000, 60_000, 90_000
@@ -158,6 +165,12 @@ final class FishingStore: ObservableObject {
     @Published private(set) var bobberLevel: Int = 1
     @Published private(set) var basketLevel: Int = 1
 
+    // 時間ブーストは開始日時も保持する。
+    // lastCalculatedAtをまたいでブースト開始前／適用中／終了後を正確に積算するために必要。
+    @Published private(set) var timeBoostStartedAt: Date?
+    @Published private(set) var timeBoostEndsAt: Date?
+    @Published private(set) var tapBoostEndsAt: Date?
+
     private enum Key {
         static let pointBalance = "memo.fishing.pointBalance"
         static let pendingCounts = "memo.fishing.pendingCounts"
@@ -167,6 +180,9 @@ final class FishingStore: ObservableObject {
         static let rodLevel = "memo.fishing.gear.rodLevel"
         static let bobberLevel = "memo.fishing.gear.bobberLevel"
         static let basketLevel = "memo.fishing.gear.basketLevel"
+        static let timeBoostStartedAt = "memo.fishing.boost.time.startedAt"
+        static let timeBoostEndsAt = "memo.fishing.boost.time.endsAt"
+        static let tapBoostEndsAt = "memo.fishing.boost.tap.endsAt"
     }
 
     private let defaults: UserDefaults
@@ -251,6 +267,77 @@ final class FishingStore: ObservableObject {
         Self.baseBasketCapacity + ((clampGearLevel(level) - 1) * 2)
     }
 
+    func isTimeBoostActive(at now: Date = Date()) -> Bool {
+        timeBoostRemaining(at: now) > 0
+    }
+
+    func isTapBoostActive(at now: Date = Date()) -> Bool {
+        tapBoostRemaining(at: now) > 0
+    }
+
+    func timeBoostRemaining(at now: Date = Date()) -> TimeInterval {
+        guard let timeBoostEndsAt else { return 0 }
+        return max(0, timeBoostEndsAt.timeIntervalSince(now))
+    }
+
+    func tapBoostRemaining(at now: Date = Date()) -> TimeInterval {
+        guard let tapBoostEndsAt else { return 0 }
+        return max(0, tapBoostEndsAt.timeIntervalSince(now))
+    }
+
+    /// UI表示と実際のタップ短縮処理で使う現在値。
+    /// 釣り竿のレベル値そのものを変えず、ブースト中だけ最終値へ2倍を適用する。
+    func effectiveTapShortenSeconds(at now: Date = Date()) -> Int {
+        let baseValue = max(1, tapShortenSeconds)
+        guard isTapBoostActive(at: now) else { return baseValue }
+        return Int((Double(baseValue) * Self.boostMultiplier).rounded())
+    }
+
+    /// UI表示用の現在の時間経過性能。
+    /// 実際の経過計算はboost境界を正確に扱うprogressedFishingSecondsで行う。
+    func effectiveTimeProgressMultiplier(at now: Date = Date()) -> Double {
+        let baseValue = max(0.01, timeProgressMultiplier)
+        return isTimeBoostActive(at: now) ? baseValue * Self.boostMultiplier : baseValue
+    }
+
+    /// 時間ブーストを開始する。
+    /// 発動直前までの部分進行を旧条件で確定し、ブースト開始だけで釣果が増えないよう基準日時を再構成する。
+    @discardableResult
+    func activateTimeBoost(now: Date = Date()) -> Bool {
+        guard !isTimeBoostActive(at: now) else { return false }
+
+        refresh(now: now)
+        let wasBasketFull = isBasketFull
+        let preservedProgress: TimeInterval = {
+            guard !wasBasketFull, let lastCalculatedAt else { return 0 }
+            return min(
+                Self.baseCatchInterval,
+                progressedFishingSeconds(from: lastCalculatedAt, to: now)
+            )
+        }()
+
+        timeBoostStartedAt = now
+        timeBoostEndsAt = now.addingTimeInterval(Self.timeBoostDuration)
+
+        if !wasBasketFull, lastCalculatedAt != nil {
+            self.lastCalculatedAt = anchorDate(
+                preservingFishingProgress: preservedProgress,
+                endingAt: now
+            )
+        }
+
+        persist()
+        return true
+    }
+
+    @discardableResult
+    func activateTapBoost(now: Date = Date()) -> Bool {
+        guard !isTapBoostActive(at: now) else { return false }
+        tapBoostEndsAt = now.addingTimeInterval(Self.tapBoostDuration)
+        persist()
+        return true
+    }
+
     /// 歩数の消費自体はAppStateを所有するショップ側で行う。
     /// ここではレベル更新と、更新後の釣り進行状態の整合だけを担当する。
     @discardableResult
@@ -261,11 +348,12 @@ final class FishingStore: ObservableObject {
         refresh(now: now)
 
         let wasBasketFull = isBasketFull
-        let oldMultiplier = timeProgressMultiplier
         let oldProgressSeconds: TimeInterval = {
             guard !wasBasketFull, let lastCalculatedAt else { return 0 }
-            let elapsed = max(0, now.timeIntervalSince(lastCalculatedAt))
-            return min(Self.baseCatchInterval, elapsed * oldMultiplier)
+            return min(
+                Self.baseCatchInterval,
+                progressedFishingSeconds(from: lastCalculatedAt, to: now)
+            )
         }()
 
         switch gear {
@@ -280,9 +368,12 @@ final class FishingStore: ObservableObject {
         }
 
         if gear == .bobber, !wasBasketFull, lastCalculatedAt != nil {
-            // 強化前に進んでいた割合を維持し、強化操作だけで釣果が突然発生しないようにする。
-            let newMultiplier = max(0.01, timeProgressMultiplier)
-            self.lastCalculatedAt = now.addingTimeInterval(-oldProgressSeconds / newMultiplier)
+            // 強化前に進んでいた釣りタイマー上の秒数を維持し、
+            // 新しいウキ性能と現在のブースト条件で基準日時だけを再構成する。
+            self.lastCalculatedAt = anchorDate(
+                preservingFishingProgress: oldProgressSeconds,
+                endingAt: now
+            )
         }
 
         if gear == .basket, wasBasketFull, !isBasketFull {
@@ -300,8 +391,7 @@ final class FishingStore: ObservableObject {
         guard !isBasketFull else { return nil }
         guard let lastCalculatedAt else { return Self.baseCatchInterval }
 
-        let elapsed = max(0, now.timeIntervalSince(lastCalculatedAt))
-        let progressedSeconds = elapsed * timeProgressMultiplier
+        let progressedSeconds = progressedFishingSeconds(from: lastCalculatedAt, to: now)
         guard progressedSeconds < Self.baseCatchInterval else { return 0 }
         return max(0, Self.baseCatchInterval - progressedSeconds)
     }
@@ -320,8 +410,13 @@ final class FishingStore: ObservableObject {
         bootstrapIfNeeded(now: now)
         guard let lastCalculatedAt else { return false }
 
-        let realSeconds = safeSeconds / max(0.01, timeProgressMultiplier)
-        self.lastCalculatedAt = lastCalculatedAt.addingTimeInterval(-realSeconds)
+        // 「表示上の残り秒数」を指定値ぶん確実に減らす。
+        // 時間ブーストの開始／終了境界をまたいでも、単純な除算で過去へずらさない。
+        let currentProgress = progressedFishingSeconds(from: lastCalculatedAt, to: now)
+        self.lastCalculatedAt = anchorDate(
+            preservingFishingProgress: currentProgress + safeSeconds,
+            endingAt: now
+        )
         persist()
         refresh(now: now)
         return true
@@ -340,7 +435,11 @@ final class FishingStore: ObservableObject {
         }
 
         let elapsed = min(rawElapsed, Self.maximumAwayDuration)
-        let progressedSeconds = elapsed * timeProgressMultiplier
+        let evaluationEnd = lastCalculatedAt.addingTimeInterval(elapsed)
+        let progressedSeconds = progressedFishingSeconds(
+            from: lastCalculatedAt,
+            to: evaluationEnd
+        )
         let generatedCount = Int(progressedSeconds / Self.baseCatchInterval)
         guard generatedCount > 0 else { return }
 
@@ -360,9 +459,13 @@ final class FishingStore: ObservableObject {
             // 満杯以降の時間は報酬へ変換しない。受け取り時から釣りを再開する。
             self.lastCalculatedAt = now
         } else {
-            let realSecondsPerCatch = Self.baseCatchInterval / max(0.01, timeProgressMultiplier)
-            self.lastCalculatedAt = lastCalculatedAt.addingTimeInterval(
-                TimeInterval(actualCount) * realSecondsPerCatch
+            // 生成済みの釣果ぶんを差し引いた端数だけを残す。
+            // ブースト開始／終了をまたいだ経過でも端数が失われないよう、基準日時を逆算する。
+            let consumedProgress = TimeInterval(actualCount) * Self.baseCatchInterval
+            let remainingProgress = max(0, progressedSeconds - consumedProgress)
+            self.lastCalculatedAt = anchorDate(
+                preservingFishingProgress: remainingProgress,
+                endingAt: evaluationEnd
             )
         }
 
@@ -501,6 +604,61 @@ final class FishingStore: ObservableObject {
         max(0, lifetimeCaughtCounts[fishID] ?? 0)
     }
 
+    /// 指定した実時間区間で釣りタイマーが何秒進むかを積算する。
+    /// 時間ブースト区間だけ、現在レベルのウキ性能を追加で1倍ぶん加算して合計2倍にする。
+    private func progressedFishingSeconds(from start: Date, to end: Date) -> TimeInterval {
+        guard end > start else { return 0 }
+
+        let baseMultiplier = max(0.01, timeProgressMultiplier)
+        let totalElapsed = end.timeIntervalSince(start)
+        var boostedOverlap: TimeInterval = 0
+
+        if let boostStart = timeBoostStartedAt,
+           let boostEnd = timeBoostEndsAt,
+           boostEnd > boostStart {
+            let overlapStart = max(start, boostStart)
+            let overlapEnd = min(end, boostEnd)
+            if overlapEnd > overlapStart {
+                boostedOverlap = overlapEnd.timeIntervalSince(overlapStart)
+            }
+        }
+
+        let additionalBoostMultiplier = max(0, Self.boostMultiplier - 1.0)
+        return (totalElapsed * baseMultiplier)
+            + (boostedOverlap * baseMultiplier * additionalBoostMultiplier)
+    }
+
+    /// endを終点として、指定した釣りタイマー上の進行秒数を保持できる基準日時を二分探索で求める。
+    /// ブースト境界をまたぐ場合でも部分進行を正確に保持するための内部変換。
+    private func anchorDate(
+        preservingFishingProgress targetProgress: TimeInterval,
+        endingAt end: Date
+    ) -> Date {
+        let target = max(0, targetProgress)
+        guard target > 0 else { return end }
+
+        let baseMultiplier = max(0.01, timeProgressMultiplier)
+        var lower = end.addingTimeInterval(-(target / baseMultiplier) - 1)
+        var upper = end
+
+        for _ in 0..<52 {
+            let middleReference = (
+                lower.timeIntervalSinceReferenceDate
+                + upper.timeIntervalSinceReferenceDate
+            ) / 2
+            let middle = Date(timeIntervalSinceReferenceDate: middleReference)
+            let progressed = progressedFishingSeconds(from: middle, to: end)
+
+            if progressed > target {
+                lower = middle
+            } else {
+                upper = middle
+            }
+        }
+
+        return upper
+    }
+
     private func bootstrapIfNeeded(now: Date) {
         guard lastCalculatedAt == nil else { return }
         lastCalculatedAt = now
@@ -525,6 +683,10 @@ final class FishingStore: ObservableObject {
         rodLevel = storedGearLevel(forKey: Key.rodLevel)
         bobberLevel = storedGearLevel(forKey: Key.bobberLevel)
         basketLevel = storedGearLevel(forKey: Key.basketLevel)
+
+        timeBoostStartedAt = defaults.object(forKey: Key.timeBoostStartedAt) as? Date
+        timeBoostEndsAt = defaults.object(forKey: Key.timeBoostEndsAt) as? Date
+        tapBoostEndsAt = defaults.object(forKey: Key.tapBoostEndsAt) as? Date
     }
 
     private func storedGearLevel(forKey key: String) -> Int {
@@ -538,6 +700,9 @@ final class FishingStore: ObservableObject {
         defaults.set(clampGearLevel(rodLevel), forKey: Key.rodLevel)
         defaults.set(clampGearLevel(bobberLevel), forKey: Key.bobberLevel)
         defaults.set(clampGearLevel(basketLevel), forKey: Key.basketLevel)
+        defaults.set(timeBoostStartedAt, forKey: Key.timeBoostStartedAt)
+        defaults.set(timeBoostEndsAt, forKey: Key.timeBoostEndsAt)
+        defaults.set(tapBoostEndsAt, forKey: Key.tapBoostEndsAt)
         encode(pendingCounts, key: Key.pendingCounts)
         encode(lifetimeCaughtCounts, key: Key.lifetimeCaughtCounts)
         encode(firstCaughtDates, key: Key.firstCaughtDates)
@@ -554,6 +719,33 @@ final class FishingStore: ObservableObject {
     }
 }
 
+// MARK: - Fishing rewarded boost ads
+
+private enum FishingBoostConfirmation: String, Identifiable {
+    case time
+    case tap
+
+    var id: String { rawValue }
+
+    var title: String {
+        switch self {
+        case .time:
+            return "時間ブーストを開始しますか？"
+        case .tap:
+            return "タップブーストを開始しますか？"
+        }
+    }
+
+    var message: String {
+        switch self {
+        case .time:
+            return "リワード広告を視聴すると、現在の時間経過による短縮値が3時間のあいだ2倍になります。効果中は再度視聴できません。"
+        case .tap:
+            return "リワード広告を視聴すると、現在のタップによる短縮値が5分間2倍になります。効果中は再度視聴できません。"
+        }
+    }
+}
+
 // MARK: - Fishing screen
 
 struct FishingView: View {
@@ -566,6 +758,9 @@ struct FishingView: View {
     let onSave: () -> Void
 
     @ObservedObject private var fishingStore = FishingStore.shared
+    @ObservedObject private var adMobManager = AdMobManager.shared
+    @ObservedObject private var timeBoostRewardedAdManager = AdMobManager.shared.rewardFishingTimeBoost
+    @ObservedObject private var tapBoostRewardedAdManager = AdMobManager.shared.rewardFishingTapBoost
 
     @State private var showShop = false
     @State private var showFishingInformation = false
@@ -573,6 +768,12 @@ struct FishingView: View {
     @State private var tapShortenIndicators: [FishingTapShortenIndicator] = []
     @State private var continuousClaimTask: Task<Void, Never>?
     @State private var isLowPowerModeEnabled = ProcessInfo.processInfo.isLowPowerModeEnabled
+    @State private var boostToastMessage: String?
+    @State private var showBoostToast = false
+    @State private var pendingBoostConfirmation: FishingBoostConfirmation?
+
+    // 効果終了直後に広告を利用できるよう、終了1分前から次回分をプリロードする。
+    private static let fishingBoostAdPreloadLeadTime: TimeInterval = 60
 
     private var currentCharacterAssetName: String {
         PetMaster.assetName(for: state.normalizedCurrentPetID)
@@ -634,6 +835,18 @@ struct FishingView: View {
 
                 interfaceLayer(in: geo)
 
+                if showBoostToast, let boostToastMessage {
+                    VStack {
+                        Spacer()
+                        FishingBoostToastView(message: boostToastMessage)
+                            .padding(.horizontal, 28)
+                            .padding(.bottom, max(geo.safeAreaInsets.bottom, 18) + 300)
+                    }
+                    .allowsHitTesting(false)
+                    .transition(.move(edge: .bottom).combined(with: .opacity))
+                    .zIndex(9_000)
+                }
+
                 if showFishingInformation {
                     FishingInformationOverlay {
                         bgmManager.playSE(.push)
@@ -643,6 +856,23 @@ struct FishingView: View {
                     }
                     .transition(.opacity)
                     .zIndex(10_000)
+                }
+
+                if let confirmation = pendingBoostConfirmation {
+                    FishingBoostConfirmationOverlay(
+                        confirmation: confirmation,
+                        onConfirm: {
+                            confirmFishingBoost(confirmation)
+                        },
+                        onCancel: {
+                            bgmManager.playSE(.push)
+                            withAnimation(.easeOut(duration: 0.16)) {
+                                pendingBoostConfirmation = nil
+                            }
+                        }
+                    )
+                    .transition(.opacity.combined(with: .scale(scale: 0.985)))
+                    .zIndex(11_000)
                 }
             }
             .frame(width: geo.size.width, height: geo.size.height)
@@ -654,6 +884,7 @@ struct FishingView: View {
             isLowPowerModeEnabled = ProcessInfo.processInfo.isLowPowerModeEnabled
             bgmManager.switchBackground(to: .main)
             fishingStore.refresh(now: Date())
+            prepareFishingBoostRewardedAds()
         }
         .onDisappear {
             stopContinuousClaiming()
@@ -665,6 +896,14 @@ struct FishingView: View {
                 return
             }
             fishingStore.refresh(now: Date())
+            prepareFishingBoostRewardedAds()
+        }
+        .onChange(of: adMobManager.hasNetworkConnection) { _, isConnected in
+            guard isConnected else { return }
+            prepareFishingBoostRewardedAds()
+        }
+        .onChange(of: adMobManager.temporaryPauseUntil) { _, _ in
+            prepareFishingBoostRewardedAds()
         }
         .onReceive(NotificationCenter.default.publisher(for: .NSProcessInfoPowerStateDidChange)) { _ in
             isLowPowerModeEnabled = ProcessInfo.processInfo.isLowPowerModeEnabled
@@ -767,7 +1006,10 @@ struct FishingView: View {
 
     private var statusArea: some View {
         VStack(alignment: .trailing, spacing: 10) {
-            fishingStatusBar
+            // ブースト終了時に操作なしでも現在性能の表示が通常値へ戻るよう毎秒更新する。
+            TimelineView(.periodic(from: .now, by: 1)) { context in
+                fishingStatusBar(now: context.date)
+            }
 
             ZStack(alignment: .trailing) {
                 // TimelineViewが表示時刻を直接供給するため、画面操作がなくても毎秒再描画される。
@@ -809,8 +1051,11 @@ struct FishingView: View {
     }
 
     /// フィッシュptと現在の釣り性能を、文字を読ませすぎない1本のステータスバーに集約する。
-    private var fishingStatusBar: some View {
-        HStack(spacing: 0) {
+    private func fishingStatusBar(now: Date) -> some View {
+        let effectiveTapSeconds = fishingStore.effectiveTapShortenSeconds(at: now)
+        let effectiveTimeMultiplier = fishingStore.effectiveTimeProgressMultiplier(at: now)
+
+        return HStack(spacing: 0) {
             FishingStatusMetric(
                 icon: .system("fish.fill"),
                 value: "\(fishingStore.pointBalance)pt"
@@ -820,14 +1065,14 @@ struct FishingView: View {
 
             FishingStatusMetric(
                 icon: .asset("fishingRod"),
-                value: "-\(fishingStore.tapShortenSeconds)秒 / タップ"
+                value: "-\(effectiveTapSeconds)秒 / タップ"
             )
 
             FishingStatusDivider()
 
             FishingStatusMetric(
                 icon: .asset("bobber"),
-                value: String(format: "-%.2f/毎秒", fishingStore.timeProgressMultiplier)
+                value: String(format: "-%.2f/毎秒", effectiveTimeMultiplier)
             )
 
             FishingStatusDivider()
@@ -850,8 +1095,8 @@ struct FishingView: View {
         .accessibilityElement(children: .ignore)
         .accessibilityLabel(
             "所持フィッシュポイント \(fishingStore.pointBalance)ポイント、" +
-            "タップ短縮 \(fishingStore.tapShortenSeconds)秒、" +
-            "毎秒 \(String(format: "%.2f", fishingStore.timeProgressMultiplier))秒進行、" +
+            "タップ短縮 \(effectiveTapSeconds)秒、" +
+            "毎秒 \(String(format: "%.2f", effectiveTimeMultiplier))秒進行、" +
             "カゴ上限 \(fishingStore.basketCapacity)匹"
         )
     }
@@ -860,23 +1105,66 @@ struct FishingView: View {
         ZStack(alignment: .bottom) {
             ForEach(floatingRewards) { reward in
                 FishingFloatingRewardView(reward: reward)
-                    .offset(x: reward.xOffset, y: reward.yOffset)
+                    .offset(x: reward.xOffset, y: reward.yOffset - 48)
                     .transition(.scale(scale: 0.72).combined(with: .opacity))
                     .allowsHitTesting(false)
             }
 
-            FishingBucketReceiveControl(
-                caughtCount: fishingStore.pendingCatchCount,
-                capacity: fishingStore.basketCapacity,
-                onTap: claimOneFish,
-                onLongPressBegan: startContinuousClaiming,
-                onLongPressEnded: stopContinuousClaiming
-            )
+            VStack(spacing: 10) {
+                FishingBucketReceiveControl(
+                    caughtCount: fishingStore.pendingCatchCount,
+                    capacity: fishingStore.basketCapacity,
+                    onTap: claimOneFish,
+                    onLongPressBegan: startContinuousClaiming,
+                    onLongPressEnded: stopContinuousClaiming
+                )
+
+                fishingBoostButtons
+            }
         }
         .frame(maxWidth: .infinity)
-        // 獲得表示を円形メーターの上へ完全に逃がすため、
-        // メーター上側に十分な表示領域を確保する。
+        // 画面最下部に2つのブーストボタンを置き、魚かごはその上へ持ち上げる。
+        // 添付レイアウトの左右位置に合わせ、左=タップ、右=時間とする。
         .frame(height: 285)
+    }
+
+    private var fishingBoostButtons: some View {
+        TimelineView(.periodic(from: .now, by: 1)) { context in
+            let now = context.date
+            let tapRemaining = fishingStore.tapBoostRemaining(at: now)
+            let timeRemaining = fishingStore.timeBoostRemaining(at: now)
+            let isTapActive = tapRemaining > 0
+            let isTimeActive = timeRemaining > 0
+
+            HStack(spacing: 14) {
+                FishingBoostButton(
+                    title: "タップブースト",
+                    countdownText: isTapActive
+                        ? Self.boostCountdownText(seconds: tapRemaining, showsHours: false)
+                        : nil,
+                    accentColor: Color(red: 0.16, green: 0.66, blue: 0.30),
+                    isEnabled: !isTapActive && canUseRewardedBoost(tapBoostRewardedAdManager),
+                    isLoading: !isTapActive && tapBoostRewardedAdManager.isLoading,
+                    accessibilityLabel: "タップブースト"
+                ) {
+                    requestTapBoostConfirmation()
+                }
+
+                FishingBoostButton(
+                    title: "時間ブースト",
+                    countdownText: isTimeActive
+                        ? Self.boostCountdownText(seconds: timeRemaining, showsHours: true)
+                        : nil,
+                    accentColor: Color(red: 0.92, green: 0.14, blue: 0.12),
+                    isEnabled: !isTimeActive && canUseRewardedBoost(timeBoostRewardedAdManager),
+                    isLoading: !isTimeActive && timeBoostRewardedAdManager.isLoading,
+                    accessibilityLabel: "時間ブースト"
+                ) {
+                    requestTimeBoostConfirmation()
+                }
+            }
+            .frame(maxWidth: .infinity)
+        }
     }
 
     private func shortenFishingTimer(
@@ -886,8 +1174,8 @@ struct FishingView: View {
         guard !showShop, !showFishingInformation else { return }
         guard !fishingStore.isBasketFull else { return }
 
-        let shortenedSeconds = fishingStore.tapShortenSeconds
         let date = Date()
+        let shortenedSeconds = fishingStore.effectiveTapShortenSeconds(at: date)
         guard fishingStore.shortenNextCatch(
             by: TimeInterval(shortenedSeconds),
             now: date
@@ -936,12 +1224,140 @@ struct FishingView: View {
         }
     }
 
+    private func canUseRewardedBoost(_ manager: RewardedAdManager) -> Bool {
+        adMobManager.hasNetworkConnection && manager.isReady
+    }
+
+    private func prepareFishingBoostRewardedAds(now: Date = Date()) {
+        adMobManager.start()
+
+        // 効果中に何時間も使えない広告を先読みし続けない。
+        // 未発動時、または効果終了1分前からだけ中央管理のprepare経由でプリロードする。
+        if fishingStore.timeBoostRemaining(at: now) <= Self.fishingBoostAdPreloadLeadTime {
+            adMobManager.prepareRewardFishingTimeBoost()
+        }
+        if fishingStore.tapBoostRemaining(at: now) <= Self.fishingBoostAdPreloadLeadTime {
+            adMobManager.prepareRewardFishingTapBoost()
+        }
+    }
+
+    private func requestTimeBoostConfirmation() {
+        let now = Date()
+        guard !fishingStore.isTimeBoostActive(at: now) else { return }
+
+        guard canUseRewardedBoost(timeBoostRewardedAdManager) else {
+            adMobManager.prepareRewardFishingTimeBoost()
+            showFishingBoostToast(adMobManager.rewardedUnavailableMessage)
+            return
+        }
+
+        bgmManager.playSE(.push)
+        pendingBoostConfirmation = .time
+    }
+
+    private func requestTapBoostConfirmation() {
+        let now = Date()
+        guard !fishingStore.isTapBoostActive(at: now) else { return }
+
+        guard canUseRewardedBoost(tapBoostRewardedAdManager) else {
+            adMobManager.prepareRewardFishingTapBoost()
+            showFishingBoostToast(adMobManager.rewardedUnavailableMessage)
+            return
+        }
+
+        bgmManager.playSE(.push)
+        pendingBoostConfirmation = .tap
+    }
+
+    private func confirmFishingBoost(_ confirmation: FishingBoostConfirmation) {
+        bgmManager.playSE(.push)
+
+        // 広告表示は確認ウィンドウを完全に閉じたあとに開始する。
+        // View階層のdismissとAdMobのfull-screen presentationが同一フレームで競合しないようにする。
+        withAnimation(.easeOut(duration: 0.16)) {
+            pendingBoostConfirmation = nil
+        }
+
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.18) {
+            switch confirmation {
+            case .time:
+                presentTimeBoostReward()
+            case .tap:
+                presentTapBoostReward()
+            }
+        }
+    }
+
+    private func presentTimeBoostReward() {
+        let now = Date()
+        guard !fishingStore.isTimeBoostActive(at: now) else { return }
+
+        guard canUseRewardedBoost(timeBoostRewardedAdManager) else {
+            adMobManager.prepareRewardFishingTimeBoost()
+            showFishingBoostToast(adMobManager.rewardedUnavailableMessage)
+            return
+        }
+
+        timeBoostRewardedAdManager.show(
+            onReward: {
+                let activated = fishingStore.activateTimeBoost(now: Date())
+                if activated {
+                    showFishingBoostToast("時間ブーストを開始しました")
+                }
+            },
+            onUnavailable: {
+                adMobManager.prepareRewardFishingTimeBoost()
+                showFishingBoostToast(adMobManager.rewardedUnavailableMessage)
+            }
+        )
+    }
+
+    private func presentTapBoostReward() {
+        let now = Date()
+        guard !fishingStore.isTapBoostActive(at: now) else { return }
+
+        guard canUseRewardedBoost(tapBoostRewardedAdManager) else {
+            adMobManager.prepareRewardFishingTapBoost()
+            showFishingBoostToast(adMobManager.rewardedUnavailableMessage)
+            return
+        }
+
+        tapBoostRewardedAdManager.show(
+            onReward: {
+                let activated = fishingStore.activateTapBoost(now: Date())
+                if activated {
+                    showFishingBoostToast("タップブーストを開始しました")
+                }
+            },
+            onUnavailable: {
+                adMobManager.prepareRewardFishingTapBoost()
+                showFishingBoostToast(adMobManager.rewardedUnavailableMessage)
+            }
+        )
+    }
+
+    private func showFishingBoostToast(_ message: String) {
+        boostToastMessage = message
+        withAnimation(.easeOut(duration: 0.18)) {
+            showBoostToast = true
+        }
+
+        Task { @MainActor in
+            try? await Task.sleep(nanoseconds: 2_000_000_000)
+            withAnimation(.easeIn(duration: 0.18)) {
+                showBoostToast = false
+            }
+        }
+    }
+
     /// 表示用TimelineViewとは別に、釣果生成の判定を毎秒実行する。
     /// Timer.publishへ依存しないため、タップ操作がなくても釣果到達時に状態を更新できる。
     @MainActor
     private func runFishingCountdownRefreshLoop() async {
         while !Task.isCancelled {
-            fishingStore.refresh(now: Date())
+            let now = Date()
+            fishingStore.refresh(now: now)
+            prepareFishingBoostRewardedAds(now: now)
 
             do {
                 try await Task.sleep(nanoseconds: 1_000_000_000)
@@ -1017,6 +1433,18 @@ struct FishingView: View {
         let remainingSeconds = safe % 60
         return String(format: "%02d:%02d", minutes, remainingSeconds)
     }
+
+    private static func boostCountdownText(seconds: TimeInterval, showsHours: Bool) -> String {
+        let safe = max(0, Int(seconds.rounded(.up)))
+        let hours = safe / 3600
+        let minutes = (safe % 3600) / 60
+        let remainingSeconds = safe % 60
+
+        if showsHours {
+            return String(format: "%02d:%02d:%02d", hours, minutes, remainingSeconds)
+        }
+        return String(format: "%02d:%02d", minutes + (hours * 60), remainingSeconds)
+    }
 }
 
 // MARK: - Compact fishing status
@@ -1062,6 +1490,246 @@ private struct FishingStatusDivider: View {
             .fill(Color.white.opacity(0.22))
             .frame(width: 1, height: 18)
             .padding(.horizontal, 3)
+    }
+}
+
+private struct ClayGrainOverlay: View {
+    let seed: Int
+    var density: Int = 120
+
+    var body: some View {
+        Canvas { context, size in
+            guard size.width > 0, size.height > 0 else { return }
+
+            for index in 0..<max(1, density) {
+                let base = Double(index + 1 + (seed * 31))
+                let xRatio = abs(sin(base * 12.9898 + 78.233)).truncatingRemainder(dividingBy: 1)
+                let yRatio = abs(sin(base * 4.1414 + 19.873)).truncatingRemainder(dividingBy: 1)
+                let sizeRatio = abs(sin(base * 7.731 + 2.417)).truncatingRemainder(dividingBy: 1)
+                let alphaRatio = abs(sin(base * 5.913 + 41.137)).truncatingRemainder(dividingBy: 1)
+
+                let diameter = CGFloat(0.55 + (sizeRatio * 1.45))
+                let rect = CGRect(
+                    x: CGFloat(xRatio) * size.width,
+                    y: CGFloat(yRatio) * size.height,
+                    width: diameter,
+                    height: diameter
+                )
+                let alpha = 0.035 + (alphaRatio * 0.055)
+                let grainColor: Color = index.isMultiple(of: 3)
+                    ? Color.black.opacity(alpha)
+                    : Color.white.opacity(alpha * 0.92)
+
+                context.fill(Path(ellipseIn: rect), with: .color(grainColor))
+            }
+        }
+        .blendMode(.overlay)
+        .allowsHitTesting(false)
+        .accessibilityHidden(true)
+    }
+}
+
+private struct ClayButtonPressStyle: ButtonStyle {
+    func makeBody(configuration: Configuration) -> some View {
+        configuration.label
+            .offset(y: configuration.isPressed ? 3 : 0)
+            .scaleEffect(configuration.isPressed ? 0.992 : 1)
+            .animation(.easeOut(duration: 0.08), value: configuration.isPressed)
+    }
+}
+
+private struct FishingBoostButton: View {
+    let title: String
+    let countdownText: String?
+    let accentColor: Color
+    let isEnabled: Bool
+    let isLoading: Bool
+    let accessibilityLabel: String
+    let action: () -> Void
+
+    private var isActive: Bool { countdownText != nil }
+    private var displayedText: String { countdownText ?? title }
+    private var textSize: CGFloat { isActive ? 16 : 14 }
+    private let cornerRadius: CGFloat = 15
+
+    var body: some View {
+        Button(action: action) {
+            ZStack {
+                // 下側の厚み。効果中も透過させず、残り時間を常に読みやすくする。
+                RoundedRectangle(cornerRadius: cornerRadius, style: .continuous)
+                    .fill(Color.black.opacity(0.46))
+                    .offset(y: 6)
+
+                RoundedRectangle(cornerRadius: cornerRadius, style: .continuous)
+                    .fill(accentColor)
+                    .overlay {
+                        LinearGradient(
+                            colors: [
+                                Color.white.opacity(0.30),
+                                Color.clear,
+                                Color.black.opacity(0.18)
+                            ],
+                            startPoint: .top,
+                            endPoint: .bottom
+                        )
+                        .clipShape(RoundedRectangle(cornerRadius: cornerRadius, style: .continuous))
+                    }
+                    .overlay {
+                        ClayGrainOverlay(seed: isActive ? 431 : 257, density: 125)
+                            .clipShape(RoundedRectangle(cornerRadius: cornerRadius, style: .continuous))
+                    }
+                    .overlay {
+                        RoundedRectangle(cornerRadius: cornerRadius, style: .continuous)
+                            .stroke(Color.white.opacity(0.76), lineWidth: 1.2)
+                    }
+
+                HStack(spacing: 7) {
+                    if isLoading && !isActive {
+                        ProgressView()
+                            .progressViewStyle(.circular)
+                            .tint(.white)
+                            .scaleEffect(0.72)
+                            .frame(width: 15, height: 15)
+                    }
+
+                    ZStack {
+                        Text(displayedText)
+                            .font(.system(size: textSize, weight: .black, design: .rounded))
+                            .foregroundStyle(Color.black.opacity(0.30))
+                            .offset(y: 2.2)
+
+                        Text(displayedText)
+                            .font(.system(size: textSize, weight: .black, design: .rounded))
+                            .foregroundStyle(Color(red: 1.00, green: 0.98, blue: 0.93))
+
+                        ClayGrainOverlay(seed: isActive ? 907 : 811, density: 72)
+                            .mask {
+                                Text(displayedText)
+                                    .font(.system(size: textSize, weight: .black, design: .rounded))
+                            }
+                    }
+                    .monospacedDigit()
+                    .lineLimit(1)
+                    .minimumScaleFactor(0.70)
+                }
+                .padding(.horizontal, 9)
+            }
+            .frame(maxWidth: .infinity)
+            .frame(height: 46)
+            .padding(.bottom, 6)
+            .shadow(color: .black.opacity(0.28), radius: 5, x: 0, y: 4)
+        }
+        .buttonStyle(ClayButtonPressStyle())
+        .disabled(!isEnabled)
+        // Active時はdisabledでも半透明化しない。色・文字・カウントダウンを100%表示する。
+        .accessibilityLabel(accessibilityLabel)
+        .accessibilityValue(countdownText.map { "残り\($0)" } ?? (isLoading ? "広告を準備中" : "視聴可能"))
+        .accessibilityHint(isActive ? "効果中は再度視聴できません" : "リワード広告を視聴してブーストを開始します")
+    }
+}
+
+private struct FishingBoostConfirmationOverlay: View {
+    let confirmation: FishingBoostConfirmation
+    let onConfirm: () -> Void
+    let onCancel: () -> Void
+
+    var body: some View {
+        GeometryReader { geo in
+            ZStack {
+                Color.black.opacity(0.52)
+                    .ignoresSafeArea()
+                    .contentShape(Rectangle())
+                    .onTapGesture { }
+
+                VStack(spacing: 18) {
+                    VStack(spacing: 9) {
+                        Text(confirmation.title)
+                            .font(.system(size: 21, weight: .black, design: .rounded))
+                            .foregroundStyle(.primary)
+                            .multilineTextAlignment(.center)
+
+                        Text(confirmation.message)
+                            .font(.system(size: 14, weight: .semibold, design: .rounded))
+                            .foregroundStyle(.secondary)
+                            .multilineTextAlignment(.center)
+                            .lineSpacing(3)
+                    }
+
+                    VStack(spacing: 10) {
+                        Button(action: onConfirm) {
+                            HStack(spacing: 8) {
+                                // ガチャ画面のリワード広告ボタンと同じ動画マーク。
+                                Image(systemName: "play.rectangle.fill")
+                                    .font(.system(size: 17, weight: .black))
+
+                                Text("広告を視聴して開始")
+                                    .font(.system(size: 16, weight: .black, design: .rounded))
+                                    .lineLimit(1)
+                                    .minimumScaleFactor(0.78)
+                            }
+                            .foregroundStyle(.white)
+                            .frame(maxWidth: .infinity)
+                            .frame(height: 50)
+                            .background(
+                                LinearGradient(
+                                    colors: [
+                                        Color(red: 0.98, green: 0.24, blue: 0.20),
+                                        Color(red: 0.82, green: 0.07, blue: 0.06)
+                                    ],
+                                    startPoint: .top,
+                                    endPoint: .bottom
+                                ),
+                                in: RoundedRectangle(cornerRadius: 15, style: .continuous)
+                            )
+                            .overlay {
+                                ClayGrainOverlay(seed: 1901, density: 120)
+                                    .clipShape(RoundedRectangle(cornerRadius: 15, style: .continuous))
+                            }
+                            .overlay {
+                                RoundedRectangle(cornerRadius: 15, style: .continuous)
+                                    .stroke(Color.white.opacity(0.52), lineWidth: 1)
+                            }
+                            .shadow(color: .black.opacity(0.24), radius: 5, x: 0, y: 4)
+                        }
+                        .buttonStyle(ClayButtonPressStyle())
+
+                        Button(action: onCancel) {
+                            Text("キャンセル")
+                                .font(.system(size: 15, weight: .bold, design: .rounded))
+                                .foregroundStyle(.primary)
+                                .frame(maxWidth: .infinity)
+                                .frame(height: 46)
+                                .background(Color.black.opacity(0.07), in: RoundedRectangle(cornerRadius: 15, style: .continuous))
+                        }
+                        .buttonStyle(.plain)
+                    }
+                }
+                .padding(20)
+                .frame(maxWidth: 360)
+                .background(.regularMaterial, in: RoundedRectangle(cornerRadius: 26, style: .continuous))
+                .overlay {
+                    RoundedRectangle(cornerRadius: 26, style: .continuous)
+                        .stroke(Color.white.opacity(0.45), lineWidth: 1)
+                }
+                .shadow(color: .black.opacity(0.32), radius: 24, x: 0, y: 12)
+                .padding(.horizontal, 24)
+            }
+            .frame(width: geo.size.width, height: geo.size.height)
+        }
+    }
+}
+
+private struct FishingBoostToastView: View {
+    let message: String
+
+    var body: some View {
+        Text(message)
+            .font(.system(size: 13, weight: .bold, design: .rounded))
+            .foregroundStyle(.white)
+            .multilineTextAlignment(.center)
+            .padding(.horizontal, 16)
+            .padding(.vertical, 10)
+            .background(Color.black.opacity(0.74), in: Capsule())
     }
 }
 
@@ -1276,6 +1944,30 @@ private struct FishingInformationOverlay: View {
                     .padding(13)
                     .background(Color.black.opacity(0.055), in: RoundedRectangle(cornerRadius: 16, style: .continuous))
 
+                    HStack(alignment: .top, spacing: 10) {
+                        Image(systemName: "clock.arrow.circlepath")
+                            .font(.system(size: 24, weight: .bold))
+                            .foregroundStyle(Color(red: 0.92, green: 0.14, blue: 0.12))
+
+                        Text("時間ブースト：リワード広告を視聴すると、ウキの現在の時間経過短縮値が3時間だけ2倍になります。効果中は再度視聴できません。")
+                            .font(.system(size: 13, weight: .bold))
+                            .frame(maxWidth: .infinity, alignment: .leading)
+                    }
+                    .padding(12)
+                    .background(Color(red: 0.92, green: 0.14, blue: 0.12).opacity(0.08), in: RoundedRectangle(cornerRadius: 16, style: .continuous))
+
+                    HStack(alignment: .top, spacing: 10) {
+                        Image(systemName: "hand.tap.fill")
+                            .font(.system(size: 24, weight: .bold))
+                            .foregroundStyle(Color(red: 0.16, green: 0.66, blue: 0.30))
+
+                        Text("タップブースト：リワード広告を視聴すると、釣り竿の現在のタップ短縮値が5分間だけ2倍になります。効果中は再度視聴できません。")
+                            .font(.system(size: 13, weight: .bold))
+                            .frame(maxWidth: .infinity, alignment: .leading)
+                    }
+                    .padding(12)
+                    .background(Color(red: 0.16, green: 0.66, blue: 0.30).opacity(0.10), in: RoundedRectangle(cornerRadius: 16, style: .continuous))
+
                     Text("魚の種類と獲得ポイント")
                         .font(.system(size: 17, weight: .black, design: .rounded))
                         .frame(maxWidth: .infinity, alignment: .leading)
@@ -1409,20 +2101,40 @@ private struct FishingNextCatchTimerView: View {
         .padding(.horizontal, 18)
         .padding(.vertical, 12)
         .frame(maxWidth: 260, minHeight: 110)
-        .background(
-            LinearGradient(
-                colors: [
-                    Color(red: 0.12, green: 0.61, blue: 0.94),
-                    Color(red: 0.04, green: 0.29, blue: 0.68)
-                ],
-                startPoint: .topLeading,
-                endPoint: .bottomTrailing
-            ),
-            in: RoundedRectangle(cornerRadius: 25, style: .continuous)
-        )
-        .overlay {
+        .background {
             RoundedRectangle(cornerRadius: 25, style: .continuous)
-                .stroke(Color.white.opacity(0.48), lineWidth: 1.2)
+                .fill(
+                    LinearGradient(
+                        colors: [
+                            Color(red: 0.16, green: 0.67, blue: 0.96),
+                            Color(red: 0.05, green: 0.39, blue: 0.78),
+                            Color(red: 0.03, green: 0.27, blue: 0.62)
+                        ],
+                        startPoint: .topLeading,
+                        endPoint: .bottomTrailing
+                    )
+                )
+                .overlay {
+                    // 立体感はボックス外へ厚みを足さず、既存の260×110の内側だけで表現する。
+                    LinearGradient(
+                        colors: [
+                            Color.white.opacity(0.16),
+                            Color.clear,
+                            Color.black.opacity(0.22)
+                        ],
+                        startPoint: .top,
+                        endPoint: .bottom
+                    )
+                    .clipShape(RoundedRectangle(cornerRadius: 25, style: .continuous))
+                }
+                .overlay {
+                    ClayGrainOverlay(seed: 1201, density: 260)
+                        .clipShape(RoundedRectangle(cornerRadius: 25, style: .continuous))
+                }
+                .overlay {
+                    RoundedRectangle(cornerRadius: 25, style: .continuous)
+                        .stroke(Color.white.opacity(0.50), lineWidth: 1.2)
+                }
         }
         .shadow(color: Color(red: 0.01, green: 0.14, blue: 0.36).opacity(0.42), radius: 11, x: 0, y: 7)
         .allowsHitTesting(false)
@@ -1438,31 +2150,42 @@ private struct ClayTimerText: View {
     var body: some View {
         ZStack {
             Text(text)
-                .foregroundStyle(Color(red: 0.01, green: 0.13, blue: 0.36))
-                .offset(y: 5)
+                .foregroundStyle(Color(red: 0.005, green: 0.09, blue: 0.26))
+                .offset(y: 6)
 
             Text(text)
-                .foregroundStyle(Color(red: 0.04, green: 0.34, blue: 0.73))
-                .offset(y: 2)
+                .foregroundStyle(Color(red: 0.025, green: 0.27, blue: 0.64))
+                .offset(y: 2.5)
 
             Text(text)
                 .foregroundStyle(
                     LinearGradient(
                         colors: [
-                            Color(red: 0.78, green: 0.96, blue: 1.00),
-                            Color(red: 0.23, green: 0.72, blue: 0.98)
+                            Color(red: 0.84, green: 0.98, blue: 1.00),
+                            Color(red: 0.31, green: 0.78, blue: 0.99),
+                            Color(red: 0.15, green: 0.58, blue: 0.94)
                         ],
                         startPoint: .top,
                         endPoint: .bottom
                     )
                 )
-                .shadow(color: .white.opacity(0.68), radius: 0.8, x: 0, y: -1.5)
-                .shadow(color: Color(red: 0.01, green: 0.12, blue: 0.34).opacity(0.48), radius: 2.5, x: 0, y: 2)
+                .shadow(color: .white.opacity(0.70), radius: 0.9, x: 0, y: -1.5)
+                .shadow(color: Color(red: 0.01, green: 0.12, blue: 0.34).opacity(0.52), radius: 2.8, x: 0, y: 2.4)
         }
         .font(.system(size: 48, weight: .black, design: .rounded))
         .monospacedDigit()
         .lineLimit(1)
         .minimumScaleFactor(0.62)
+        // 粒子CanvasをZStackの子要素にするとレイアウト提案サイズを受けて
+        // タイマー本体が元サイズより膨らむ可能性があるため、描画専用overlayにする。
+        .overlay {
+            ClayGrainOverlay(seed: 1607, density: 145)
+                .mask {
+                    Text(text)
+                        .font(.system(size: 48, weight: .black, design: .rounded))
+                        .monospacedDigit()
+                }
+        }
     }
 }
 
