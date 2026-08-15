@@ -103,11 +103,8 @@ struct ShopView: View {
         }
         .ignoresSafeArea()
         .onAppear {
-            bgmManager.switchBackground(to: .main)
+            bgmManager.switchBackground(to: .fishing)
             fishingStore.refresh(now: Date())
-        }
-        .onDisappear {
-            bgmManager.restoreDefaultBackground()
         }
     }
 

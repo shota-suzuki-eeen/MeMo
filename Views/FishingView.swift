@@ -882,13 +882,15 @@ struct FishingView: View {
         .navigationBarHidden(true)
         .onAppear {
             isLowPowerModeEnabled = ProcessInfo.processInfo.isLowPowerModeEnabled
-            bgmManager.switchBackground(to: .main)
+            bgmManager.switchBackground(to: .fishing)
             fishingStore.refresh(now: Date())
             prepareFishingBoostRewardedAds()
         }
         .onDisappear {
             stopContinuousClaiming()
-            bgmManager.restoreDefaultBackground()
+            if !showShop {
+                bgmManager.restoreDefaultBackground()
+            }
         }
         .onChange(of: scenePhase) { _, newPhase in
             guard newPhase == .active else {

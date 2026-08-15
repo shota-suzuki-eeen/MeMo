@@ -141,6 +141,7 @@ final class BGMManager: NSObject, ObservableObject, AVAudioPlayerDelegate {
         case moja = "BGM_moja"
         case gacha = "BGM_gacha"
         case zukan = "BGM_zukan"
+        case fishing = "BGM_fishing"
         case takibi = "takibi"
     }
 
