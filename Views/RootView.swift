@@ -8,6 +8,7 @@
 //  お散歩機能の開始ポップアップ・全画面お散歩画面・グローバルリザルト表示を追加。
 //  2026/06 update: 起動時の rewardWalkStart / rewardWalkDouble プリロードを廃止.
 //  2026/06 update: Home画面上部バナーを廃止し、歩数獲得表示は上部メーターへ吸い込まれる演出に変更。
+//  2026/09 update: 期間限定Halloweenイベント入口・報酬通知バッジ・イベント全画面遷移を追加。
 //
 
 import SwiftUI
@@ -31,9 +32,11 @@ struct RootView: View {
     @ObservedObject private var walkStore = WalkChallengeStore.shared
     @ObservedObject private var walkWeatherManager = WalkWeatherManager.shared
     @ObservedObject private var walkStartAd = AdMobManager.shared.rewardWalkStart
+    @ObservedObject private var halloweenEventStore = Halloween2026EventStore.shared
 
     @State private var showWalkStartPopup: Bool = false
     @State private var showWalkView: Bool = false
+    @State private var showHalloweenEvent: Bool = false
     @State private var walkStartMessage: String?
     @State private var stepGainPopup: StepGainPopupItem?
     @State private var isStepGainPopupAbsorbing: Bool = false
@@ -46,6 +49,15 @@ struct RootView: View {
         static let absorbScale: CGFloat = 0.22
         static let absorbDelayNanoseconds: UInt64 = 1_350_000_000
         static let absorbDurationNanoseconds: UInt64 = 560_000_000
+    }
+
+    private enum HalloweenEntryLayout {
+        // HomeViewの既存BottomButtonsと同じ寸法を使用して、4番目（釣り）の真上に置く。
+        static let buttonBackgroundSize: CGFloat = 76
+        static let buttonSpacing: CGFloat = 16
+        static let barHorizontalPadding: CGFloat = 14
+        static let outerHorizontalPadding: CGFloat = 18
+        static let bottomPadding: CGFloat = 170
     }
 
     private var isIPadWalkAdFallbackAvailable: Bool {
@@ -70,6 +82,8 @@ struct RootView: View {
                 if let sharedState = viewModel.sharedState {
                     ZStack(alignment: .top) {
                         HomeView(state: sharedState, hk: hk)
+
+                        halloweenEventHomeEntryLayer
 
                         MeMoLiveActivityStateObserver(state: sharedState)
                             .frame(width: 0, height: 0)
@@ -96,6 +110,14 @@ struct RootView: View {
                         WalkView(
                             state: sharedState,
                             onSave: { saveRootState() }
+                        )
+                        .environmentObject(bgmManager)
+                        .memoIPadPresentedPhoneCanvas()
+                    }
+                    .fullScreenCover(isPresented: $showHalloweenEvent) {
+                        Halloween2026EventView(
+                            state: sharedState,
+                            store: halloweenEventStore
                         )
                         .environmentObject(bgmManager)
                         .memoIPadPresentedPhoneCanvas()
@@ -153,6 +175,49 @@ struct RootView: View {
                 hk: hk,
                 bgmManager: bgmManager
             )
+        }
+    }
+
+    @ViewBuilder
+    private var halloweenEventHomeEntryLayer: some View {
+        TimelineView(.periodic(from: Date(), by: 15)) { timeline in
+            if EventManager.isActive(.halloween2026, at: timeline.date) {
+                HStack(spacing: HalloweenEntryLayout.buttonSpacing) {
+                    Color.clear
+                        .frame(
+                            width: HalloweenEntryLayout.buttonBackgroundSize,
+                            height: HalloweenEntryLayout.buttonBackgroundSize
+                        )
+                        .allowsHitTesting(false)
+                    Color.clear
+                        .frame(
+                            width: HalloweenEntryLayout.buttonBackgroundSize,
+                            height: HalloweenEntryLayout.buttonBackgroundSize
+                        )
+                        .allowsHitTesting(false)
+                    Color.clear
+                        .frame(
+                            width: HalloweenEntryLayout.buttonBackgroundSize,
+                            height: HalloweenEntryLayout.buttonBackgroundSize
+                        )
+                        .allowsHitTesting(false)
+
+                    HalloweenHomeEntryButton(
+                        showsNotificationBadge: halloweenEventStore.hasClaimableReward,
+                        action: {
+                            bgmManager.playSE(.push)
+                            guard EventManager.isActive(.halloween2026) else { return }
+                            showHalloweenEvent = true
+                        }
+                    )
+                }
+                .padding(.horizontal, HalloweenEntryLayout.barHorizontalPadding)
+                .padding(.horizontal, HalloweenEntryLayout.outerHorizontalPadding)
+                .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .bottom)
+                .padding(.bottom, HalloweenEntryLayout.bottomPadding)
+                .zIndex(9_000)
+                .transition(.opacity.combined(with: .scale(scale: 0.92)))
+            }
         }
     }
 
@@ -396,6 +461,49 @@ private struct DeniedView: View {
             .buttonStyle(.borderedProminent)
         }
         .padding()
+    }
+}
+
+private struct HalloweenHomeEntryButton: View {
+    let showsNotificationBadge: Bool
+    let action: () -> Void
+
+    var body: some View {
+        Button(action: action) {
+            ZStack(alignment: .topTrailing) {
+                ZStack {
+                    Image("clay_block")
+                        .resizable()
+                        .scaledToFit()
+                        .frame(width: 76, height: 76)
+
+                    VStack(spacing: 1) {
+                        Image(systemName: "figure.run")
+                            .font(.system(size: 31, weight: .black))
+                            .foregroundStyle(Color.orange)
+
+                        Text("EVENT")
+                            .font(.system(size: 9, weight: .black, design: .rounded))
+                            .foregroundStyle(.primary)
+                    }
+                }
+                .frame(width: 76, height: 76)
+
+                if showsNotificationBadge {
+                    EventNotificationBadge()
+                        .offset(x: 3, y: -3)
+                }
+            }
+            .frame(width: 76, height: 76)
+            .contentShape(RoundedRectangle(cornerRadius: 22, style: .continuous))
+        }
+        .buttonStyle(.plain)
+        .shadow(color: .black.opacity(0.18), radius: 8, x: 0, y: 4)
+        .accessibilityLabel(
+            showsNotificationBadge
+                ? "期間限定イベント、受け取り可能な報酬があります"
+                : "期間限定イベント"
+        )
     }
 }
 
