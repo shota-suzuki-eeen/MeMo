@@ -3,20 +3,20 @@
 //  MeMo
 //
 //  3レーン縦スクロールランゲーム本体。
-//  キャラクターは下部固定、障害物/キャンディを下方向へ流す。
+//  2026/09 performance v5:
+//  - SKPhysicsを使用せず、少数ノードへの手動衝突判定に変更。
+//  - 距離・キャンディ・カウントダウンHUDはSpriteKit内で完結。
+//  - SwiftUIへの通知はGAME OVER時の1回だけ。
+//  - 仮アセットはSKSpriteNode中心の軽量描画。
 //
 
 import SpriteKit
 import UIKit
 
-final class HalloweenRunGameScene: SKScene, SKPhysicsContactDelegate {
-    private enum PhysicsCategory {
-        static let player: UInt32 = 1 << 0
-        static let obstacle: UInt32 = 1 << 1
-        static let candy: UInt32 = 1 << 2
-    }
-
+final class HalloweenRunGameScene: SKScene {
     private enum Config {
+        static let preferredFramesPerSecond = 60
+
         static let laneMoveDuration: TimeInterval = 0.14
 
         static let baseScrollSpeed: CGFloat = 260
@@ -24,7 +24,6 @@ final class HalloweenRunGameScene: SKScene, SKPhysicsContactDelegate {
         static let maxDifficultyReachTime: TimeInterval = 180
 
         static let baseObstacleSpawnInterval: TimeInterval = 1.45
-        // 左右タップで十分反応できるよう、最大難度でも0.9秒未満にはしない。
         static let minimumObstacleSpawnInterval: TimeInterval = 0.90
         static let doubleObstacleStartTime: TimeInterval = 30
         static let maximumDoubleObstacleChance: Double = 0.58
@@ -38,33 +37,72 @@ final class HalloweenRunGameScene: SKScene, SKPhysicsContactDelegate {
         static let obstacleHeight: CGFloat = 72
         static let obstacleWidthRatio: CGFloat = 0.56
 
-        // 0秒時点で約8m/s、3分時点で約16m/s。3分生存時は約2,160mが目安。
+        // 手動衝突判定用。playerNodeの見た目より少し小さくして理不尽な接触を防ぐ。
+        static let playerCollisionHalfWidth: CGFloat = 19
+        static let playerCollisionHalfHeight: CGFloat = 25
+        static let obstacleCollisionHalfHeight: CGFloat = 30
+        static let candyCollisionHalfSize: CGFloat = 18
+
+        // 0秒時点で約8m/s、3分時点で約16m/s。
         static let baseMetersPerSecond: Double = 8
         static let maxMetersPerSecond: Double = 16
+
+        // Date()を毎フレーム呼ばず、イベント終了だけ1秒ごとに確認。
+        static let eventEndCheckInterval: TimeInterval = 1.0
     }
 
-    var onDistanceChanged: ((Int) -> Void)?
-    var onCandyChanged: ((Int) -> Void)?
-    var onCountdownChanged: ((Int?) -> Void)?
+    /// SwiftUI側へ渡すのはプレイ終了時だけ。
     var onGameOver: ((HalloweenRunResult) -> Void)?
 
-    private let playerNode = SKShapeNode(rectOf: CGSize(width: 52, height: 62), cornerRadius: 22)
+    // MARK: - Layers
+
+    private let roadMarkLayer = SKNode()
+    private let movingLayer = SKNode()
+    private let hudLayer = SKNode()
+
+    // MARK: - Player
+
+    private let playerNode = SKSpriteNode(
+        color: UIColor(white: 0.96, alpha: 1),
+        size: CGSize(width: 52, height: 62)
+    )
 
     private var lanePositions: [CGFloat] = []
-    private var playerLane: Int = 1
-    private var preferredSafeLane: Int = 1
+    private var playerLane = 1
+    private var preferredSafeLane = 1
+
+    // MARK: - HUD
+
+    private let distanceTitleLabel = SKLabelNode(fontNamed: "AvenirNext-Bold")
+    private let distanceLabel = SKLabelNode(fontNamed: "AvenirNext-Heavy")
+    private let candyLabel = SKLabelNode(fontNamed: "AvenirNext-Heavy")
+    private let countdownLabel = SKLabelNode(fontNamed: "AvenirNext-Heavy")
+    private let readyLabel = SKLabelNode(fontNamed: "AvenirNext-Bold")
+    private let leftHintLabel = SKLabelNode(fontNamed: "AvenirNext-Bold")
+    private let rightHintLabel = SKLabelNode(fontNamed: "AvenirNext-Bold")
+
+    // MARK: - Runtime
 
     private var previousUpdateTime: TimeInterval?
     private var countdownRemaining: TimeInterval = 3
-    private var lastReportedCountdown: Int?
+    private var lastDisplayedCountdown: Int?
 
     private var elapsedTime: TimeInterval = 0
     private var obstacleSpawnAccumulator: TimeInterval = 0
     private var candySpawnAccumulator: TimeInterval = 0
+    private var eventEndCheckAccumulator: TimeInterval = 0
+
     private var distanceMeters: Double = 0
-    private var candyCount: Int = 0
-    private var lastReportedDistance: Int = -1
+    private var candyCount = 0
+    private var lastDisplayedDistance = -1
+
     private var isGameOver = false
+    private var hasShutDown = false
+
+    // 生成器をタップごとに作らず使い回す。
+    private let moveHaptic = UIImpactFeedbackGenerator(style: .light)
+    private let candyHaptic = UIImpactFeedbackGenerator(style: .soft)
+    private let gameOverHaptic = UINotificationFeedbackGenerator()
 
     override init(size: CGSize) {
         super.init(size: size)
@@ -77,13 +115,21 @@ final class HalloweenRunGameScene: SKScene, SKPhysicsContactDelegate {
     }
 
     override func didMove(to view: SKView) {
-        physicsWorld.gravity = .zero
-        physicsWorld.contactDelegate = self
+        view.preferredFramesPerSecond = Config.preferredFramesPerSecond
+        view.ignoresSiblingOrder = true
+        view.shouldCullNonVisibleNodes = true
+        view.isMultipleTouchEnabled = false
+        view.backgroundColor = backgroundColor
 
         removeAllChildren()
+        setupLayers()
         setupRoad()
         setupPlayer()
-        reportCountdownIfNeeded(force: true)
+        setupHUD()
+
+        moveHaptic.prepare()
+        candyHaptic.prepare()
+        gameOverHaptic.prepare()
     }
 
     override func didChangeSize(_ oldSize: CGSize) {
@@ -95,16 +141,30 @@ final class HalloweenRunGameScene: SKScene, SKPhysicsContactDelegate {
             x: lanePositions[min(max(0, playerLane), lanePositions.count - 1)],
             y: size.height * Config.playerYRatio
         )
+        updateHUDPositions()
+    }
+
+    // MARK: - Setup
+
+    private func setupLayers() {
+        roadMarkLayer.zPosition = -5
+        addChild(roadMarkLayer)
+
+        movingLayer.zPosition = 10
+        addChild(movingLayer)
+
+        hudLayer.zPosition = 100
+        addChild(hudLayer)
     }
 
     private func setupRoad() {
         lanePositions = Config.laneXRatio.map { size.width * $0 }
 
-        let road = SKShapeNode(rectOf: CGSize(width: size.width * 0.86, height: size.height * 1.1), cornerRadius: 34)
-        road.fillColor = UIColor(red: 0.13, green: 0.09, blue: 0.21, alpha: 1)
-        road.strokeColor = UIColor.white.withAlphaComponent(0.10)
-        road.lineWidth = 2
-        road.position = CGPoint(x: size.width / 2, y: size.height / 2)
+        let road = SKSpriteNode(
+            color: UIColor(red: 0.13, green: 0.09, blue: 0.21, alpha: 1),
+            size: CGSize(width: size.width * 0.86, height: size.height * 1.1)
+        )
+        road.position = CGPoint(x: size.width * 0.5, y: size.height * 0.5)
         road.zPosition = -10
         addChild(road)
 
@@ -115,63 +175,122 @@ final class HalloweenRunGameScene: SKScene, SKPhysicsContactDelegate {
 
         for dividerX in dividerXs {
             for index in 0..<12 {
-                let mark = SKShapeNode(rectOf: CGSize(width: 4, height: 38), cornerRadius: 2)
-                mark.fillColor = UIColor.white.withAlphaComponent(0.16)
-                mark.strokeColor = .clear
+                let mark = SKSpriteNode(
+                    color: UIColor.white.withAlphaComponent(0.16),
+                    size: CGSize(width: 4, height: 38)
+                )
                 mark.position = CGPoint(
                     x: dividerX,
                     y: CGFloat(index) * (size.height / 10) - 30
                 )
-                mark.name = "roadMark"
-                mark.zPosition = -5
-                addChild(mark)
+                roadMarkLayer.addChild(mark)
             }
         }
     }
 
     private func setupPlayer() {
         playerNode.removeFromParent()
+        playerNode.removeAllChildren()
+
         playerLane = 1
         preferredSafeLane = 1
 
-        playerNode.fillColor = UIColor(white: 0.96, alpha: 1)
-        playerNode.strokeColor = UIColor.black.withAlphaComponent(0.40)
-        playerNode.lineWidth = 3
-        playerNode.position = CGPoint(x: lanePositions[playerLane], y: size.height * Config.playerYRatio)
+        playerNode.position = CGPoint(
+            x: lanePositions[playerLane],
+            y: size.height * Config.playerYRatio
+        )
         playerNode.zPosition = 20
         playerNode.name = "player"
 
-        let body = SKPhysicsBody(rectangleOf: CGSize(width: 40, height: 50))
-        body.isDynamic = false
-        body.categoryBitMask = PhysicsCategory.player
-        body.contactTestBitMask = PhysicsCategory.obstacle | PhysicsCategory.candy
-        body.collisionBitMask = 0
-        playerNode.physicsBody = body
-
+        // 仮キャラクターの目。2ノードだけなので負荷は無視できる。
         let leftEye = SKShapeNode(circleOfRadius: 5)
         leftEye.fillColor = .black
         leftEye.strokeColor = .clear
         leftEye.position = CGPoint(x: -10, y: 10)
-        leftEye.zPosition = 1
         playerNode.addChild(leftEye)
 
         let rightEye = SKShapeNode(circleOfRadius: 5)
         rightEye.fillColor = .black
         rightEye.strokeColor = .clear
         rightEye.position = CGPoint(x: 10, y: 10)
-        rightEye.zPosition = 1
         playerNode.addChild(rightEye)
 
         addChild(playerNode)
     }
 
-    override func update(_ currentTime: TimeInterval) {
-        guard !isGameOver else { return }
+    private func setupHUD() {
+        distanceTitleLabel.text = "DISTANCE"
+        distanceTitleLabel.fontSize = 10
+        distanceTitleLabel.fontColor = UIColor.white.withAlphaComponent(0.62)
+        distanceTitleLabel.horizontalAlignmentMode = .center
+        distanceTitleLabel.verticalAlignmentMode = .center
 
-        if EventManager.hasEnded(.halloween2026) {
-            finishGame()
-            return
-        }
+        distanceLabel.text = "0m"
+        distanceLabel.fontSize = 25
+        distanceLabel.fontColor = .white
+        distanceLabel.horizontalAlignmentMode = .center
+        distanceLabel.verticalAlignmentMode = .center
+
+        candyLabel.text = "CANDY  0"
+        candyLabel.fontSize = 17
+        candyLabel.fontColor = .white
+        candyLabel.horizontalAlignmentMode = .right
+        candyLabel.verticalAlignmentMode = .center
+
+        countdownLabel.text = "3"
+        countdownLabel.fontSize = 88
+        countdownLabel.fontColor = .white
+        countdownLabel.horizontalAlignmentMode = .center
+        countdownLabel.verticalAlignmentMode = .center
+
+        readyLabel.text = "READY"
+        readyLabel.fontSize = 18
+        readyLabel.fontColor = .orange
+        readyLabel.horizontalAlignmentMode = .center
+        readyLabel.verticalAlignmentMode = .center
+
+        leftHintLabel.text = "← LEFT"
+        leftHintLabel.fontSize = 11
+        leftHintLabel.fontColor = UIColor.white.withAlphaComponent(0.62)
+        leftHintLabel.horizontalAlignmentMode = .left
+        leftHintLabel.verticalAlignmentMode = .center
+
+        rightHintLabel.text = "RIGHT →"
+        rightHintLabel.fontSize = 11
+        rightHintLabel.fontColor = UIColor.white.withAlphaComponent(0.62)
+        rightHintLabel.horizontalAlignmentMode = .right
+        rightHintLabel.verticalAlignmentMode = .center
+
+        hudLayer.addChild(distanceTitleLabel)
+        hudLayer.addChild(distanceLabel)
+        hudLayer.addChild(candyLabel)
+        hudLayer.addChild(countdownLabel)
+        hudLayer.addChild(readyLabel)
+        hudLayer.addChild(leftHintLabel)
+        hudLayer.addChild(rightHintLabel)
+
+        updateHUDPositions()
+        updateCountdownHUD(force: true)
+    }
+
+    private func updateHUDPositions() {
+        let topY = size.height - 68
+
+        distanceTitleLabel.position = CGPoint(x: size.width * 0.5, y: topY + 10)
+        distanceLabel.position = CGPoint(x: size.width * 0.5, y: topY - 14)
+        candyLabel.position = CGPoint(x: size.width - 18, y: topY - 3)
+
+        countdownLabel.position = CGPoint(x: size.width * 0.5, y: size.height * 0.56)
+        readyLabel.position = CGPoint(x: size.width * 0.5, y: size.height * 0.56 - 72)
+
+        leftHintLabel.position = CGPoint(x: 26, y: 34)
+        rightHintLabel.position = CGPoint(x: size.width - 26, y: 34)
+    }
+
+    // MARK: - Frame update
+
+    override func update(_ currentTime: TimeInterval) {
+        guard !isGameOver, !hasShutDown else { return }
 
         guard let previousUpdateTime else {
             self.previousUpdateTime = currentTime
@@ -180,27 +299,38 @@ final class HalloweenRunGameScene: SKScene, SKPhysicsContactDelegate {
 
         var deltaTime = currentTime - previousUpdateTime
         self.previousUpdateTime = currentTime
-
-        // 復帰直後などの巨大deltaで障害物が飛ばないように抑制。
         deltaTime = min(max(0, deltaTime), 0.05)
+
+        eventEndCheckAccumulator += deltaTime
+        if eventEndCheckAccumulator >= Config.eventEndCheckInterval {
+            eventEndCheckAccumulator = 0
+            if EventManager.hasEnded(.halloween2026) {
+                finishGame()
+                return
+            }
+        }
 
         if countdownRemaining > 0 {
             countdownRemaining = max(0, countdownRemaining - deltaTime)
-            reportCountdownIfNeeded()
+            updateCountdownHUD()
+
+            if countdownRemaining <= 0 {
+                countdownLabel.isHidden = true
+                readyLabel.isHidden = true
+            }
             return
         }
 
-        if lastReportedCountdown != 0 {
-            lastReportedCountdown = 0
-            onCountdownChanged?(nil)
-        }
-
         elapsedTime += deltaTime
+
         let difficulty = difficultyProgress
         let scrollSpeed = currentScrollSpeed(difficulty: difficulty)
 
         updateRoadMarks(deltaTime: deltaTime, speed: scrollSpeed)
-        updateMovingNodes(deltaTime: deltaTime, speed: scrollSpeed)
+        updateMovingNodesAndCollisions(deltaTime: deltaTime, speed: scrollSpeed)
+
+        guard !isGameOver else { return }
+
         updateDistance(deltaTime: deltaTime, difficulty: difficulty)
         updateObstacleSpawning(deltaTime: deltaTime, difficulty: difficulty)
         updateCandySpawning(deltaTime: deltaTime)
@@ -225,13 +355,32 @@ final class HalloweenRunGameScene: SKScene, SKPhysicsContactDelegate {
             + (Config.maxMetersPerSecond - Config.baseMetersPerSecond) * difficulty
 
         distanceMeters += metersPerSecond * deltaTime
-        let integerDistance = max(0, Int(distanceMeters.rounded(.down)))
 
-        if integerDistance != lastReportedDistance {
-            lastReportedDistance = integerDistance
-            onDistanceChanged?(integerDistance)
-        }
+        let integerDistance = max(0, Int(distanceMeters.rounded(.down)))
+        guard integerDistance != lastDisplayedDistance else { return }
+
+        lastDisplayedDistance = integerDistance
+        distanceLabel.text = "\(integerDistance)m"
     }
+
+    private func updateCountdownHUD(force: Bool = false) {
+        guard countdownRemaining > 0 else {
+            countdownLabel.isHidden = true
+            readyLabel.isHidden = true
+            lastDisplayedCountdown = nil
+            return
+        }
+
+        let value = max(1, Int(ceil(countdownRemaining)))
+        guard force || value != lastDisplayedCountdown else { return }
+
+        lastDisplayedCountdown = value
+        countdownLabel.text = "\(value)"
+        countdownLabel.isHidden = false
+        readyLabel.isHidden = false
+    }
+
+    // MARK: - Obstacles
 
     private func updateObstacleSpawning(deltaTime: TimeInterval, difficulty: Double) {
         obstacleSpawnAccumulator += deltaTime
@@ -249,21 +398,29 @@ final class HalloweenRunGameScene: SKScene, SKPhysicsContactDelegate {
         if elapsedTime < Config.doubleObstacleStartTime {
             doubleChance = 0
         } else {
+            let denominator = max(
+                1,
+                Config.maxDifficultyReachTime - Config.doubleObstacleStartTime
+            )
             let afterStart = min(
                 1,
-                max(0, (elapsedTime - Config.doubleObstacleStartTime) /
-                    (Config.maxDifficultyReachTime - Config.doubleObstacleStartTime))
+                max(
+                    0,
+                    (elapsedTime - Config.doubleObstacleStartTime) / denominator
+                )
             )
-            doubleChance = 0.12 + ((Config.maximumDoubleObstacleChance - 0.12) * afterStart)
+            doubleChance = 0.12
+                + ((Config.maximumDoubleObstacleChance - 0.12) * afterStart)
         }
 
-        let shouldUseDoubleObstacle = Double.random(in: 0...1) < doubleChance
+        if Double.random(in: 0...1) < doubleChance {
+            let candidates = [
+                preferredSafeLane - 1,
+                preferredSafeLane,
+                preferredSafeLane + 1,
+            ]
+            .filter { (0...2).contains($0) }
 
-        if shouldUseDoubleObstacle {
-            // 安全レーンは前回から最大1レーンだけ移動させる。
-            // これにより左右タップ1回で必ず次の安全レーンへ到達できる。
-            let candidates = [preferredSafeLane - 1, preferredSafeLane, preferredSafeLane + 1]
-                .filter { (0...2).contains($0) }
             let nextSafeLane = candidates.randomElement() ?? preferredSafeLane
             preferredSafeLane = nextSafeLane
 
@@ -271,15 +428,18 @@ final class HalloweenRunGameScene: SKScene, SKPhysicsContactDelegate {
                 spawnObstacle(lane: lane, y: spawnY)
             }
         } else {
-            // 単体障害物では、保証している安全レーンを塞がない。
             let blockedCandidates = (0...2).filter { $0 != preferredSafeLane }
             let blockedLane = blockedCandidates.randomElement() ?? 0
+
             spawnObstacle(lane: blockedLane, y: spawnY)
 
-            // 難易度が上がるにつれて安全ルート自体も左右へ動かす。
             if difficulty > 0.20, Double.random(in: 0...1) < 0.30 {
-                let candidates = [preferredSafeLane - 1, preferredSafeLane + 1]
-                    .filter { (0...2).contains($0) && $0 != blockedLane }
+                let candidates = [
+                    preferredSafeLane - 1,
+                    preferredSafeLane + 1,
+                ]
+                .filter { (0...2).contains($0) && $0 != blockedLane }
+
                 if let next = candidates.randomElement() {
                     preferredSafeLane = next
                 }
@@ -296,30 +456,23 @@ final class HalloweenRunGameScene: SKScene, SKPhysicsContactDelegate {
             height: Config.obstacleHeight
         )
 
-        let node = SKShapeNode(rectOf: obstacleSize, cornerRadius: 14)
-        node.fillColor = UIColor(red: 0.92, green: 0.25, blue: 0.18, alpha: 1)
-        node.strokeColor = UIColor.orange.withAlphaComponent(0.85)
-        node.lineWidth = 3
+        let node = SKSpriteNode(
+            color: UIColor(red: 0.92, green: 0.25, blue: 0.18, alpha: 1),
+            size: obstacleSize
+        )
         node.position = CGPoint(x: lanePositions[lane], y: y)
         node.name = "obstacle"
-        node.zPosition = 10
         node.userData = NSMutableDictionary()
         node.userData?["lane"] = lane
 
-        let body = SKPhysicsBody(rectangleOf: CGSize(width: obstacleSize.width * 0.84, height: obstacleSize.height * 0.84))
-        body.isDynamic = true
-        body.affectedByGravity = false
-        body.allowsRotation = false
-        body.categoryBitMask = PhysicsCategory.obstacle
-        body.contactTestBitMask = PhysicsCategory.player
-        body.collisionBitMask = 0
-        node.physicsBody = body
-
-        addChild(node)
+        movingLayer.addChild(node)
     }
+
+    // MARK: - Candy
 
     private func updateCandySpawning(deltaTime: TimeInterval) {
         candySpawnAccumulator += deltaTime
+
         guard candySpawnAccumulator >= Config.candySpawnInterval else { return }
         candySpawnAccumulator -= Config.candySpawnInterval
 
@@ -341,8 +494,9 @@ final class HalloweenRunGameScene: SKScene, SKPhysicsContactDelegate {
     private func candyAvailableLanes(aroundY y: CGFloat) -> [Int] {
         var blockedLanes = Set<Int>()
 
-        enumerateChildNodes(withName: "obstacle") { node, _ in
-            guard abs(node.position.y - y) < 120 else { return }
+        for node in movingLayer.children where node.name == "obstacle" {
+            guard abs(node.position.y - y) < 120 else { continue }
+
             if let lane = node.userData?["lane"] as? Int {
                 blockedLanes.insert(lane)
             }
@@ -354,82 +508,107 @@ final class HalloweenRunGameScene: SKScene, SKPhysicsContactDelegate {
     private func spawnCandy(lane: Int, y: CGFloat) {
         guard lanePositions.indices.contains(lane) else { return }
 
-        let container = SKNode()
-        container.position = CGPoint(x: lanePositions[lane], y: y)
-        container.name = "candy"
-        container.zPosition = 12
-        container.userData = NSMutableDictionary()
-        container.userData?["lane"] = lane
+        // アセット準備前は最軽量のSpriteNodeをキャンディ代替表示として使用。
+        let node = SKSpriteNode(
+            color: UIColor(red: 1.00, green: 0.39, blue: 0.66, alpha: 1),
+            size: CGSize(width: 30, height: 30)
+        )
+        node.position = CGPoint(x: lanePositions[lane], y: y)
+        node.name = "candy"
+        node.userData = NSMutableDictionary()
+        node.userData?["lane"] = lane
 
-        let glow = SKShapeNode(circleOfRadius: 24)
-        glow.fillColor = UIColor.systemPink.withAlphaComponent(0.22)
-        glow.strokeColor = UIColor.white.withAlphaComponent(0.16)
-        glow.lineWidth = 2
-        container.addChild(glow)
-
-        let label = SKLabelNode(text: "🍬")
-        label.fontSize = 30
-        label.verticalAlignmentMode = .center
-        label.horizontalAlignmentMode = .center
-        label.position = CGPoint(x: 0, y: -1)
-        container.addChild(label)
-
-        let body = SKPhysicsBody(circleOfRadius: 20)
-        body.isDynamic = true
-        body.affectedByGravity = false
-        body.allowsRotation = false
-        body.categoryBitMask = PhysicsCategory.candy
-        body.contactTestBitMask = PhysicsCategory.player
-        body.collisionBitMask = 0
-        container.physicsBody = body
-
-        addChild(container)
+        movingLayer.addChild(node)
     }
 
-    private func updateMovingNodes(deltaTime: TimeInterval, speed: CGFloat) {
-        let deltaY = speed * CGFloat(deltaTime)
+    // MARK: - Manual movement / collision
 
-        for node in children where node.name == "obstacle" || node.name == "candy" {
+    private func updateMovingNodesAndCollisions(
+        deltaTime: TimeInterval,
+        speed: CGFloat
+    ) {
+        let deltaY = speed * CGFloat(deltaTime)
+        let obstacleHalfWidth =
+            size.width * 0.26 * Config.obstacleWidthRatio * 0.42
+
+        // childrenはArrayのスナップショットなので、ループ中にremoveしても安全。
+        for node in movingLayer.children {
             node.position.y -= deltaY
+
+            if node.name == "obstacle" {
+                let xDistance = abs(node.position.x - playerNode.position.x)
+                let yDistance = abs(node.position.y - playerNode.position.y)
+
+                let hitX =
+                    xDistance
+                    <= obstacleHalfWidth + Config.playerCollisionHalfWidth
+                let hitY =
+                    yDistance
+                    <= Config.obstacleCollisionHalfHeight
+                        + Config.playerCollisionHalfHeight
+
+                if hitX && hitY {
+                    finishGame()
+                    return
+                }
+            } else if node.name == "candy" {
+                let xDistance = abs(node.position.x - playerNode.position.x)
+                let yDistance = abs(node.position.y - playerNode.position.y)
+
+                let hitX =
+                    xDistance
+                    <= Config.candyCollisionHalfSize
+                        + Config.playerCollisionHalfWidth
+                let hitY =
+                    yDistance
+                    <= Config.candyCollisionHalfSize
+                        + Config.playerCollisionHalfHeight
+
+                if hitX && hitY {
+                    collectCandy(node)
+                    continue
+                }
+            }
+
             if node.position.y < -100 {
                 node.removeFromParent()
             }
         }
     }
 
+    private func collectCandy(_ node: SKNode) {
+        guard node.parent != nil else { return }
+
+        node.removeFromParent()
+        candyCount += 1
+        candyLabel.text = "CANDY  \(candyCount)"
+
+        candyHaptic.impactOccurred(intensity: 0.64)
+    }
+
     private func updateRoadMarks(deltaTime: TimeInterval, speed: CGFloat) {
         let deltaY = speed * CGFloat(deltaTime)
         let resetY = size.height + 80
 
-        enumerateChildNodes(withName: "roadMark") { node, _ in
+        for node in roadMarkLayer.children {
             node.position.y -= deltaY
+
             if node.position.y < -60 {
                 node.position.y = resetY
             }
         }
     }
 
-    private func reportCountdownIfNeeded(force: Bool = false) {
-        guard countdownRemaining > 0 else {
-            if force || lastReportedCountdown != 0 {
-                lastReportedCountdown = 0
-                onCountdownChanged?(nil)
-            }
-            return
-        }
-
-        let value = max(1, Int(ceil(countdownRemaining)))
-        if force || value != lastReportedCountdown {
-            lastReportedCountdown = value
-            onCountdownChanged?(value)
-        }
-    }
+    // MARK: - Input
 
     override func touchesEnded(_ touches: Set<UITouch>, with event: UIEvent?) {
-        guard !isGameOver, countdownRemaining <= 0 else { return }
+        guard !isGameOver, !hasShutDown, countdownRemaining <= 0 else {
+            return
+        }
         guard let touch = touches.first else { return }
 
         let location = touch.location(in: self)
+
         if location.x < size.width * 0.5 {
             movePlayer(by: -1)
         } else {
@@ -444,50 +623,55 @@ final class HalloweenRunGameScene: SKScene, SKPhysicsContactDelegate {
         playerLane = targetLane
 
         playerNode.removeAction(forKey: "laneMove")
-        let move = SKAction.moveTo(x: lanePositions[targetLane], duration: Config.laneMoveDuration)
+
+        let move = SKAction.moveTo(
+            x: lanePositions[targetLane],
+            duration: Config.laneMoveDuration
+        )
         move.timingMode = .easeOut
         playerNode.run(move, withKey: "laneMove")
 
-        UIImpactFeedbackGenerator(style: .light).impactOccurred()
+        moveHaptic.impactOccurred(intensity: 0.72)
     }
 
-    func didBegin(_ contact: SKPhysicsContact) {
-        guard !isGameOver else { return }
-
-        let categories = contact.bodyA.categoryBitMask | contact.bodyB.categoryBitMask
-
-        if categories == (PhysicsCategory.player | PhysicsCategory.obstacle) {
-            finishGame()
-            return
-        }
-
-        if categories == (PhysicsCategory.player | PhysicsCategory.candy) {
-            let candyNode: SKNode?
-            if contact.bodyA.categoryBitMask == PhysicsCategory.candy {
-                candyNode = contact.bodyA.node
-            } else {
-                candyNode = contact.bodyB.node
-            }
-
-            candyNode?.removeFromParent()
-            candyCount += 1
-            onCandyChanged?(candyCount)
-            UIImpactFeedbackGenerator(style: .soft).impactOccurred()
-        }
-    }
+    // MARK: - Finish / cleanup
 
     private func finishGame() {
-        guard !isGameOver else { return }
-        isGameOver = true
+        guard !isGameOver, !hasShutDown else { return }
 
+        isGameOver = true
+        previousUpdateTime = nil
         playerNode.removeAllActions()
-        UINotificationFeedbackGenerator().notificationOccurred(.error)
+
+        gameOverHaptic.notificationOccurred(.error)
 
         let result = HalloweenRunResult(
             distance: max(0, Int(distanceMeters.rounded(.down))),
             candyCount: max(0, candyCount)
         )
 
-        onGameOver?(result)
+        let callback = onGameOver
+
+        // Scene更新処理の途中でSwiftUI Stateを直接変更しない。
+        DispatchQueue.main.async {
+            callback?(result)
+        }
+    }
+
+    func shutdown() {
+        guard !hasShutDown else { return }
+
+        hasShutDown = true
+        isGameOver = true
+        onGameOver = nil
+        previousUpdateTime = nil
+
+        playerNode.removeAllActions()
+        removeAllActions()
+        movingLayer.removeAllActions()
+        roadMarkLayer.removeAllActions()
+        hudLayer.removeAllActions()
+
+        isPaused = true
     }
 }

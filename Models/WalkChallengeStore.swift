@@ -5,6 +5,12 @@
 //  お散歩機能のセッション・タップ数・リザルトを永続管理するストア。
 //  タイマーは画面滞在に依存せず、保存済みの終了時刻と現在時刻の差分で判定する。
 //
+//  2026/09 performance update:
+//  - 常時0.25秒tickerを廃止。
+//  - activeSessionが存在するときだけ1秒tickerを起動。
+//  - ticker中はUserDefaults / JSONDecoderを毎回読まない。
+//  - Halloweenランゲーム中はtickerを完全停止し、終了後に現在時刻から復元する。
+//
 
 import Foundation
 import Combine
@@ -45,6 +51,9 @@ final class WalkChallengeStore: ObservableObject {
 
     static let sessionDurationSeconds: TimeInterval = 5 * 60
 
+    /// 残り時間表示は秒単位なので、1秒更新で十分。
+    private static let tickerIntervalNanoseconds: UInt64 = 1_000_000_000
+
     @Published private(set) var activeSession: WalkChallengeSession?
     @Published private(set) var pendingResult: WalkChallengeResult?
     @Published private(set) var remainingSeconds: Int = 0
@@ -59,10 +68,15 @@ final class WalkChallengeStore: ObservableObject {
     private let defaults: UserDefaults
     private var tickerTask: Task<Void, Never>?
 
+    /// ランゲームなど、メインスレッドを優先したい画面ではtrueにする。
+    /// お散歩時間はendsAtで管理しているため、tickerを止めても時間そのものは止まらない。
+    private var isTickerSuspendedForExclusiveGameplay = false
+
     private init(defaults: UserDefaults = .standard) {
         self.defaults = defaults
+
         loadFromDefaults()
-        refresh(now: Date())
+        refreshInMemory(now: Date())
         startTickerIfNeeded()
     }
 
@@ -81,21 +95,63 @@ final class WalkChallengeStore: ObservableObject {
         return String(format: "%02d:%02d", minutes, seconds)
     }
 
-    func bootstrap() {
+    // MARK: - Lifecycle
+
+    /// アプリ起動時・お散歩画面表示時など、保存済み状態と同期したいタイミングで呼ぶ。
+    ///
+    /// UserDefaults / JSONDecoderを読むのはこのような明示的タイミングだけ。
+    func bootstrap(now: Date = Date()) {
         loadFromDefaults()
-        refresh(now: Date())
+        refreshInMemory(now: now)
         startTickerIfNeeded()
     }
 
+    /// Halloweenランゲーム中など、リアルタイム描画を最優先したいときに呼ぶ。
+    ///
+    /// activeSessionが存在していてもtickerを停止する。
+    /// endsAtは保持されるため、お散歩の終了時刻には影響しない。
+    func pauseUpdatesForExclusiveGameplay() {
+        guard !isTickerSuspendedForExclusiveGameplay else { return }
+
+        isTickerSuspendedForExclusiveGameplay = true
+        stopTicker()
+    }
+
+    /// Exclusive gameplay終了後に呼ぶ。
+    ///
+    /// 保存データを1回だけ読み直し、現在時刻から残り時間を再計算する。
+    /// ゲーム中にお散歩が終了していた場合は、この時点でpendingResultへ変換される。
+    func resumeUpdatesAfterExclusiveGameplay(now: Date = Date()) {
+        guard isTickerSuspendedForExclusiveGameplay else {
+            startTickerIfNeeded()
+            return
+        }
+
+        isTickerSuspendedForExclusiveGameplay = false
+
+        loadFromDefaults()
+        refreshInMemory(now: now)
+        startTickerIfNeeded()
+    }
+
+    // MARK: - Session
+
     func canUseRainFreeStart(isRainy: Bool, now: Date = Date()) -> Bool {
         guard isRainy else { return false }
-        return defaults.string(forKey: DefaultsKey.rainyFreeUsedDayKey) != Self.dayKey(now)
+        return defaults.string(forKey: DefaultsKey.rainyFreeUsedDayKey)
+            != Self.dayKey(now)
     }
 
     @discardableResult
-    func startSession(isRainFreeStart: Bool, now: Date = Date()) -> Bool {
-        refresh(now: now)
-        guard activeSession?.isActive(now: now) != true else { return false }
+    func startSession(
+        isRainFreeStart: Bool,
+        now: Date = Date()
+    ) -> Bool {
+        refreshInMemory(now: now)
+
+        guard activeSession?.isActive(now: now) != true else {
+            return false
+        }
 
         let session = WalkChallengeSession(
             id: UUID(),
@@ -106,53 +162,53 @@ final class WalkChallengeStore: ObservableObject {
         )
 
         if isRainFreeStart {
-            defaults.set(Self.dayKey(now), forKey: DefaultsKey.rainyFreeUsedDayKey)
+            defaults.set(
+                Self.dayKey(now),
+                forKey: DefaultsKey.rainyFreeUsedDayKey
+            )
         }
 
-        activeSession = session
-        pendingResult = nil
-        remainingSeconds = session.remainingSeconds(now: now)
-        currentTapCount = 0
+        setActiveSession(session)
+        setPendingResult(nil)
+        setRemainingSeconds(session.remainingSeconds(now: now))
+        setCurrentTapCount(0)
+
         persistSession(session)
         clearPendingResult()
+
         startTickerIfNeeded()
         return true
     }
 
     func registerTap(now: Date = Date()) {
-        refresh(now: now)
-        guard var session = activeSession, session.isActive(now: now) else { return }
+        refreshInMemory(now: now)
+
+        guard var session = activeSession,
+              session.isActive(now: now) else {
+            return
+        }
 
         session.tapCount += 1
-        activeSession = session
-        currentTapCount = session.tapCount
+
+        setActiveSession(session)
+        setCurrentTapCount(session.tapCount)
         persistSession(session)
     }
 
+    /// メモリ上に保持しているセッションを現在時刻に追従させる。
+    ///
+    /// 旧実装と異なり、ここではUserDefaults / JSONDecoderを読まない。
     func refresh(now: Date = Date()) {
-        loadFromDefaults()
-
-        guard let session = activeSession else {
-            remainingSeconds = 0
-            currentTapCount = 0
-            return
-        }
-
-        if session.isActive(now: now) {
-            remainingSeconds = session.remainingSeconds(now: now)
-            currentTapCount = session.tapCount
-            return
-        }
-
-        finishExpiredSession(session, now: now)
+        refreshInMemory(now: now)
     }
 
     @discardableResult
-    func finishActiveSessionNow(now: Date = Date()) -> WalkChallengeResult? {
-        loadFromDefaults()
+    func finishActiveSessionNow(
+        now: Date = Date()
+    ) -> WalkChallengeResult? {
+        refreshInMemory(now: now)
 
         guard let session = activeSession else {
-            refresh(now: now)
             return pendingResult
         }
 
@@ -170,18 +226,25 @@ final class WalkChallengeStore: ObservableObject {
             isRainFreeStart: session.isRainFreeStart
         )
 
-        activeSession = nil
-        pendingResult = result
-        remainingSeconds = 0
-        currentTapCount = 0
+        setActiveSession(nil)
+        setPendingResult(result)
+        setRemainingSeconds(0)
+        setCurrentTapCount(0)
+
+        stopTicker()
         clearSession()
         persistPendingResult(result)
+
         return result
     }
 
     @discardableResult
-    func claimPendingResult(multiplier: Int, state: AppState) -> Int {
+    func claimPendingResult(
+        multiplier: Int,
+        state: AppState
+    ) -> Int {
         guard let result = pendingResult else { return 0 }
+
         let safeMultiplier = max(1, multiplier)
         let grantedSteps = max(0, result.baseSteps * safeMultiplier)
 
@@ -189,17 +252,40 @@ final class WalkChallengeStore: ObservableObject {
             _ = state.addWalletSteps(grantedSteps)
         }
 
-        pendingResult = nil
+        setPendingResult(nil)
         clearPendingResult()
+
         return grantedSteps
     }
 
     func dismissPendingResultWithoutClaim() {
-        pendingResult = nil
+        setPendingResult(nil)
         clearPendingResult()
     }
 
-    private func finishExpiredSession(_ session: WalkChallengeSession, now: Date) {
+    // MARK: - In-memory refresh
+
+    private func refreshInMemory(now: Date) {
+        guard let session = activeSession else {
+            setRemainingSeconds(0)
+            setCurrentTapCount(0)
+            stopTickerIfSessionIsInactive()
+            return
+        }
+
+        if session.isActive(now: now) {
+            setRemainingSeconds(session.remainingSeconds(now: now))
+            setCurrentTapCount(session.tapCount)
+            return
+        }
+
+        finishExpiredSession(session, now: now)
+    }
+
+    private func finishExpiredSession(
+        _ session: WalkChallengeSession,
+        now: Date
+    ) {
         let result = WalkChallengeResult(
             id: UUID(),
             sessionID: session.id,
@@ -209,39 +295,96 @@ final class WalkChallengeStore: ObservableObject {
             isRainFreeStart: session.isRainFreeStart
         )
 
-        activeSession = nil
-        pendingResult = result
-        remainingSeconds = 0
-        currentTapCount = 0
+        setActiveSession(nil)
+        setPendingResult(result)
+        setRemainingSeconds(0)
+        setCurrentTapCount(0)
+
+        stopTicker()
         clearSession()
         persistPendingResult(result)
     }
 
+    // MARK: - Ticker
+
     private func startTickerIfNeeded() {
+        guard !isTickerSuspendedForExclusiveGameplay else { return }
         guard tickerTask == nil else { return }
+        guard activeSession?.isActive(now: Date()) == true else { return }
 
         tickerTask = Task { @MainActor [weak self] in
             while !Task.isCancelled {
-                self?.refresh(now: Date())
-                try? await Task.sleep(nanoseconds: 250_000_000)
+                do {
+                    try await Task.sleep(
+                        nanoseconds: Self.tickerIntervalNanoseconds
+                    )
+                } catch {
+                    break
+                }
+
+                guard !Task.isCancelled else { break }
+                guard let self else { break }
+
+                if self.isTickerSuspendedForExclusiveGameplay {
+                    break
+                }
+
+                self.refreshInMemory(now: Date())
+
+                guard self.activeSession?.isActive(now: Date()) == true else {
+                    break
+                }
             }
+
+            // stopTicker()経由ですでにnilの場合も問題ない。
+            self?.tickerTask = nil
         }
     }
 
+    private func stopTicker() {
+        tickerTask?.cancel()
+        tickerTask = nil
+    }
+
+    private func stopTickerIfSessionIsInactive() {
+        guard activeSession?.isActive(now: Date()) != true else { return }
+        stopTicker()
+    }
+
+    // MARK: - Persistence
+
     private func loadFromDefaults() {
+        let loadedSession: WalkChallengeSession?
+
         if let data = defaults.data(forKey: DefaultsKey.activeSession),
-           let decoded = try? JSONDecoder().decode(WalkChallengeSession.self, from: data) {
-            activeSession = decoded
-            currentTapCount = decoded.tapCount
+           let decoded = try? JSONDecoder().decode(
+               WalkChallengeSession.self,
+               from: data
+           ) {
+            loadedSession = decoded
         } else {
-            activeSession = nil
+            loadedSession = nil
         }
 
+        let loadedPendingResult: WalkChallengeResult?
+
         if let data = defaults.data(forKey: DefaultsKey.pendingResult),
-           let decoded = try? JSONDecoder().decode(WalkChallengeResult.self, from: data) {
-            pendingResult = decoded
+           let decoded = try? JSONDecoder().decode(
+               WalkChallengeResult.self,
+               from: data
+           ) {
+            loadedPendingResult = decoded
         } else {
-            pendingResult = nil
+            loadedPendingResult = nil
+        }
+
+        setActiveSession(loadedSession)
+        setPendingResult(loadedPendingResult)
+
+        if let loadedSession {
+            setCurrentTapCount(loadedSession.tapCount)
+        } else {
+            setCurrentTapCount(0)
         }
     }
 
@@ -263,6 +406,33 @@ final class WalkChallengeStore: ObservableObject {
 
     private func clearPendingResult() {
         defaults.removeObject(forKey: DefaultsKey.pendingResult)
+    }
+
+    // MARK: - Published value guards
+    //
+    // 同じ値を毎秒Publishedへ再代入すると、不要なSwiftUI再評価を発生させる。
+    // 値が変化した場合だけpublishする。
+
+    private func setActiveSession(_ value: WalkChallengeSession?) {
+        guard activeSession != value else { return }
+        activeSession = value
+    }
+
+    private func setPendingResult(_ value: WalkChallengeResult?) {
+        guard pendingResult != value else { return }
+        pendingResult = value
+    }
+
+    private func setRemainingSeconds(_ value: Int) {
+        let safeValue = max(0, value)
+        guard remainingSeconds != safeValue else { return }
+        remainingSeconds = safeValue
+    }
+
+    private func setCurrentTapCount(_ value: Int) {
+        let safeValue = max(0, value)
+        guard currentTapCount != safeValue else { return }
+        currentTapCount = safeValue
     }
 
     private static func dayKey(_ date: Date) -> String {

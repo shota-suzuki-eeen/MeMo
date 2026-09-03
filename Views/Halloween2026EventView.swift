@@ -14,12 +14,67 @@ struct Halloween2026EventView: View {
 
     let state: AppState
     @ObservedObject var store: Halloween2026EventStore
+    let onRunGameActiveChanged: (Bool) -> Void
 
     @State private var showRewardWindow = false
     @State private var showRunGame = false
     @State private var showExchange = false
 
+    init(
+        state: AppState,
+        store: Halloween2026EventStore,
+        onRunGameActiveChanged: @escaping (Bool) -> Void = { _ in }
+    ) {
+        self.state = state
+        _store = ObservedObject(wrappedValue: store)
+        self.onRunGameActiveChanged = onRunGameActiveChanged
+    }
+
     var body: some View {
+        Group {
+            if showRunGame {
+                // ゲーム中はイベントトップのTimelineView・背景Blur等も描画しない。
+                Color.black
+                    .ignoresSafeArea()
+                    .accessibilityHidden(true)
+            } else {
+                eventTopContent
+            }
+        }
+        .ignoresSafeArea()
+        .fullScreenCover(
+            isPresented: $showRunGame,
+            onDismiss: {
+                onRunGameActiveChanged(false)
+            }
+        ) {
+            HalloweenRunGameView(
+                store: store,
+                onClose: {
+                    showRunGame = false
+                }
+            )
+            .environmentObject(bgmManager)
+            .memoIPadPresentedPhoneCanvas()
+        }
+        .fullScreenCover(isPresented: $showExchange) {
+            Halloween2026ExchangeView(state: state, store: store)
+                .environmentObject(bgmManager)
+                .memoIPadPresentedPhoneCanvas()
+        }
+        .onAppear {
+            bgmManager.switchBackground(to: .fishing)
+        }
+        .onDisappear {
+            // ランゲームのfullScreenCover表示による一時的なDisappearでは
+            // BGMをmainへ戻さない。
+            if !showRunGame {
+                bgmManager.switchBackground(to: .main)
+            }
+        }
+    }
+
+    private var eventTopContent: some View {
         TimelineView(.periodic(from: Date(), by: 15)) { timeline in
             ZStack {
                 background
@@ -44,26 +99,6 @@ struct Halloween2026EventView: View {
                     .transition(.opacity.combined(with: .scale(scale: 0.96)))
                 }
             }
-        }
-        .ignoresSafeArea()
-        .fullScreenCover(isPresented: $showRunGame) {
-            HalloweenRunGameView(
-                store: store,
-                onClose: { showRunGame = false }
-            )
-            .environmentObject(bgmManager)
-            .memoIPadPresentedPhoneCanvas()
-        }
-        .fullScreenCover(isPresented: $showExchange) {
-            Halloween2026ExchangeView(state: state, store: store)
-                .environmentObject(bgmManager)
-                .memoIPadPresentedPhoneCanvas()
-        }
-        .onAppear {
-            bgmManager.switchBackground(to: .fishing)
-        }
-        .onDisappear {
-            bgmManager.switchBackground(to: .main)
         }
     }
 
@@ -210,6 +245,10 @@ struct Halloween2026EventView: View {
         Button {
             bgmManager.playSE(.push)
             guard EventManager.isActive(.halloween2026) else { return }
+
+            // fullScreenCoverの表示より先にRootへ通知し、
+            // HomeViewを背面の描画ツリーから外す。
+            onRunGameActiveChanged(true)
             showRunGame = true
         } label: {
             VStack(spacing: 8) {

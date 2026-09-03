@@ -37,6 +37,8 @@ struct RootView: View {
     @State private var showWalkStartPopup: Bool = false
     @State private var showWalkView: Bool = false
     @State private var showHalloweenEvent: Bool = false
+    // Halloweenランゲーム中は、背面のHomeView等を描画ツリーから外して処理を休止する。
+    @State private var isHalloweenRunGameActive: Bool = false
     @State private var walkStartMessage: String?
     @State private var stepGainPopup: StepGainPopupItem?
     @State private var isStepGainPopupAbsorbing: Bool = false
@@ -81,30 +83,39 @@ struct RootView: View {
             case .authorized:
                 if let sharedState = viewModel.sharedState {
                     ZStack(alignment: .top) {
-                        HomeView(state: sharedState, hk: hk)
+                        if isHalloweenRunGameActive {
+                            // ランゲームは別のfullScreenCoverで表示される。
+                            // その背面ではHomeView・TimelineView・キャラクターアニメーション・
+                            // Live Activity observer・各種オーバーレイを描画ツリーから外す。
+                            Color.black
+                                .ignoresSafeArea()
+                                .accessibilityHidden(true)
+                        } else {
+                            HomeView(state: sharedState, hk: hk)
 
-                        halloweenEventHomeEntryLayer
+                            halloweenEventHomeEntryLayer
 
-                        MeMoLiveActivityStateObserver(state: sharedState)
-                            .frame(width: 0, height: 0)
-                            .allowsHitTesting(false)
+                            MeMoLiveActivityStateObserver(state: sharedState)
+                                .frame(width: 0, height: 0)
+                                .allowsHitTesting(false)
 
-                        walkStartPopupLayer
+                            walkStartPopupLayer
 
-                        if let pendingResult = walkStore.pendingResult {
-                            WalkResultOverlayView(result: pendingResult) { multiplier in
-                                _ = walkStore.claimPendingResult(
-                                    multiplier: multiplier,
-                                    state: sharedState
-                                )
-                                saveRootState()
+                            if let pendingResult = walkStore.pendingResult {
+                                WalkResultOverlayView(result: pendingResult) { multiplier in
+                                    _ = walkStore.claimPendingResult(
+                                        multiplier: multiplier,
+                                        state: sharedState
+                                    )
+                                    saveRootState()
+                                }
+                                .environmentObject(bgmManager)
+                                .zIndex(20_000)
+                                .transition(.opacity.combined(with: .scale(scale: 0.96)))
                             }
-                            .environmentObject(bgmManager)
-                            .zIndex(20_000)
-                            .transition(.opacity.combined(with: .scale(scale: 0.96)))
-                        }
 
-                        stepGainPopupLayer
+                            stepGainPopupLayer
+                        }
                     }
                     .fullScreenCover(isPresented: $showWalkView) {
                         WalkView(
@@ -114,10 +125,19 @@ struct RootView: View {
                         .environmentObject(bgmManager)
                         .memoIPadPresentedPhoneCanvas()
                     }
-                    .fullScreenCover(isPresented: $showHalloweenEvent) {
+                    .fullScreenCover(
+                        isPresented: $showHalloweenEvent,
+                        onDismiss: {
+                            // イベント画面自体が閉じられた場合も必ず解除する。
+                            isHalloweenRunGameActive = false
+                        }
+                    ) {
                         Halloween2026EventView(
                             state: sharedState,
-                            store: halloweenEventStore
+                            store: halloweenEventStore,
+                            onRunGameActiveChanged: { isActive in
+                                isHalloweenRunGameActive = isActive
+                            }
                         )
                         .environmentObject(bgmManager)
                         .memoIPadPresentedPhoneCanvas()
@@ -134,7 +154,6 @@ struct RootView: View {
                     .onAppear {
                         lastObservedWalletSteps = sharedState.walletSteps
                         walkStore.bootstrap()
-                        walkStore.refresh()
                         Task { await walkWeatherManager.refreshRainStatus() }
                         AdMobManager.shared.prepareInterstitialGetIfNeeded(
                             isRewardClaimable: sharedState.nextClaimableHappinessRewardLevel() != nil
@@ -150,17 +169,43 @@ struct RootView: View {
                         handleWalkMenuRequest()
                     }
                     .onChange(of: sharedState.walletSteps) { oldValue, newValue in
+                        if isHalloweenRunGameActive {
+                            // ゲーム中は歩数変化によるポップアップ描画・Live Activity即時更新を抑止。
+                            lastObservedWalletSteps = newValue
+                            return
+                        }
+
                         handleWalletStepsChange(oldValue: oldValue, newValue: newValue)
                         Task { @MainActor in
                             await MeMoLiveActivityManager.shared.updateImmediately(from: sharedState)
                         }
                     }
                     .onChange(of: sharedState.happinessLevel) { _, _ in
+                        guard !isHalloweenRunGameActive else { return }
+
                         AdMobManager.shared.prepareInterstitialGetIfNeeded(
                             isRewardClaimable: sharedState.nextClaimableHappinessRewardLevel() != nil
                         )
                         Task { @MainActor in
                             await MeMoLiveActivityManager.shared.updateImmediately(from: sharedState)
+                        }
+                    }
+                    .onChange(of: isHalloweenRunGameActive) { _, isActive in
+                        if isActive {
+                            // ランゲーム中はWalkChallengeStoreのtickerも完全停止する。
+                            // お散歩の終了時刻はendsAtで保持されるため、時間計測自体は継続する。
+                            walkStore.pauseUpdatesForExclusiveGameplay()
+
+                            // ゲーム開始時点でホーム由来の遅延UI処理を残さない。
+                            cancelStepGainPopupDismissTask()
+                            stepGainPopup = nil
+                            isStepGainPopupAbsorbing = false
+                            showWalkStartPopup = false
+                            walkStartMessage = nil
+                        } else {
+                            // ゲーム終了後に保存状態を1回だけ読み直し、
+                            // 現在時刻から残り時間/終了結果を復元する。
+                            walkStore.resumeUpdatesAfterExclusiveGameplay()
                         }
                     }
                 } else {
@@ -326,7 +371,6 @@ struct RootView: View {
 
     private func handleWalkMenuRequest() {
         walkStore.bootstrap()
-        walkStore.refresh()
         walkStartMessage = nil
 
         if walkStore.isSessionActive {
