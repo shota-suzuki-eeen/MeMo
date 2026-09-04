@@ -192,9 +192,14 @@ struct RootView: View {
                     }
                     .onChange(of: isHalloweenRunGameActive) { _, isActive in
                         if isActive {
-                            // ランゲーム中はWalkChallengeStoreのtickerも完全停止する。
+                            // ランゲーム中はWalkChallengeStoreのtickerを停止する。
                             // お散歩の終了時刻はendsAtで保持されるため、時間計測自体は継続する。
                             walkStore.pauseUpdatesForExclusiveGameplay()
+
+                            // WatchConnectivity自体は維持したまま、負荷の大きい動的画像アセット配送だけ停止。
+                            // 3秒周期の再送Taskもここでキャンセルされる。
+                            MeMoWatchConnectivityBridge.shared
+                                .pauseDynamicAssetDeliveryForExclusiveGameplay()
 
                             // ゲーム開始時点でホーム由来の遅延UI処理を残さない。
                             cancelStepGainPopupDismissTask()
@@ -206,6 +211,10 @@ struct RootView: View {
                             // ゲーム終了後に保存状態を1回だけ読み直し、
                             // 現在時刻から残り時間/終了結果を復元する。
                             walkStore.resumeUpdatesAfterExclusiveGameplay()
+
+                            // Watch動的画像配送は画面遷移直後を避け、Bridge側で0.5秒遅延して再開する。
+                            MeMoWatchConnectivityBridge.shared
+                                .resumeDynamicAssetDeliveryAfterExclusiveGameplay()
                         }
                     }
                 } else {

@@ -5,6 +5,10 @@
 //  Shared iPhone / Watch bridge.
 //  Add this file to both the iPhone App target and the Watch App target.
 //
+//  2026/09 update:
+//  Halloweenランゲーム中はiPhone側の動的Watch画像配送だけを一時停止し、
+//  3秒周期の再送・画像生成をゲーム終了後まで遅延する。
+//
 
 import Combine
 import CoreGraphics
@@ -366,6 +370,7 @@ final class MeMoWatchConnectivityBridge: NSObject, ObservableObject {
 
     #if os(iOS)
     private static let dynamicAssetRetryInterval: TimeInterval = 3.0
+    private static let dynamicAssetResumeDelayNanoseconds: UInt64 = 500_000_000
 
     private weak var appState: AppState?
     private weak var healthKitManager: HealthKitManager?
@@ -382,6 +387,9 @@ final class MeMoWatchConnectivityBridge: NSObject, ObservableObject {
     private var inFlightFileDynamicAssetNames: Set<String> = []
     private var dynamicAssetLastAttemptDates: [String: Date] = [:]
     private var dynamicAssetRetryTask: Task<Void, Never>?
+    private var dynamicAssetResumeTask: Task<Void, Never>?
+    private var isDynamicAssetDeliverySuspendedForExclusiveGameplay = false
+    private var deferredDynamicAssetForceNames: Set<String> = []
     private var knownWatchInstanceID: String?
     #endif
 
@@ -424,6 +432,67 @@ final class MeMoWatchConnectivityBridge: NSObject, ObservableObject {
         activate()
         publishCurrentSnapshot(backgroundAssetName: nil)
         flushPendingWatchEventsIfNeeded()
+    }
+
+    /// ランゲームなど、フレーム安定性を最優先したい画面で使用する。
+    /// WatchConnectivityセッション自体は維持し、動的画像アセットの新規生成・再送だけを止める。
+    func pauseDynamicAssetDeliveryForExclusiveGameplay() {
+        // 再開待ち0.5秒の最中に再度ゲームが始まった場合も、必ず再開Taskを止める。
+        isDynamicAssetDeliverySuspendedForExclusiveGameplay = true
+
+        dynamicAssetResumeTask?.cancel()
+        dynamicAssetResumeTask = nil
+
+        // 3秒周期の再送Taskを即時キャンセルする。
+        dynamicAssetRetryTask?.cancel()
+        dynamicAssetRetryTask = nil
+    }
+
+    /// ランゲーム終了後に動的画像配送を再開する。
+    /// 画面遷移と画像圧縮が重ならないよう、0.5秒の間はsuspendedを維持する。
+    func resumeDynamicAssetDeliveryAfterExclusiveGameplay() {
+        guard isDynamicAssetDeliverySuspendedForExclusiveGameplay else { return }
+
+        dynamicAssetRetryTask?.cancel()
+        dynamicAssetRetryTask = nil
+
+        dynamicAssetResumeTask?.cancel()
+
+        let initiallyDeferredForceNames = deferredDynamicAssetForceNames
+        deferredDynamicAssetForceNames.removeAll()
+
+        dynamicAssetResumeTask = Task { @MainActor [weak self] in
+            guard let self else { return }
+
+            do {
+                try await Task.sleep(
+                    nanoseconds: Self.dynamicAssetResumeDelayNanoseconds
+                )
+            } catch {
+                // 再開待ちが再度のゲーム開始などでキャンセルされた場合も、
+                // それまでに受けたforce要求は失わない。
+                self.deferredDynamicAssetForceNames.formUnion(
+                    initiallyDeferredForceNames
+                )
+                self.dynamicAssetResumeTask = nil
+                return
+            }
+
+            // 0.5秒の待機中に追加されたWatch側要求もまとめて再開時に処理する。
+            var forceNames = initiallyDeferredForceNames
+            forceNames.formUnion(self.deferredDynamicAssetForceNames)
+            self.deferredDynamicAssetForceNames.removeAll()
+
+            self.dynamicAssetResumeTask = nil
+            self.isDynamicAssetDeliverySuspendedForExclusiveGameplay = false
+
+            // ゲーム中にWatchから明示要求されたものはforce扱いで再開。
+            // それ以外の未ACK画像もproactive側で通常再評価される。
+            self.proactivelyTransferDynamicAssetsIfNeeded(
+                for: self.latestSnapshot,
+                forceAssetNames: forceNames
+            )
+        }
     }
 
     func refreshLatestStepsAndPublish(
@@ -480,6 +549,17 @@ final class MeMoWatchConnectivityBridge: NSObject, ObservableObject {
         refreshWidgetSnapshotIfAvailable(appState: appState, now: now)
     }
 
+    private func deferDynamicAssetDeliveryUntilResume(
+        forceAssetNames: Set<String> = []
+    ) {
+        if !forceAssetNames.isEmpty {
+            deferredDynamicAssetForceNames.formUnion(forceAssetNames)
+        }
+
+        dynamicAssetRetryTask?.cancel()
+        dynamicAssetRetryTask = nil
+    }
+
     private func resetDynamicAssetDeliveryState() {
         acknowledgedDynamicAssetNames.removeAll()
         inFlightImmediateDynamicAssetNames.removeAll()
@@ -508,11 +588,19 @@ final class MeMoWatchConnectivityBridge: NSObject, ObservableObject {
 
     private func forceResendCurrentPresentationAssets() {
         guard appState != nil else { return }
+
+        let forceNames = Set(
+            Self.presentationDynamicAssetNames(for: latestSnapshot)
+        )
+
+        if isDynamicAssetDeliverySuspendedForExclusiveGameplay {
+            deferDynamicAssetDeliveryUntilResume(forceAssetNames: forceNames)
+            return
+        }
+
         publishCurrentSnapshot(
             backgroundAssetName: nil,
-            forceDynamicAssetNames: Set(
-                Self.presentationDynamicAssetNames(for: latestSnapshot)
-            )
+            forceDynamicAssetNames: forceNames
         )
     }
 
@@ -522,6 +610,17 @@ final class MeMoWatchConnectivityBridge: NSObject, ObservableObject {
         force: Bool = false
     ) -> Set<String> {
         #if canImport(WatchConnectivity) && canImport(UIKit)
+        let normalizedNames = Set(
+            Self.uniqueNormalizedAssetNames(assetNames)
+        )
+
+        guard !isDynamicAssetDeliverySuspendedForExclusiveGameplay else {
+            deferDynamicAssetDeliveryUntilResume(
+                forceAssetNames: force ? normalizedNames : []
+            )
+            return []
+        }
+
         guard let session,
               session.activationState == .activated else {
             return []
@@ -580,6 +679,17 @@ final class MeMoWatchConnectivityBridge: NSObject, ObservableObject {
         force: Bool = false
     ) -> Set<String> {
         #if canImport(WatchConnectivity) && canImport(UIKit)
+        let normalizedNames = Set(
+            Self.uniqueNormalizedAssetNames(assetNames)
+        )
+
+        guard !isDynamicAssetDeliverySuspendedForExclusiveGameplay else {
+            deferDynamicAssetDeliveryUntilResume(
+                forceAssetNames: force ? normalizedNames : []
+            )
+            return []
+        }
+
         guard let session,
               session.activationState == .activated,
               session.isReachable else {
@@ -618,7 +728,16 @@ final class MeMoWatchConnectivityBridge: NSObject, ObservableObject {
                     errorHandler: { [weak self] _ in
                         Task { @MainActor in
                             guard let self else { return }
+
                             self.inFlightImmediateDynamicAssetNames.remove(assetName)
+
+                            if self.isDynamicAssetDeliverySuspendedForExclusiveGameplay {
+                                self.deferDynamicAssetDeliveryUntilResume(
+                                    forceAssetNames: [assetName]
+                                )
+                                return
+                            }
+
                             _ = self.transferDynamicAssetsToWatch(
                                 assetNames: [assetName],
                                 force: true
@@ -652,6 +771,13 @@ final class MeMoWatchConnectivityBridge: NSObject, ObservableObject {
         for snapshot: MeMoWatchSnapshot,
         forceAssetNames: Set<String> = []
     ) {
+        guard !isDynamicAssetDeliverySuspendedForExclusiveGameplay else {
+            deferDynamicAssetDeliveryUntilResume(
+                forceAssetNames: forceAssetNames
+            )
+            return
+        }
+
         if !forceAssetNames.isEmpty {
             invalidateDeliveryState(for: forceAssetNames)
         }
@@ -690,6 +816,11 @@ final class MeMoWatchConnectivityBridge: NSObject, ObservableObject {
     }
 
     private func scheduleDynamicAssetRetryIfNeeded() {
+        guard !isDynamicAssetDeliverySuspendedForExclusiveGameplay else {
+            deferDynamicAssetDeliveryUntilResume()
+            return
+        }
+
         guard dynamicAssetRetryTask == nil else { return }
 
         let required = Set(Self.requiredDynamicAssetNames(for: latestSnapshot))
@@ -710,6 +841,12 @@ final class MeMoWatchConnectivityBridge: NSObject, ObservableObject {
             }
 
             self.dynamicAssetRetryTask = nil
+
+            guard !self.isDynamicAssetDeliverySuspendedForExclusiveGameplay else {
+                self.deferDynamicAssetDeliveryUntilResume()
+                return
+            }
+
             self.proactivelyTransferDynamicAssetsIfNeeded(
                 for: self.latestSnapshot
             )
@@ -730,6 +867,10 @@ final class MeMoWatchConnectivityBridge: NSObject, ObservableObject {
 
     #if canImport(UIKit)
     private func makeDynamicAssetTransferFile(assetName: String) -> URL? {
+        guard !isDynamicAssetDeliverySuspendedForExclusiveGameplay else {
+            return nil
+        }
+
         guard let sourceImage = UIImage(named: assetName) else {
             return nil
         }
@@ -770,6 +911,10 @@ final class MeMoWatchConnectivityBridge: NSObject, ObservableObject {
     private func makeImmediateDynamicAssetEnvelopeData(
         assetName: String
     ) -> Data? {
+        guard !isDynamicAssetDeliverySuspendedForExclusiveGameplay else {
+            return nil
+        }
+
         guard let sourceImage = UIImage(named: assetName),
               let payload = optimizedAssetData(
                 from: sourceImage,
@@ -810,6 +955,10 @@ final class MeMoWatchConnectivityBridge: NSObject, ObservableObject {
         assetName: String,
         maximumPixelDimension: CGFloat
     ) -> Data? {
+        guard !isDynamicAssetDeliverySuspendedForExclusiveGameplay else {
+            return nil
+        }
+
         let pixelWidth = CGFloat(image.cgImage?.width ?? 0)
         let pixelHeight = CGFloat(image.cgImage?.height ?? 0)
         let currentMaximum = max(pixelWidth, pixelHeight)
@@ -841,6 +990,10 @@ final class MeMoWatchConnectivityBridge: NSObject, ObservableObject {
         from image: UIImage,
         assetName: String
     ) -> Data? {
+        guard !isDynamicAssetDeliverySuspendedForExclusiveGameplay else {
+            return nil
+        }
+
         if assetName == lastBackgroundAssetName {
             return image.jpegData(compressionQuality: 0.84)
         }
@@ -1323,6 +1476,7 @@ final class MeMoWatchConnectivityBridge: NSObject, ObservableObject {
             )
         }
 
+        // Snapshot自体の同期は継続するが、画像配送はproactive側でゲーム中停止される。
         proactivelyTransferDynamicAssetsIfNeeded(
             for: snapshot,
             forceAssetNames: forceAssetNames
@@ -1355,6 +1509,7 @@ final class MeMoWatchConnectivityBridge: NSObject, ObservableObject {
 
         switch event {
         case "watchHello":
+            // ゲーム中ならforce対象だけ覚えて、実配送は終了後へ延期。
             forceResendCurrentPresentationAssets()
 
         case "assetStoredAck":
@@ -1392,6 +1547,13 @@ final class MeMoWatchConnectivityBridge: NSObject, ObservableObject {
             }
 
             let names = Set(Self.uniqueNormalizedAssetNames(assetNames))
+
+            if isDynamicAssetDeliverySuspendedForExclusiveGameplay {
+                // Watch側の不足要求は失わず、ゲーム終了後にforce送信する。
+                deferDynamicAssetDeliveryUntilResume(forceAssetNames: names)
+                return
+            }
+
             invalidateDeliveryState(for: names)
             _ = sendImmediateDynamicAssetsToWatch(
                 assetNames: Array(names),
@@ -1530,6 +1692,7 @@ extension MeMoWatchConnectivityBridge: WCSessionDelegate {
         Task { @MainActor in
             #if os(iOS)
             // 再有効化時は配送状態を破棄し、現在のキャラクターと壁紙を強制再送する。
+            // ゲーム中ならproactive側で実配送は延期される。
             self.resetDynamicAssetDeliveryState()
             self.publishCurrentSnapshot(
                 backgroundAssetName: nil,
@@ -1570,7 +1733,13 @@ extension MeMoWatchConnectivityBridge: WCSessionDelegate {
             if error != nil {
                 self.dynamicAssetLastAttemptDates.removeValue(forKey: assetName)
             }
-            self.scheduleDynamicAssetRetryIfNeeded()
+
+            if self.isDynamicAssetDeliverySuspendedForExclusiveGameplay {
+                // 完了通知だけ処理し、新しい再送Taskはゲーム終了後まで作らない。
+                self.deferDynamicAssetDeliveryUntilResume()
+            } else {
+                self.scheduleDynamicAssetRetryIfNeeded()
+            }
         }
     }
     #endif
@@ -1651,6 +1820,7 @@ extension MeMoWatchConnectivityBridge: WCSessionDelegate {
 
         Task { @MainActor in
             #if os(iOS)
+            // 到達性変化もゲーム中は実配送せず、force対象だけ保持する。
             self.proactivelyTransferDynamicAssetsIfNeeded(
                 for: self.latestSnapshot,
                 forceAssetNames: Set(
