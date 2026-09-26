@@ -1,3 +1,8 @@
 .DS_Store
-MeMoWatch Watch App/WatchAssets.xcassets/
-MeMoWidget/Assets.xcassets/
+Assets.xcassets/
+MeMo_material/
+MeMo-Support/
+**/xcuserdata/
+**/*.xcuserstate
+MeMo/MeMoWatch Watch App/WatchAssets.xcassets/
+MeMo/MeMoWidget/Assets.xcassets/

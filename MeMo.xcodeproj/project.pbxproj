@@ -1,0 +1,1091 @@
+// !$*UTF8*$!
+{
+	archiveVersion = 1;
+	classes = {
+	};
+	objectVersion = 77;
+	objects = {
+
+/* Begin PBXBuildFile section */
+		EE4707742F6CCAA500A7FD5A /* Assets.xcassets in Resources */ = {isa = PBXBuildFile; fileRef = EE4707712F6CCAA500A7FD5A /* Assets.xcassets */; };
+		EE4707E02F6CFEF500A7FD5A /* GoogleMobileAds in Frameworks */ = {isa = PBXBuildFile; productRef = EE4707DF2F6CFEF500A7FD5A /* GoogleMobileAds */; };
+		EEA600202FD3032C001EEAC9 /* WidgetKit.framework in Frameworks */ = {isa = PBXBuildFile; fileRef = EEA6001F2FD3032C001EEAC9 /* WidgetKit.framework */; };
+		EEA600222FD3032C001EEAC9 /* SwiftUI.framework in Frameworks */ = {isa = PBXBuildFile; fileRef = EEA600212FD3032C001EEAC9 /* SwiftUI.framework */; };
+		EEA600C32FD33B90001EEAC9 /* MeMoWidgetExtension.appex in Embed Foundation Extensions */ = {isa = PBXBuildFile; fileRef = EEA6001D2FD3032C001EEAC9 /* MeMoWidgetExtension.appex */; settings = {ATTRIBUTES = (RemoveHeadersOnCopy, ); }; };
+		EECBEDFA300C6EDE00C4EC6F /* MeMoWatch Watch App.app in Embed Watch Content */ = {isa = PBXBuildFile; fileRef = EE9643AD2FC7CF060055CCFA /* MeMoWatch Watch App.app */; settings = {ATTRIBUTES = (RemoveHeadersOnCopy, ); }; };
+		EECBEE08300E3B9000C4EC6F /* WidgetKit.framework in Frameworks */ = {isa = PBXBuildFile; fileRef = EEA6001F2FD3032C001EEAC9 /* WidgetKit.framework */; };
+		EECBEE09300E3B9000C4EC6F /* SwiftUI.framework in Frameworks */ = {isa = PBXBuildFile; fileRef = EEA600212FD3032C001EEAC9 /* SwiftUI.framework */; };
+		EECBEE32300E476C00C4EC6F /* WidgetKit.framework in Frameworks */ = {isa = PBXBuildFile; fileRef = EEA6001F2FD3032C001EEAC9 /* WidgetKit.framework */; };
+		EECBEE33300E476C00C4EC6F /* SwiftUI.framework in Frameworks */ = {isa = PBXBuildFile; fileRef = EEA600212FD3032C001EEAC9 /* SwiftUI.framework */; };
+		EECBEE3E300E476D00C4EC6F /* MeMoWatchComplicationExtension.appex in Embed Foundation Extensions */ = {isa = PBXBuildFile; fileRef = EECBEE31300E476C00C4EC6F /* MeMoWatchComplicationExtension.appex */; settings = {ATTRIBUTES = (RemoveHeadersOnCopy, ); }; };
+/* End PBXBuildFile section */
+
+/* Begin PBXContainerItemProxy section */
+		EE9643B52FC7CF060055CCFA /* PBXContainerItemProxy */ = {
+			isa = PBXContainerItemProxy;
+			containerPortal = EE56612E2F6ADE270038F078 /* Project object */;
+			proxyType = 1;
+			remoteGlobalIDString = EE9643AC2FC7CF060055CCFA;
+			remoteInfo = "MeMoWatch Watch App";
+		};
+		EEA6002D2FD3032D001EEAC9 /* PBXContainerItemProxy */ = {
+			isa = PBXContainerItemProxy;
+			containerPortal = EE56612E2F6ADE270038F078 /* Project object */;
+			proxyType = 1;
+			remoteGlobalIDString = EEA6001C2FD3032C001EEAC9;
+			remoteInfo = MeMoWidgetExtension;
+		};
+		EECBEDFB300C6EDE00C4EC6F /* PBXContainerItemProxy */ = {
+			isa = PBXContainerItemProxy;
+			containerPortal = EE56612E2F6ADE270038F078 /* Project object */;
+			proxyType = 1;
+			remoteGlobalIDString = EE9643AC2FC7CF060055CCFA;
+			remoteInfo = "MeMoWatch Watch App";
+		};
+		EECBEE12300E3B9000C4EC6F /* PBXContainerItemProxy */ = {
+			isa = PBXContainerItemProxy;
+			containerPortal = EE56612E2F6ADE270038F078 /* Project object */;
+			proxyType = 1;
+			remoteGlobalIDString = EECBEE06300E3B9000C4EC6F;
+			remoteInfo = MeMoWatchComplicationExtensionExtension;
+		};
+		EECBEE3C300E476D00C4EC6F /* PBXContainerItemProxy */ = {
+			isa = PBXContainerItemProxy;
+			containerPortal = EE56612E2F6ADE270038F078 /* Project object */;
+			proxyType = 1;
+			remoteGlobalIDString = EECBEE30300E476C00C4EC6F;
+			remoteInfo = MeMoWatchComplicationExtension;
+		};
+/* End PBXContainerItemProxy section */
+
+/* Begin PBXCopyFilesBuildPhase section */
+		EE9643BB2FC7CF060055CCFA /* Embed Watch Content */ = {
+			isa = PBXCopyFilesBuildPhase;
+			buildActionMask = 2147483647;
+			dstPath = "$(CONTENTS_FOLDER_PATH)/Watch";
+			dstSubfolderSpec = 16;
+			files = (
+				EECBEDFA300C6EDE00C4EC6F /* MeMoWatch Watch App.app in Embed Watch Content */,
+			);
+			name = "Embed Watch Content";
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+		EEA600342FD3032D001EEAC9 /* Embed Foundation Extensions */ = {
+			isa = PBXCopyFilesBuildPhase;
+			buildActionMask = 2147483647;
+			dstPath = "";
+			dstSubfolderSpec = 13;
+			files = (
+				EEA600C32FD33B90001EEAC9 /* MeMoWidgetExtension.appex in Embed Foundation Extensions */,
+			);
+			name = "Embed Foundation Extensions";
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+		EECBEE19300E3B9000C4EC6F /* Embed Foundation Extensions */ = {
+			isa = PBXCopyFilesBuildPhase;
+			buildActionMask = 2147483647;
+			dstPath = "";
+			dstSubfolderSpec = 13;
+			files = (
+				EECBEE3E300E476D00C4EC6F /* MeMoWatchComplicationExtension.appex in Embed Foundation Extensions */,
+			);
+			name = "Embed Foundation Extensions";
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+/* End PBXCopyFilesBuildPhase section */
+
+/* Begin PBXFileReference section */
+		EE4707712F6CCAA500A7FD5A /* Assets.xcassets */ = {isa = PBXFileReference; lastKnownFileType = folder.assetcatalog; path = Assets.xcassets; sourceTree = "<group>"; };
+		EE4707ED2F6D0F4400A7FD5A /* MeMo.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = MeMo.app; sourceTree = BUILT_PRODUCTS_DIR; };
+		EE53B485301F44890032E7BF /* MeMoWatchComplicationExtensionExtension.appex */ = {isa = PBXFileReference; explicitFileType = "wrapper.app-extension"; includeInIndex = 0; path = MeMoWatchComplicationExtensionExtension.appex; sourceTree = BUILT_PRODUCTS_DIR; };
+		EE9643AD2FC7CF060055CCFA /* MeMoWatch Watch App.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = "MeMoWatch Watch App.app"; sourceTree = BUILT_PRODUCTS_DIR; };
+		EEA6001D2FD3032C001EEAC9 /* MeMoWidgetExtension.appex */ = {isa = PBXFileReference; explicitFileType = "wrapper.app-extension"; includeInIndex = 0; path = MeMoWidgetExtension.appex; sourceTree = BUILT_PRODUCTS_DIR; };
+		EEA6001F2FD3032C001EEAC9 /* WidgetKit.framework */ = {isa = PBXFileReference; lastKnownFileType = wrapper.framework; name = WidgetKit.framework; path = System/Library/Frameworks/WidgetKit.framework; sourceTree = SDKROOT; };
+		EEA600212FD3032C001EEAC9 /* SwiftUI.framework */ = {isa = PBXFileReference; lastKnownFileType = wrapper.framework; name = SwiftUI.framework; path = System/Library/Frameworks/SwiftUI.framework; sourceTree = SDKROOT; };
+		EEA600BF2FD3321C001EEAC9 /* MeMoWidgetExtension.entitlements */ = {isa = PBXFileReference; lastKnownFileType = text.plist.entitlements; path = MeMoWidgetExtension.entitlements; sourceTree = "<group>"; };
+		EECBEE31300E476C00C4EC6F /* MeMoWatchComplicationExtension.appex */ = {isa = PBXFileReference; explicitFileType = "wrapper.app-extension"; includeInIndex = 0; path = MeMoWatchComplicationExtension.appex; sourceTree = BUILT_PRODUCTS_DIR; };
+/* End PBXFileReference section */
+
+/* Begin PBXFileSystemSynchronizedBuildFileExceptionSet section */
+		EE4707EF2F6D10CD00A7FD5A /* Exceptions for "MeMo" folder in "MeMo" target */ = {
+			isa = PBXFileSystemSynchronizedBuildFileExceptionSet;
+			membershipExceptions = (
+				Info.plist,
+				"MeMoWatch Watch App/Models/MeMoWatchApp.swift",
+				"MeMoWatch Watch App/ViewModels/MeMoWatchHomeViewModel.swift",
+				"MeMoWatch Watch App/Views/MeMoWatchCharacterSpriteView.swift",
+				"MeMoWatch Watch App/Views/MeMoWatchHomeView.swift",
+				"MeMoWatch Watch App/WatchAssets.xcassets",
+				MeMoWidget/Assets.xcassets,
+				MeMoWidget/Info.plist,
+				MeMoWidget/MeMoWidget.swift,
+				MeMoWidget/MeMoWidgetBundle.swift,
+				MeMoWidget/MeMoWidgetLiveActivity.swift,
+			);
+			target = EE5661352F6ADE270038F078 /* MeMo */;
+		};
+		EE9644012FC8B18B0055CCFA /* Exceptions for "MeMo" folder in "MeMoWatch Watch App" target */ = {
+			isa = PBXFileSystemSynchronizedBuildFileExceptionSet;
+			membershipExceptions = (
+				"MeMoWatch Watch App/Models/MeMoWatchApp.swift",
+				"MeMoWatch Watch App/Models/MeMoWatchConnectivityBridge.swift",
+				"MeMoWatch Watch App/ViewModels/MeMoWatchHomeViewModel.swift",
+				"MeMoWatch Watch App/Views/MeMoWatchCharacterSpriteView.swift",
+				"MeMoWatch Watch App/Views/MeMoWatchHomeView.swift",
+				"MeMoWatch Watch App/WatchAssets.xcassets",
+			);
+			target = EE9643AC2FC7CF060055CCFA /* MeMoWatch Watch App */;
+		};
+		EEA6003F2FD308A5001EEAC9 /* Exceptions for "MeMo" folder in "MeMoWidgetExtension" target */ = {
+			isa = PBXFileSystemSynchronizedBuildFileExceptionSet;
+			membershipExceptions = (
+				MeMoWidget/Assets.xcassets,
+				MeMoWidget/MeMoWidget.swift,
+				MeMoWidget/MeMoWidgetBundle.swift,
+				MeMoWidget/MeMoWidgetLiveActivity.swift,
+				Models/MeMoCareActivityAttributes.swift,
+			);
+			target = EEA6001C2FD3032C001EEAC9 /* MeMoWidgetExtension */;
+		};
+		EECBEE42300E476D00C4EC6F /* Exceptions for "MeMoWatchComplication" folder in "MeMoWatchComplicationExtension" target */ = {
+			isa = PBXFileSystemSynchronizedBuildFileExceptionSet;
+			membershipExceptions = (
+				Info.plist,
+			);
+			target = EECBEE30300E476C00C4EC6F /* MeMoWatchComplicationExtension */;
+		};
+/* End PBXFileSystemSynchronizedBuildFileExceptionSet section */
+
+/* Begin PBXFileSystemSynchronizedRootGroup section */
+		EE5661382F6ADE270038F078 /* MeMo */ = {
+			isa = PBXFileSystemSynchronizedRootGroup;
+			exceptions = (
+				EE4707EF2F6D10CD00A7FD5A /* Exceptions for "MeMo" folder in "MeMo" target */,
+				EE9644012FC8B18B0055CCFA /* Exceptions for "MeMo" folder in "MeMoWatch Watch App" target */,
+				EEA6003F2FD308A5001EEAC9 /* Exceptions for "MeMo" folder in "MeMoWidgetExtension" target */,
+			);
+			path = MeMo;
+			sourceTree = "<group>";
+		};
+		EECBEE34300E476C00C4EC6F /* MeMoWatchComplication */ = {
+			isa = PBXFileSystemSynchronizedRootGroup;
+			exceptions = (
+				EECBEE42300E476D00C4EC6F /* Exceptions for "MeMoWatchComplication" folder in "MeMoWatchComplicationExtension" target */,
+			);
+			path = MeMoWatchComplication;
+			sourceTree = "<group>";
+		};
+/* End PBXFileSystemSynchronizedRootGroup section */
+
+/* Begin PBXFrameworksBuildPhase section */
+		EE5661332F6ADE270038F078 /* Frameworks */ = {
+			isa = PBXFrameworksBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+				EE4707E02F6CFEF500A7FD5A /* GoogleMobileAds in Frameworks */,
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+		EE9643AA2FC7CF060055CCFA /* Frameworks */ = {
+			isa = PBXFrameworksBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+		EEA6001A2FD3032C001EEAC9 /* Frameworks */ = {
+			isa = PBXFrameworksBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+				EEA600222FD3032C001EEAC9 /* SwiftUI.framework in Frameworks */,
+				EEA600202FD3032C001EEAC9 /* WidgetKit.framework in Frameworks */,
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+		EECBEE04300E3B9000C4EC6F /* Frameworks */ = {
+			isa = PBXFrameworksBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+				EECBEE09300E3B9000C4EC6F /* SwiftUI.framework in Frameworks */,
+				EECBEE08300E3B9000C4EC6F /* WidgetKit.framework in Frameworks */,
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+		EECBEE2E300E476C00C4EC6F /* Frameworks */ = {
+			isa = PBXFrameworksBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+				EECBEE33300E476C00C4EC6F /* SwiftUI.framework in Frameworks */,
+				EECBEE32300E476C00C4EC6F /* WidgetKit.framework in Frameworks */,
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+/* End PBXFrameworksBuildPhase section */
+
+/* Begin PBXGroup section */
+		EE56612D2F6ADE270038F078 = {
+			isa = PBXGroup;
+			children = (
+				EEA600BF2FD3321C001EEAC9 /* MeMoWidgetExtension.entitlements */,
+				EE5661382F6ADE270038F078 /* MeMo */,
+				EE4707712F6CCAA500A7FD5A /* Assets.xcassets */,
+				EE4707ED2F6D0F4400A7FD5A /* MeMo.app */,
+				EE9643AD2FC7CF060055CCFA /* MeMoWatch Watch App.app */,
+				EEA6001D2FD3032C001EEAC9 /* MeMoWidgetExtension.appex */,
+				EECBEE34300E476C00C4EC6F /* MeMoWatchComplication */,
+				EEA6001E2FD3032C001EEAC9 /* Frameworks */,
+				EECBEE31300E476C00C4EC6F /* MeMoWatchComplicationExtension.appex */,
+				EE53B485301F44890032E7BF /* MeMoWatchComplicationExtensionExtension.appex */,
+			);
+			sourceTree = "<group>";
+		};
+		EEA6001E2FD3032C001EEAC9 /* Frameworks */ = {
+			isa = PBXGroup;
+			children = (
+				EEA6001F2FD3032C001EEAC9 /* WidgetKit.framework */,
+				EEA600212FD3032C001EEAC9 /* SwiftUI.framework */,
+			);
+			name = Frameworks;
+			sourceTree = "<group>";
+		};
+/* End PBXGroup section */
+
+/* Begin PBXNativeTarget section */
+		EE5661352F6ADE270038F078 /* MeMo */ = {
+			isa = PBXNativeTarget;
+			buildConfigurationList = EE5661412F6ADE280038F078 /* Build configuration list for PBXNativeTarget "MeMo" */;
+			buildPhases = (
+				EE5661322F6ADE270038F078 /* Sources */,
+				EE5661332F6ADE270038F078 /* Frameworks */,
+				EE5661342F6ADE270038F078 /* Resources */,
+				EE9643BB2FC7CF060055CCFA /* Embed Watch Content */,
+				EEA600342FD3032D001EEAC9 /* Embed Foundation Extensions */,
+			);
+			buildRules = (
+			);
+			dependencies = (
+				EE9643B62FC7CF060055CCFA /* PBXTargetDependency */,
+				EEA6002E2FD3032D001EEAC9 /* PBXTargetDependency */,
+				EECBEDFC300C6EDE00C4EC6F /* PBXTargetDependency */,
+			);
+			fileSystemSynchronizedGroups = (
+				EE5661382F6ADE270038F078 /* MeMo */,
+			);
+			name = MeMo;
+			packageProductDependencies = (
+				EE4707DF2F6CFEF500A7FD5A /* GoogleMobileAds */,
+			);
+			productName = MeMo;
+			productReference = EE4707ED2F6D0F4400A7FD5A /* MeMo.app */;
+			productType = "com.apple.product-type.application";
+		};
+		EE9643AC2FC7CF060055CCFA /* MeMoWatch Watch App */ = {
+			isa = PBXNativeTarget;
+			buildConfigurationList = EE9643B82FC7CF060055CCFA /* Build configuration list for PBXNativeTarget "MeMoWatch Watch App" */;
+			buildPhases = (
+				EE9643A92FC7CF060055CCFA /* Sources */,
+				EE9643AA2FC7CF060055CCFA /* Frameworks */,
+				EE9643AB2FC7CF060055CCFA /* Resources */,
+				EECBEE19300E3B9000C4EC6F /* Embed Foundation Extensions */,
+			);
+			buildRules = (
+			);
+			dependencies = (
+				EECBEE13300E3B9000C4EC6F /* PBXTargetDependency */,
+				EECBEE3D300E476D00C4EC6F /* PBXTargetDependency */,
+			);
+			name = "MeMoWatch Watch App";
+			packageProductDependencies = (
+			);
+			productName = "MeMoWatch Watch App";
+			productReference = EE9643AD2FC7CF060055CCFA /* MeMoWatch Watch App.app */;
+			productType = "com.apple.product-type.application";
+		};
+		EEA6001C2FD3032C001EEAC9 /* MeMoWidgetExtension */ = {
+			isa = PBXNativeTarget;
+			buildConfigurationList = EEA600302FD3032D001EEAC9 /* Build configuration list for PBXNativeTarget "MeMoWidgetExtension" */;
+			buildPhases = (
+				EEA600192FD3032C001EEAC9 /* Sources */,
+				EEA6001A2FD3032C001EEAC9 /* Frameworks */,
+				EEA6001B2FD3032C001EEAC9 /* Resources */,
+			);
+			buildRules = (
+			);
+			dependencies = (
+			);
+			name = MeMoWidgetExtension;
+			packageProductDependencies = (
+			);
+			productName = MeMoWidgetExtension;
+			productReference = EEA6001D2FD3032C001EEAC9 /* MeMoWidgetExtension.appex */;
+			productType = "com.apple.product-type.app-extension";
+		};
+		EECBEE06300E3B9000C4EC6F /* MeMoWatchComplicationExtensionExtension */ = {
+			isa = PBXNativeTarget;
+			buildConfigurationList = EECBEE15300E3B9000C4EC6F /* Build configuration list for PBXNativeTarget "MeMoWatchComplicationExtensionExtension" */;
+			buildPhases = (
+				EECBEE03300E3B9000C4EC6F /* Sources */,
+				EECBEE04300E3B9000C4EC6F /* Frameworks */,
+				EECBEE05300E3B9000C4EC6F /* Resources */,
+			);
+			buildRules = (
+			);
+			dependencies = (
+			);
+			name = MeMoWatchComplicationExtensionExtension;
+			packageProductDependencies = (
+			);
+			productName = MeMoWatchComplicationExtensionExtension;
+			productReference = EE53B485301F44890032E7BF /* MeMoWatchComplicationExtensionExtension.appex */;
+			productType = "com.apple.product-type.app-extension";
+		};
+		EECBEE30300E476C00C4EC6F /* MeMoWatchComplicationExtension */ = {
+			isa = PBXNativeTarget;
+			buildConfigurationList = EECBEE3F300E476D00C4EC6F /* Build configuration list for PBXNativeTarget "MeMoWatchComplicationExtension" */;
+			buildPhases = (
+				EECBEE2D300E476C00C4EC6F /* Sources */,
+				EECBEE2E300E476C00C4EC6F /* Frameworks */,
+				EECBEE2F300E476C00C4EC6F /* Resources */,
+			);
+			buildRules = (
+			);
+			dependencies = (
+			);
+			fileSystemSynchronizedGroups = (
+				EECBEE34300E476C00C4EC6F /* MeMoWatchComplication */,
+			);
+			name = MeMoWatchComplicationExtension;
+			packageProductDependencies = (
+			);
+			productName = MeMoWatchComplicationExtension;
+			productReference = EECBEE31300E476C00C4EC6F /* MeMoWatchComplicationExtension.appex */;
+			productType = "com.apple.product-type.app-extension";
+		};
+/* End PBXNativeTarget section */
+
+/* Begin PBXProject section */
+		EE56612E2F6ADE270038F078 /* Project object */ = {
+			isa = PBXProject;
+			attributes = {
+				BuildIndependentTargetsInParallel = 1;
+				LastSwiftUpdateCheck = 2600;
+				LastUpgradeCheck = 2600;
+				TargetAttributes = {
+					EE5661352F6ADE270038F078 = {
+						CreatedOnToolsVersion = 26.0.1;
+						LastSwiftMigration = 2600;
+					};
+					EE9643AC2FC7CF060055CCFA = {
+						CreatedOnToolsVersion = 26.0.1;
+					};
+					EEA6001C2FD3032C001EEAC9 = {
+						CreatedOnToolsVersion = 26.0.1;
+					};
+					EECBEE06300E3B9000C4EC6F = {
+						CreatedOnToolsVersion = 26.0.1;
+					};
+					EECBEE30300E476C00C4EC6F = {
+						CreatedOnToolsVersion = 26.0.1;
+					};
+				};
+			};
+			buildConfigurationList = EE5661312F6ADE270038F078 /* Build configuration list for PBXProject "MeMo" */;
+			developmentRegion = en;
+			hasScannedForEncodings = 0;
+			knownRegions = (
+				en,
+				Base,
+			);
+			mainGroup = EE56612D2F6ADE270038F078;
+			minimizedProjectReferenceProxies = 1;
+			packageReferences = (
+				EE4707DE2F6CFEF500A7FD5A /* XCRemoteSwiftPackageReference "swift-package-manager-google-mobile-ads" */,
+			);
+			preferredProjectObjectVersion = 77;
+			productRefGroup = EE56612D2F6ADE270038F078;
+			projectDirPath = "";
+			projectRoot = "";
+			targets = (
+				EE5661352F6ADE270038F078 /* MeMo */,
+				EE9643AC2FC7CF060055CCFA /* MeMoWatch Watch App */,
+				EEA6001C2FD3032C001EEAC9 /* MeMoWidgetExtension */,
+				EECBEE06300E3B9000C4EC6F /* MeMoWatchComplicationExtensionExtension */,
+				EECBEE30300E476C00C4EC6F /* MeMoWatchComplicationExtension */,
+			);
+		};
+/* End PBXProject section */
+
+/* Begin PBXResourcesBuildPhase section */
+		EE5661342F6ADE270038F078 /* Resources */ = {
+			isa = PBXResourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+				EE4707742F6CCAA500A7FD5A /* Assets.xcassets in Resources */,
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+		EE9643AB2FC7CF060055CCFA /* Resources */ = {
+			isa = PBXResourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+		EEA6001B2FD3032C001EEAC9 /* Resources */ = {
+			isa = PBXResourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+		EECBEE05300E3B9000C4EC6F /* Resources */ = {
+			isa = PBXResourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+		EECBEE2F300E476C00C4EC6F /* Resources */ = {
+			isa = PBXResourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+/* End PBXResourcesBuildPhase section */
+
+/* Begin PBXSourcesBuildPhase section */
+		EE5661322F6ADE270038F078 /* Sources */ = {
+			isa = PBXSourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+		EE9643A92FC7CF060055CCFA /* Sources */ = {
+			isa = PBXSourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+		EEA600192FD3032C001EEAC9 /* Sources */ = {
+			isa = PBXSourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+		EECBEE03300E3B9000C4EC6F /* Sources */ = {
+			isa = PBXSourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+		EECBEE2D300E476C00C4EC6F /* Sources */ = {
+			isa = PBXSourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+/* End PBXSourcesBuildPhase section */
+
+/* Begin PBXTargetDependency section */
+		EE9643B62FC7CF060055CCFA /* PBXTargetDependency */ = {
+			isa = PBXTargetDependency;
+			target = EE9643AC2FC7CF060055CCFA /* MeMoWatch Watch App */;
+			targetProxy = EE9643B52FC7CF060055CCFA /* PBXContainerItemProxy */;
+		};
+		EEA6002E2FD3032D001EEAC9 /* PBXTargetDependency */ = {
+			isa = PBXTargetDependency;
+			target = EEA6001C2FD3032C001EEAC9 /* MeMoWidgetExtension */;
+			targetProxy = EEA6002D2FD3032D001EEAC9 /* PBXContainerItemProxy */;
+		};
+		EECBEDFC300C6EDE00C4EC6F /* PBXTargetDependency */ = {
+			isa = PBXTargetDependency;
+			target = EE9643AC2FC7CF060055CCFA /* MeMoWatch Watch App */;
+			targetProxy = EECBEDFB300C6EDE00C4EC6F /* PBXContainerItemProxy */;
+		};
+		EECBEE13300E3B9000C4EC6F /* PBXTargetDependency */ = {
+			isa = PBXTargetDependency;
+			target = EECBEE06300E3B9000C4EC6F /* MeMoWatchComplicationExtensionExtension */;
+			targetProxy = EECBEE12300E3B9000C4EC6F /* PBXContainerItemProxy */;
+		};
+		EECBEE3D300E476D00C4EC6F /* PBXTargetDependency */ = {
+			isa = PBXTargetDependency;
+			target = EECBEE30300E476C00C4EC6F /* MeMoWatchComplicationExtension */;
+			targetProxy = EECBEE3C300E476D00C4EC6F /* PBXContainerItemProxy */;
+		};
+/* End PBXTargetDependency section */
+
+/* Begin XCBuildConfiguration section */
+		EE56613F2F6ADE280038F078 /* Debug */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				ALWAYS_SEARCH_USER_PATHS = NO;
+				ASSETCATALOG_COMPILER_GENERATE_SWIFT_ASSET_SYMBOL_EXTENSIONS = YES;
+				CLANG_ANALYZER_NONNULL = YES;
+				CLANG_ANALYZER_NUMBER_OBJECT_CONVERSION = YES_AGGRESSIVE;
+				CLANG_CXX_LANGUAGE_STANDARD = "gnu++20";
+				CLANG_ENABLE_MODULES = YES;
+				CLANG_ENABLE_OBJC_ARC = YES;
+				CLANG_ENABLE_OBJC_WEAK = YES;
+				CLANG_WARN_BLOCK_CAPTURE_AUTORELEASING = YES;
+				CLANG_WARN_BOOL_CONVERSION = YES;
+				CLANG_WARN_COMMA = YES;
+				CLANG_WARN_CONSTANT_CONVERSION = YES;
+				CLANG_WARN_DEPRECATED_OBJC_IMPLEMENTATIONS = YES;
+				CLANG_WARN_DIRECT_OBJC_ISA_USAGE = YES_ERROR;
+				CLANG_WARN_DOCUMENTATION_COMMENTS = YES;
+				CLANG_WARN_EMPTY_BODY = YES;
+				CLANG_WARN_ENUM_CONVERSION = YES;
+				CLANG_WARN_INFINITE_RECURSION = YES;
+				CLANG_WARN_INT_CONVERSION = YES;
+				CLANG_WARN_NON_LITERAL_NULL_CONVERSION = YES;
+				CLANG_WARN_OBJC_IMPLICIT_RETAIN_SELF = YES;
+				CLANG_WARN_OBJC_LITERAL_CONVERSION = YES;
+				CLANG_WARN_OBJC_ROOT_CLASS = YES_ERROR;
+				CLANG_WARN_QUOTED_INCLUDE_IN_FRAMEWORK_HEADER = YES;
+				CLANG_WARN_RANGE_LOOP_ANALYSIS = YES;
+				CLANG_WARN_STRICT_PROTOTYPES = YES;
+				CLANG_WARN_SUSPICIOUS_MOVE = YES;
+				CLANG_WARN_UNGUARDED_AVAILABILITY = YES_AGGRESSIVE;
+				CLANG_WARN_UNREACHABLE_CODE = YES;
+				CLANG_WARN__DUPLICATE_METHOD_MATCH = YES;
+				COPY_PHASE_STRIP = NO;
+				DEBUG_INFORMATION_FORMAT = dwarf;
+				DEVELOPMENT_TEAM = 94262RHUMM;
+				ENABLE_STRICT_OBJC_MSGSEND = YES;
+				ENABLE_TESTABILITY = YES;
+				ENABLE_USER_SCRIPT_SANDBOXING = YES;
+				GCC_C_LANGUAGE_STANDARD = gnu17;
+				GCC_DYNAMIC_NO_PIC = NO;
+				GCC_NO_COMMON_BLOCKS = YES;
+				GCC_OPTIMIZATION_LEVEL = 0;
+				GCC_PREPROCESSOR_DEFINITIONS = (
+					"DEBUG=1",
+					"$(inherited)",
+				);
+				GCC_WARN_64_TO_32_BIT_CONVERSION = YES;
+				GCC_WARN_ABOUT_RETURN_TYPE = YES_ERROR;
+				GCC_WARN_UNDECLARED_SELECTOR = YES;
+				GCC_WARN_UNINITIALIZED_AUTOS = YES_AGGRESSIVE;
+				GCC_WARN_UNUSED_FUNCTION = YES;
+				GCC_WARN_UNUSED_VARIABLE = YES;
+				IPHONEOS_DEPLOYMENT_TARGET = 26.0;
+				LOCALIZATION_PREFERS_STRING_CATALOGS = YES;
+				MTL_ENABLE_DEBUG_INFO = INCLUDE_SOURCE;
+				MTL_FAST_MATH = YES;
+				ONLY_ACTIVE_ARCH = YES;
+				SDKROOT = iphoneos;
+				SWIFT_ACTIVE_COMPILATION_CONDITIONS = "DEBUG $(inherited)";
+				SWIFT_OPTIMIZATION_LEVEL = "-Onone";
+			};
+			name = Debug;
+		};
+		EE5661402F6ADE280038F078 /* Release */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				ALWAYS_SEARCH_USER_PATHS = NO;
+				ASSETCATALOG_COMPILER_GENERATE_SWIFT_ASSET_SYMBOL_EXTENSIONS = YES;
+				CLANG_ANALYZER_NONNULL = YES;
+				CLANG_ANALYZER_NUMBER_OBJECT_CONVERSION = YES_AGGRESSIVE;
+				CLANG_CXX_LANGUAGE_STANDARD = "gnu++20";
+				CLANG_ENABLE_MODULES = YES;
+				CLANG_ENABLE_OBJC_ARC = YES;
+				CLANG_ENABLE_OBJC_WEAK = YES;
+				CLANG_WARN_BLOCK_CAPTURE_AUTORELEASING = YES;
+				CLANG_WARN_BOOL_CONVERSION = YES;
+				CLANG_WARN_COMMA = YES;
+				CLANG_WARN_CONSTANT_CONVERSION = YES;
+				CLANG_WARN_DEPRECATED_OBJC_IMPLEMENTATIONS = YES;
+				CLANG_WARN_DIRECT_OBJC_ISA_USAGE = YES_ERROR;
+				CLANG_WARN_DOCUMENTATION_COMMENTS = YES;
+				CLANG_WARN_EMPTY_BODY = YES;
+				CLANG_WARN_ENUM_CONVERSION = YES;
+				CLANG_WARN_INFINITE_RECURSION = YES;
+				CLANG_WARN_INT_CONVERSION = YES;
+				CLANG_WARN_NON_LITERAL_NULL_CONVERSION = YES;
+				CLANG_WARN_OBJC_IMPLICIT_RETAIN_SELF = YES;
+				CLANG_WARN_OBJC_LITERAL_CONVERSION = YES;
+				CLANG_WARN_OBJC_ROOT_CLASS = YES_ERROR;
+				CLANG_WARN_QUOTED_INCLUDE_IN_FRAMEWORK_HEADER = YES;
+				CLANG_WARN_RANGE_LOOP_ANALYSIS = YES;
+				CLANG_WARN_STRICT_PROTOTYPES = YES;
+				CLANG_WARN_SUSPICIOUS_MOVE = YES;
+				CLANG_WARN_UNGUARDED_AVAILABILITY = YES_AGGRESSIVE;
+				CLANG_WARN_UNREACHABLE_CODE = YES;
+				CLANG_WARN__DUPLICATE_METHOD_MATCH = YES;
+				COPY_PHASE_STRIP = NO;
+				DEBUG_INFORMATION_FORMAT = "dwarf-with-dsym";
+				DEVELOPMENT_TEAM = 94262RHUMM;
+				ENABLE_NS_ASSERTIONS = NO;
+				ENABLE_STRICT_OBJC_MSGSEND = YES;
+				ENABLE_USER_SCRIPT_SANDBOXING = YES;
+				GCC_C_LANGUAGE_STANDARD = gnu17;
+				GCC_NO_COMMON_BLOCKS = YES;
+				GCC_WARN_64_TO_32_BIT_CONVERSION = YES;
+				GCC_WARN_ABOUT_RETURN_TYPE = YES_ERROR;
+				GCC_WARN_UNDECLARED_SELECTOR = YES;
+				GCC_WARN_UNINITIALIZED_AUTOS = YES_AGGRESSIVE;
+				GCC_WARN_UNUSED_FUNCTION = YES;
+				GCC_WARN_UNUSED_VARIABLE = YES;
+				IPHONEOS_DEPLOYMENT_TARGET = 26.0;
+				LOCALIZATION_PREFERS_STRING_CATALOGS = YES;
+				MTL_ENABLE_DEBUG_INFO = NO;
+				MTL_FAST_MATH = YES;
+				SDKROOT = iphoneos;
+				SWIFT_COMPILATION_MODE = wholemodule;
+				VALIDATE_PRODUCT = YES;
+			};
+			name = Release;
+		};
+		EE5661422F6ADE280038F078 /* Debug */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
+				ASSETCATALOG_COMPILER_GLOBAL_ACCENT_COLOR_NAME = AccentColor;
+				CLANG_ENABLE_MODULES = YES;
+				CODE_SIGN_ENTITLEMENTS = MeMo/MeMo.entitlements;
+				CODE_SIGN_STYLE = Automatic;
+				CURRENT_PROJECT_VERSION = 1;
+				DEVELOPMENT_TEAM = 94262RHUMM;
+				ENABLE_PREVIEWS = YES;
+				GENERATE_INFOPLIST_FILE = YES;
+				INFOPLIST_FILE = MeMo/Info.plist;
+				INFOPLIST_KEY_LSApplicationCategoryType = "public.app-category.lifestyle";
+				INFOPLIST_KEY_NSCameraUsageDescription = "写真を撮影して今日の一枚に保存するためにカメラを使用します。";
+				INFOPLIST_KEY_NSHealthShareUsageDescription = "歩数や消費カロリーなどのHealthデータを取得し、アプリ内の育成や表示に利用するために使用します。";
+				INFOPLIST_KEY_NSHealthUpdateUsageDescription = "アプリの機能としてHealthデータとの連携を行うために使用します。";
+				INFOPLIST_KEY_NSLocationAlwaysAndWhenInUseUsageDescription = "ステップ機能の計測中にアプリを切り替えた場合でも、距離とルートをできるだけ継続して記録するため、位置情報を使用します。";
+				INFOPLIST_KEY_NSLocationWhenInUseUsageDescription = "写真撮影時の位置情報取得、ステップ機能での距離計測と走行ルートの保存、およびお散歩機能で雨の日かどうかを判定するために位置情報を使用します。";
+				INFOPLIST_KEY_NSPhotoLibraryAddUsageDescription = "撮影した写真を端末の写真アプリに保存するために使用します。";
+				INFOPLIST_KEY_UIApplicationSceneManifest_Generation = YES;
+				INFOPLIST_KEY_UIApplicationSupportsIndirectInputEvents = YES;
+				INFOPLIST_KEY_UILaunchScreen_Generation = YES;
+				INFOPLIST_KEY_UISupportedInterfaceOrientations = UIInterfaceOrientationPortrait;
+				INFOPLIST_KEY_UISupportedInterfaceOrientations_iPad = "UIInterfaceOrientationLandscapeLeft UIInterfaceOrientationLandscapeRight UIInterfaceOrientationPortrait UIInterfaceOrientationPortraitUpsideDown";
+				IPHONEOS_DEPLOYMENT_TARGET = 18.6;
+				LD_RUNPATH_SEARCH_PATHS = (
+					"$(inherited)",
+					"@executable_path/Frameworks",
+				);
+				MARKETING_VERSION = 1.3.0;
+				PRODUCT_BUNDLE_IDENTIFIER = "com.shota-eeen.MeMo";
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				STRING_CATALOG_GENERATE_SYMBOLS = YES;
+				SUPPORTED_PLATFORMS = "iphoneos iphonesimulator";
+				SUPPORTS_MACCATALYST = NO;
+				SUPPORTS_MAC_DESIGNED_FOR_IPHONE_IPAD = NO;
+				SUPPORTS_XR_DESIGNED_FOR_IPHONE_IPAD = NO;
+				SWIFT_APPROACHABLE_CONCURRENCY = YES;
+				SWIFT_DEFAULT_ACTOR_ISOLATION = MainActor;
+				SWIFT_EMIT_LOC_STRINGS = YES;
+				SWIFT_OPTIMIZATION_LEVEL = "-Onone";
+				SWIFT_UPCOMING_FEATURE_MEMBER_IMPORT_VISIBILITY = YES;
+				SWIFT_VERSION = 5.0;
+				TARGETED_DEVICE_FAMILY = "1,2";
+			};
+			name = Debug;
+		};
+		EE5661432F6ADE280038F078 /* Release */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
+				ASSETCATALOG_COMPILER_GLOBAL_ACCENT_COLOR_NAME = AccentColor;
+				CLANG_ENABLE_MODULES = YES;
+				CODE_SIGN_ENTITLEMENTS = MeMo/MeMo.entitlements;
+				CODE_SIGN_STYLE = Automatic;
+				CURRENT_PROJECT_VERSION = 1;
+				DEVELOPMENT_TEAM = 94262RHUMM;
+				ENABLE_PREVIEWS = YES;
+				GENERATE_INFOPLIST_FILE = YES;
+				INFOPLIST_FILE = MeMo/Info.plist;
+				INFOPLIST_KEY_LSApplicationCategoryType = "public.app-category.lifestyle";
+				INFOPLIST_KEY_NSCameraUsageDescription = "写真を撮影して今日の一枚に保存するためにカメラを使用します。";
+				INFOPLIST_KEY_NSHealthShareUsageDescription = "歩数や消費カロリーなどのHealthデータを取得し、アプリ内の育成や表示に利用するために使用します。";
+				INFOPLIST_KEY_NSHealthUpdateUsageDescription = "アプリの機能としてHealthデータとの連携を行うために使用します。";
+				INFOPLIST_KEY_NSLocationAlwaysAndWhenInUseUsageDescription = "ステップ機能の計測中にアプリを切り替えた場合でも、距離とルートをできるだけ継続して記録するため、位置情報を使用します。";
+				INFOPLIST_KEY_NSLocationWhenInUseUsageDescription = "写真撮影時の位置情報取得、ステップ機能での距離計測と走行ルートの保存、およびお散歩機能で雨の日かどうかを判定するために位置情報を使用します。";
+				INFOPLIST_KEY_NSPhotoLibraryAddUsageDescription = "撮影した写真を端末の写真アプリに保存するために使用します。";
+				INFOPLIST_KEY_UIApplicationSceneManifest_Generation = YES;
+				INFOPLIST_KEY_UIApplicationSupportsIndirectInputEvents = YES;
+				INFOPLIST_KEY_UILaunchScreen_Generation = YES;
+				INFOPLIST_KEY_UISupportedInterfaceOrientations = UIInterfaceOrientationPortrait;
+				INFOPLIST_KEY_UISupportedInterfaceOrientations_iPad = "UIInterfaceOrientationLandscapeLeft UIInterfaceOrientationLandscapeRight UIInterfaceOrientationPortrait UIInterfaceOrientationPortraitUpsideDown";
+				IPHONEOS_DEPLOYMENT_TARGET = 18.6;
+				LD_RUNPATH_SEARCH_PATHS = (
+					"$(inherited)",
+					"@executable_path/Frameworks",
+				);
+				MARKETING_VERSION = 1.3.0;
+				PRODUCT_BUNDLE_IDENTIFIER = "com.shota-eeen.MeMo";
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				STRING_CATALOG_GENERATE_SYMBOLS = YES;
+				SUPPORTED_PLATFORMS = "iphoneos iphonesimulator";
+				SUPPORTS_MACCATALYST = NO;
+				SUPPORTS_MAC_DESIGNED_FOR_IPHONE_IPAD = NO;
+				SUPPORTS_XR_DESIGNED_FOR_IPHONE_IPAD = NO;
+				SWIFT_APPROACHABLE_CONCURRENCY = YES;
+				SWIFT_DEFAULT_ACTOR_ISOLATION = MainActor;
+				SWIFT_EMIT_LOC_STRINGS = YES;
+				SWIFT_UPCOMING_FEATURE_MEMBER_IMPORT_VISIBILITY = YES;
+				SWIFT_VERSION = 5.0;
+				TARGETED_DEVICE_FAMILY = "1,2";
+			};
+			name = Release;
+		};
+		EE9643B92FC7CF060055CCFA /* Debug */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
+				ASSETCATALOG_COMPILER_GLOBAL_ACCENT_COLOR_NAME = AccentColor;
+				CODE_SIGN_STYLE = Automatic;
+				CURRENT_PROJECT_VERSION = 1;
+				DEVELOPMENT_TEAM = 94262RHUMM;
+				ENABLE_PREVIEWS = YES;
+				GENERATE_INFOPLIST_FILE = YES;
+				INFOPLIST_KEY_CFBundleDisplayName = MeMoWatch;
+				INFOPLIST_KEY_UISupportedInterfaceOrientations = "UIInterfaceOrientationPortrait UIInterfaceOrientationPortraitUpsideDown";
+				INFOPLIST_KEY_WKCompanionAppBundleIdentifier = "com.shota-eeen.MeMo";
+				INFOPLIST_KEY_WKRunsIndependentlyOfCompanionApp = NO;
+				LD_RUNPATH_SEARCH_PATHS = (
+					"$(inherited)",
+					"@executable_path/Frameworks",
+				);
+				MARKETING_VERSION = 1.1.3;
+				PRODUCT_BUNDLE_IDENTIFIER = "com.shota-eeen.MeMo.watchkitapp";
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				SDKROOT = watchos;
+				SKIP_INSTALL = YES;
+				STRING_CATALOG_GENERATE_SYMBOLS = YES;
+				SWIFT_APPROACHABLE_CONCURRENCY = YES;
+				SWIFT_DEFAULT_ACTOR_ISOLATION = MainActor;
+				SWIFT_EMIT_LOC_STRINGS = YES;
+				SWIFT_UPCOMING_FEATURE_MEMBER_IMPORT_VISIBILITY = YES;
+				SWIFT_VERSION = 5.0;
+				TARGETED_DEVICE_FAMILY = 4;
+				WATCHOS_DEPLOYMENT_TARGET = 11.6;
+			};
+			name = Debug;
+		};
+		EE9643BA2FC7CF060055CCFA /* Release */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
+				ASSETCATALOG_COMPILER_GLOBAL_ACCENT_COLOR_NAME = AccentColor;
+				CODE_SIGN_STYLE = Automatic;
+				CURRENT_PROJECT_VERSION = 1;
+				DEVELOPMENT_TEAM = 94262RHUMM;
+				ENABLE_PREVIEWS = YES;
+				GENERATE_INFOPLIST_FILE = YES;
+				INFOPLIST_KEY_CFBundleDisplayName = MeMoWatch;
+				INFOPLIST_KEY_UISupportedInterfaceOrientations = "UIInterfaceOrientationPortrait UIInterfaceOrientationPortraitUpsideDown";
+				INFOPLIST_KEY_WKCompanionAppBundleIdentifier = "com.shota-eeen.MeMo";
+				INFOPLIST_KEY_WKRunsIndependentlyOfCompanionApp = NO;
+				LD_RUNPATH_SEARCH_PATHS = (
+					"$(inherited)",
+					"@executable_path/Frameworks",
+				);
+				MARKETING_VERSION = 1.1.3;
+				PRODUCT_BUNDLE_IDENTIFIER = "com.shota-eeen.MeMo.watchkitapp";
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				SDKROOT = watchos;
+				SKIP_INSTALL = YES;
+				STRING_CATALOG_GENERATE_SYMBOLS = YES;
+				SWIFT_APPROACHABLE_CONCURRENCY = YES;
+				SWIFT_DEFAULT_ACTOR_ISOLATION = MainActor;
+				SWIFT_EMIT_LOC_STRINGS = YES;
+				SWIFT_UPCOMING_FEATURE_MEMBER_IMPORT_VISIBILITY = YES;
+				SWIFT_VERSION = 5.0;
+				TARGETED_DEVICE_FAMILY = 4;
+				WATCHOS_DEPLOYMENT_TARGET = 11.6;
+			};
+			name = Release;
+		};
+		EEA600312FD3032D001EEAC9 /* Debug */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				ASSETCATALOG_COMPILER_GLOBAL_ACCENT_COLOR_NAME = AccentColor;
+				ASSETCATALOG_COMPILER_WIDGET_BACKGROUND_COLOR_NAME = WidgetBackground;
+				CODE_SIGN_ENTITLEMENTS = MeMoWidgetExtension.entitlements;
+				CODE_SIGN_STYLE = Automatic;
+				CURRENT_PROJECT_VERSION = 1;
+				DEVELOPMENT_TEAM = 94262RHUMM;
+				GENERATE_INFOPLIST_FILE = YES;
+				INFOPLIST_FILE = MeMo/MeMoWidget/Info.plist;
+				INFOPLIST_KEY_CFBundleDisplayName = MeMoWidget;
+				INFOPLIST_KEY_NSHumanReadableCopyright = "";
+				IPHONEOS_DEPLOYMENT_TARGET = 18.6;
+				LD_RUNPATH_SEARCH_PATHS = (
+					"$(inherited)",
+					"@executable_path/Frameworks",
+					"@executable_path/../../Frameworks",
+				);
+				MARKETING_VERSION = 1.0;
+				PRODUCT_BUNDLE_IDENTIFIER = "com.shota-eeen.MeMo.MeMoWidget";
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				SKIP_INSTALL = YES;
+				STRING_CATALOG_GENERATE_SYMBOLS = YES;
+				SUPPORTED_PLATFORMS = "iphoneos iphonesimulator";
+				SUPPORTS_MACCATALYST = NO;
+				SUPPORTS_MAC_DESIGNED_FOR_IPHONE_IPAD = NO;
+				SUPPORTS_XR_DESIGNED_FOR_IPHONE_IPAD = NO;
+				SWIFT_APPROACHABLE_CONCURRENCY = YES;
+				SWIFT_EMIT_LOC_STRINGS = YES;
+				SWIFT_UPCOMING_FEATURE_MEMBER_IMPORT_VISIBILITY = YES;
+				SWIFT_VERSION = 5.0;
+				TARGETED_DEVICE_FAMILY = "1,2";
+			};
+			name = Debug;
+		};
+		EEA600322FD3032D001EEAC9 /* Release */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				ASSETCATALOG_COMPILER_GLOBAL_ACCENT_COLOR_NAME = AccentColor;
+				ASSETCATALOG_COMPILER_WIDGET_BACKGROUND_COLOR_NAME = WidgetBackground;
+				CODE_SIGN_ENTITLEMENTS = MeMoWidgetExtension.entitlements;
+				CODE_SIGN_STYLE = Automatic;
+				CURRENT_PROJECT_VERSION = 1;
+				DEVELOPMENT_TEAM = 94262RHUMM;
+				GENERATE_INFOPLIST_FILE = YES;
+				INFOPLIST_FILE = MeMo/MeMoWidget/Info.plist;
+				INFOPLIST_KEY_CFBundleDisplayName = MeMoWidget;
+				INFOPLIST_KEY_NSHumanReadableCopyright = "";
+				IPHONEOS_DEPLOYMENT_TARGET = 18.6;
+				LD_RUNPATH_SEARCH_PATHS = (
+					"$(inherited)",
+					"@executable_path/Frameworks",
+					"@executable_path/../../Frameworks",
+				);
+				MARKETING_VERSION = 1.0;
+				PRODUCT_BUNDLE_IDENTIFIER = "com.shota-eeen.MeMo.MeMoWidget";
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				SKIP_INSTALL = YES;
+				STRING_CATALOG_GENERATE_SYMBOLS = YES;
+				SUPPORTED_PLATFORMS = "iphoneos iphonesimulator";
+				SUPPORTS_MACCATALYST = NO;
+				SUPPORTS_MAC_DESIGNED_FOR_IPHONE_IPAD = NO;
+				SUPPORTS_XR_DESIGNED_FOR_IPHONE_IPAD = NO;
+				SWIFT_APPROACHABLE_CONCURRENCY = YES;
+				SWIFT_EMIT_LOC_STRINGS = YES;
+				SWIFT_UPCOMING_FEATURE_MEMBER_IMPORT_VISIBILITY = YES;
+				SWIFT_VERSION = 5.0;
+				TARGETED_DEVICE_FAMILY = "1,2";
+			};
+			name = Release;
+		};
+		EECBEE16300E3B9000C4EC6F /* Debug */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				ASSETCATALOG_COMPILER_GLOBAL_ACCENT_COLOR_NAME = AccentColor;
+				ASSETCATALOG_COMPILER_WIDGET_BACKGROUND_COLOR_NAME = WidgetBackground;
+				CODE_SIGN_STYLE = Automatic;
+				CURRENT_PROJECT_VERSION = 1;
+				DEVELOPMENT_TEAM = 94262RHUMM;
+				GENERATE_INFOPLIST_FILE = YES;
+				INFOPLIST_FILE = MeMoWatchComplication/Info.plist;
+				INFOPLIST_KEY_CFBundleDisplayName = MeMoWatchComplicationExtension;
+				INFOPLIST_KEY_NSHumanReadableCopyright = "";
+				LD_RUNPATH_SEARCH_PATHS = (
+					"$(inherited)",
+					"@executable_path/Frameworks",
+					"@executable_path/../../Frameworks",
+					"@executable_path/../../../../Frameworks",
+				);
+				MARKETING_VERSION = 1.0;
+				PRODUCT_BUNDLE_IDENTIFIER = "com.shota-eeen.MeMo.watchkitapp.MeMoWatchComplicationExtension";
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				SDKROOT = watchos;
+				SKIP_INSTALL = YES;
+				STRING_CATALOG_GENERATE_SYMBOLS = YES;
+				SWIFT_APPROACHABLE_CONCURRENCY = YES;
+				SWIFT_EMIT_LOC_STRINGS = YES;
+				SWIFT_UPCOMING_FEATURE_MEMBER_IMPORT_VISIBILITY = YES;
+				SWIFT_VERSION = 5.0;
+				TARGETED_DEVICE_FAMILY = 4;
+				WATCHOS_DEPLOYMENT_TARGET = 26.0;
+			};
+			name = Debug;
+		};
+		EECBEE17300E3B9000C4EC6F /* Release */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				ASSETCATALOG_COMPILER_GLOBAL_ACCENT_COLOR_NAME = AccentColor;
+				ASSETCATALOG_COMPILER_WIDGET_BACKGROUND_COLOR_NAME = WidgetBackground;
+				CODE_SIGN_STYLE = Automatic;
+				CURRENT_PROJECT_VERSION = 1;
+				DEVELOPMENT_TEAM = 94262RHUMM;
+				GENERATE_INFOPLIST_FILE = YES;
+				INFOPLIST_FILE = MeMoWatchComplication/Info.plist;
+				INFOPLIST_KEY_CFBundleDisplayName = MeMoWatchComplicationExtension;
+				INFOPLIST_KEY_NSHumanReadableCopyright = "";
+				LD_RUNPATH_SEARCH_PATHS = (
+					"$(inherited)",
+					"@executable_path/Frameworks",
+					"@executable_path/../../Frameworks",
+					"@executable_path/../../../../Frameworks",
+				);
+				MARKETING_VERSION = 1.0;
+				PRODUCT_BUNDLE_IDENTIFIER = "com.shota-eeen.MeMo.watchkitapp.MeMoWatchComplicationExtension";
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				SDKROOT = watchos;
+				SKIP_INSTALL = YES;
+				STRING_CATALOG_GENERATE_SYMBOLS = YES;
+				SWIFT_APPROACHABLE_CONCURRENCY = YES;
+				SWIFT_EMIT_LOC_STRINGS = YES;
+				SWIFT_UPCOMING_FEATURE_MEMBER_IMPORT_VISIBILITY = YES;
+				SWIFT_VERSION = 5.0;
+				TARGETED_DEVICE_FAMILY = 4;
+				WATCHOS_DEPLOYMENT_TARGET = 26.0;
+			};
+			name = Release;
+		};
+		EECBEE40300E476D00C4EC6F /* Debug */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				ASSETCATALOG_COMPILER_GLOBAL_ACCENT_COLOR_NAME = AccentColor;
+				ASSETCATALOG_COMPILER_WIDGET_BACKGROUND_COLOR_NAME = WidgetBackground;
+				CODE_SIGN_STYLE = Automatic;
+				CURRENT_PROJECT_VERSION = 1;
+				DEVELOPMENT_TEAM = 94262RHUMM;
+				GENERATE_INFOPLIST_FILE = YES;
+				INFOPLIST_FILE = MeMoWatchComplication/Info.plist;
+				INFOPLIST_KEY_CFBundleDisplayName = MeMoWatchComplication;
+				INFOPLIST_KEY_NSHumanReadableCopyright = "";
+				LD_RUNPATH_SEARCH_PATHS = (
+					"$(inherited)",
+					"@executable_path/Frameworks",
+					"@executable_path/../../Frameworks",
+					"@executable_path/../../../../Frameworks",
+				);
+				MARKETING_VERSION = 1.0;
+				PRODUCT_BUNDLE_IDENTIFIER = "com.shota-eeen.MeMo.watchkitapp.MeMoWatchComplication";
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				SDKROOT = watchos;
+				SKIP_INSTALL = YES;
+				STRING_CATALOG_GENERATE_SYMBOLS = YES;
+				SWIFT_APPROACHABLE_CONCURRENCY = YES;
+				SWIFT_EMIT_LOC_STRINGS = YES;
+				SWIFT_UPCOMING_FEATURE_MEMBER_IMPORT_VISIBILITY = YES;
+				SWIFT_VERSION = 5.0;
+				TARGETED_DEVICE_FAMILY = 4;
+				WATCHOS_DEPLOYMENT_TARGET = 26.0;
+			};
+			name = Debug;
+		};
+		EECBEE41300E476D00C4EC6F /* Release */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				ASSETCATALOG_COMPILER_GLOBAL_ACCENT_COLOR_NAME = AccentColor;
+				ASSETCATALOG_COMPILER_WIDGET_BACKGROUND_COLOR_NAME = WidgetBackground;
+				CODE_SIGN_STYLE = Automatic;
+				CURRENT_PROJECT_VERSION = 1;
+				DEVELOPMENT_TEAM = 94262RHUMM;
+				GENERATE_INFOPLIST_FILE = YES;
+				INFOPLIST_FILE = MeMoWatchComplication/Info.plist;
+				INFOPLIST_KEY_CFBundleDisplayName = MeMoWatchComplication;
+				INFOPLIST_KEY_NSHumanReadableCopyright = "";
+				LD_RUNPATH_SEARCH_PATHS = (
+					"$(inherited)",
+					"@executable_path/Frameworks",
+					"@executable_path/../../Frameworks",
+					"@executable_path/../../../../Frameworks",
+				);
+				MARKETING_VERSION = 1.0;
+				PRODUCT_BUNDLE_IDENTIFIER = "com.shota-eeen.MeMo.watchkitapp.MeMoWatchComplication";
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				SDKROOT = watchos;
+				SKIP_INSTALL = YES;
+				STRING_CATALOG_GENERATE_SYMBOLS = YES;
+				SWIFT_APPROACHABLE_CONCURRENCY = YES;
+				SWIFT_EMIT_LOC_STRINGS = YES;
+				SWIFT_UPCOMING_FEATURE_MEMBER_IMPORT_VISIBILITY = YES;
+				SWIFT_VERSION = 5.0;
+				TARGETED_DEVICE_FAMILY = 4;
+				WATCHOS_DEPLOYMENT_TARGET = 26.0;
+			};
+			name = Release;
+		};
+/* End XCBuildConfiguration section */
+
+/* Begin XCConfigurationList section */
+		EE5661312F6ADE270038F078 /* Build configuration list for PBXProject "MeMo" */ = {
+			isa = XCConfigurationList;
+			buildConfigurations = (
+				EE56613F2F6ADE280038F078 /* Debug */,
+				EE5661402F6ADE280038F078 /* Release */,
+			);
+			defaultConfigurationIsVisible = 0;
+			defaultConfigurationName = Release;
+		};
+		EE5661412F6ADE280038F078 /* Build configuration list for PBXNativeTarget "MeMo" */ = {
+			isa = XCConfigurationList;
+			buildConfigurations = (
+				EE5661422F6ADE280038F078 /* Debug */,
+				EE5661432F6ADE280038F078 /* Release */,
+			);
+			defaultConfigurationIsVisible = 0;
+			defaultConfigurationName = Release;
+		};
+		EE9643B82FC7CF060055CCFA /* Build configuration list for PBXNativeTarget "MeMoWatch Watch App" */ = {
+			isa = XCConfigurationList;
+			buildConfigurations = (
+				EE9643B92FC7CF060055CCFA /* Debug */,
+				EE9643BA2FC7CF060055CCFA /* Release */,
+			);
+			defaultConfigurationIsVisible = 0;
+			defaultConfigurationName = Release;
+		};
+		EEA600302FD3032D001EEAC9 /* Build configuration list for PBXNativeTarget "MeMoWidgetExtension" */ = {
+			isa = XCConfigurationList;
+			buildConfigurations = (
+				EEA600312FD3032D001EEAC9 /* Debug */,
+				EEA600322FD3032D001EEAC9 /* Release */,
+			);
+			defaultConfigurationIsVisible = 0;
+			defaultConfigurationName = Release;
+		};
+		EECBEE15300E3B9000C4EC6F /* Build configuration list for PBXNativeTarget "MeMoWatchComplicationExtensionExtension" */ = {
+			isa = XCConfigurationList;
+			buildConfigurations = (
+				EECBEE16300E3B9000C4EC6F /* Debug */,
+				EECBEE17300E3B9000C4EC6F /* Release */,
+			);
+			defaultConfigurationIsVisible = 0;
+			defaultConfigurationName = Release;
+		};
+		EECBEE3F300E476D00C4EC6F /* Build configuration list for PBXNativeTarget "MeMoWatchComplicationExtension" */ = {
+			isa = XCConfigurationList;
+			buildConfigurations = (
+				EECBEE40300E476D00C4EC6F /* Debug */,
+				EECBEE41300E476D00C4EC6F /* Release */,
+			);
+			defaultConfigurationIsVisible = 0;
+			defaultConfigurationName = Release;
+		};
+/* End XCConfigurationList section */
+
+/* Begin XCRemoteSwiftPackageReference section */
+		EE4707DE2F6CFEF500A7FD5A /* XCRemoteSwiftPackageReference "swift-package-manager-google-mobile-ads" */ = {
+			isa = XCRemoteSwiftPackageReference;
+			repositoryURL = "https://github.com/googleads/swift-package-manager-google-mobile-ads.git";
+			requirement = {
+				kind = upToNextMajorVersion;
+				minimumVersion = 13.1.0;
+			};
+		};
+/* End XCRemoteSwiftPackageReference section */
+
+/* Begin XCSwiftPackageProductDependency section */
+		EE4707DF2F6CFEF500A7FD5A /* GoogleMobileAds */ = {
+			isa = XCSwiftPackageProductDependency;
+			package = EE4707DE2F6CFEF500A7FD5A /* XCRemoteSwiftPackageReference "swift-package-manager-google-mobile-ads" */;
+			productName = GoogleMobileAds;
+		};
+/* End XCSwiftPackageProductDependency section */
+	};
+	rootObject = EE56612E2F6ADE270038F078 /* Project object */;
+}
