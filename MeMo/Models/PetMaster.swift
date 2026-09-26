@@ -180,7 +180,31 @@ enum PetMaster {
         .init(id: "moja_obaoru", name: "オバオル"),
         .init(id: "moja_sun", name: "スン"),
         .init(id: "moja_wanigeeta", name: "ワニゲータ"),
-        .init(id: "moja_wareware", name: "ワレワレ")
+        .init(id: "moja_wareware", name: "ワレワレ"),
+        .init(id: "street_ageriter", name: "アゲリーター"),
+        .init(id: "street_arako", name: "アラコ"),
+        .init(id: "street_borderkeniy", name: "ボーダーケニー"),
+        .init(id: "street_fantosu", name: "ファントス"),
+        .init(id: "street_fax", name: "ファックス"),
+        .init(id: "street_fried", name: "フライド"),
+        .init(id: "street_guin", name: "グイン"),
+        .init(id: "street_hamstar", name: "ハム・スター"),
+        .init(id: "street_hayne", name: "ヘイン"),
+        .init(id: "street_kabarapi", name: "カバラピ"),
+        .init(id: "street_kuro", name: "クロ"),
+        .init(id: "street_monmasu", name: "モンマス"),
+        .init(id: "street_rabi", name: "ラビ"),
+        .init(id: "street_raccun", name: "ラックン"),
+        .init(id: "street_raian", name: "ライアン"),
+        .init(id: "street_rattyu", name: "ラッチュ"),
+        .init(id: "street_rautan", name: "ラウタン"),
+        .init(id: "street_reita", name: "レイタ"),
+        .init(id: "street_rigora", name: "リゴラ"),
+        .init(id: "street_rissu", name: "リッス"),
+        .init(id: "street_sankuma", name: "サンクマ"),
+        .init(id: "street_spiky", name: "スパイキー"),
+        .init(id: "street_yarn", name: "ヤーン"),
+        .init(id: "street_yuma", name: "ユーマ")
     ]
 
     static func assetName(for petID: String) -> String {
@@ -280,6 +304,30 @@ enum PetMaster {
         case "moja_sun": return "sun"
         case "moja_wanigeeta": return "wanigeeta"
         case "moja_wareware": return "wareware"
+        case "street_ageriter": return "ageriter"
+        case "street_arako": return "arako"
+        case "street_borderkeniy": return "borderkeniy"
+        case "street_fantosu": return "fantosu"
+        case "street_fax": return "fax"
+        case "street_fried": return "fried"
+        case "street_guin": return "guin"
+        case "street_hamstar": return "hamstar"
+        case "street_hayne": return "hayne"
+        case "street_kabarapi": return "kabarapi"
+        case "street_kuro": return "kuro"
+        case "street_monmasu": return "monmasu"
+        case "street_rabi": return "rabi"
+        case "street_raccun": return "raccun"
+        case "street_raian": return "raian"
+        case "street_rattyu": return "rattyu"
+        case "street_rautan": return "rautan"
+        case "street_reita": return "reita"
+        case "street_rigora": return "rigora"
+        case "street_rissu": return "rissu"
+        case "street_sankuma": return "sankuma"
+        case "street_spiky": return "spiky"
+        case "street_yarn": return "yarn"
+        case "street_yuma": return "yuma"
         default: return "person"
         }
     }
@@ -292,6 +340,8 @@ enum PetMaster {
         case let id where id.hasPrefix("reward_"):
             return "\(base)_wc"
         case let id where id.hasPrefix("moja_"):
+            return "\(base)_wc"
+        case let id where id.hasPrefix("street_"):
             return "\(base)_wc"
         default:
             return base
@@ -306,6 +356,8 @@ enum PetMaster {
         case let id where id.hasPrefix("reward_"):
             return ["\(base)_idle_blink_0001", "\(base)_idle_blink_0002"]
         case let id where id.hasPrefix("moja_"):
+            return ["\(base)_idle_blink_0001", "\(base)_idle_blink_0002"]
+        case let id where id.hasPrefix("street_"):
             return ["\(base)_idle_blink_0001", "\(base)_idle_blink_0002"]
         default:
             return []
