@@ -1,4 +1,4 @@
-# Task: <short title>
+# Task: <短いタイトル>
 
 ## Status
 
@@ -6,11 +6,11 @@
 
 ## Goal
 
-Describe the user-visible result.
+ユーザーから見た最終的な結果を書く。
 
 ## Background
 
-Explain why this change is needed and how the current behavior works.
+なぜ必要なのか、現在どのように動いているかを書く。
 
 ## Scope
 
@@ -22,21 +22,40 @@ Explain why this change is needed and how the current behavior works.
 
 - ...
 
-## Existing implementation to inspect first
+## 最初に確認する既存実装
 
-- `path/to/file.swift`
-- relevant types/functions
-- related persistence keys
-- related assets
-- related Watch/Widget code if applicable
+現在の path を使用する。
+
+例:
+
+- `MeMo/Models/...`
+- `MeMo/Views/...`
+- `MeMo/Managers/...`
+- `MeMo/MeMoWatch Watch App/...`
+- `MeMo/MeMoWidget/...`
+- `MeMoWatchComplication/...`
+- `MeMo.xcodeproj/project.pbxproj`
+
+記載するもの:
+
+- relevant source
+- type / function
+- persistence key
+- asset
+- Watch / Widget / Complication 関連
 
 ## Required assets
 
-| Asset | Expected name/path | Notes |
-|---|---|---|
-| | | |
+| Asset | Runtime name/path | Git 管理 | Notes |
+|---|---|---|---|
+| | | Yes / No | |
 
-Do not rename existing assets unless explicitly required.
+注意:
+
+- main `Assets.xcassets` は Git 管理外
+- Watch / Widget Asset Catalog も Git 管理外
+- existing Asset name を理由なく変更しない
+- Cloud で見えない Asset は local verification を明記
 
 ## Functional requirements
 
@@ -50,15 +69,13 @@ Do not rename existing assets unless explicitly required.
 
 ## Persistence requirements
 
-Choose one:
+いずれかを選択。
 
 ### No new persistence
 
-No stored state should change.
+保存状態は変更しない。
 
 ### Additive persistence
-
-New key/model/field:
 
 - name:
 - type:
@@ -74,62 +91,78 @@ New format:
 
 Migration algorithm:
 
-Rollback/failure behavior:
+Rollback / failure behavior:
 
 ## Existing-user compatibility
 
-Explicitly describe what an existing installed user may already have.
+既存インストールユーザーが保持している可能性がある状態を書く。
 
-Examples:
+例:
 
-- existing SwiftData records
-- non-zero gacha pity
+- SwiftData records
+- gacha pity
 - claimed rewards
-- existing photos
-- existing fishing points
-- active walk/event state
-- Watch/Widget shared snapshots
+- photos
+- fishing points
+- active walk / event state
+- Watch / Widget shared snapshot
 
-The implementation must preserve these values.
+これらを維持すること。
 
-## Files that must not be changed unnecessarily
+## Xcode / target impact
+
+- affected target(s):
+- `MeMo.xcodeproj` 変更必要?:
+- Target Membership change?:
+- entitlements / capability change?:
+- Swift Package change?:
+- ignored/local Asset dependency?:
+
+不明な場合は Codex が project を確認してから実装すること。
+
+## 不要に変更してはいけない file
 
 - ...
 
 ## Acceptance criteria
 
 - [ ] ...
-- [ ] existing user data remains readable
-- [ ] relevant targets build
-- [ ] no unrelated behavior changed
+- [ ] existing user data が読める
+- [ ] unrelated behavior が変わらない
+- [ ] project file change が必要最小限
+- [ ] ignored/local Asset requirement が明記されている
+- [ ] Cloud で build できない場合、affected target を local Xcode で確認する
 
 ## Verification
 
-### Build
+### Codex Cloud
 
-- affected target(s):
-- expected scheme(s), if known:
+- command / check:
+- test:
+- static validation:
+- usable Xcode toolchain がある場合のみ build:
 
-### Tests
+### Local Xcode
 
-- ...
-
-### Manual checks
-
-- ...
+- affected scheme:
+- Simulator / device:
+- Target Membership:
+- Asset:
+- signing / capability:
 
 ### Upgrade test
 
-Describe how to verify behavior with pre-existing data.
+Existing data を使った update 後の確認方法を書く。
 
-## Codex final report requirements
+## Codex final report
 
-Codex must report:
+Codex は以下を報告すること。
 
 - changed files
 - implementation summary
 - persistence impact
-- build result
-- test result
-- migration/upgrade verification
+- Xcode / target impact
+- Cloud verification
+- local Xcode verification required
+- migration / upgrade verification
 - remaining risks
