@@ -1,49 +1,97 @@
-# MeMo Codex Documentation Pack
+# MeMo Codex ドキュメント
 
-Prepared from GitHub repository `shota-suzuki-eeen/MeMo`.
+Repository:
 
-Audited snapshot:
+`shota-suzuki-eeen/MeMo`
 
-`92563441704cf11712b17705b77b8b18f83c430f` (`main`, 2026-09-26)
+基準コミット:
 
-## Contents
+`448bb17895b60b4bcbd54690c327c8aa22bbadbe`
 
-- `AGENTS.md` — repository-wide instructions for Codex
-- `docs/ARCHITECTURE.md` — project architecture/navigation
-- `docs/PERSISTENCE_COMPATIBILITY.md` — released-user data compatibility contract
-- `docs/REPOSITORY_MAP.md` — audited GitHub source tree map
-- `docs/CODEX_WORKFLOW.md` — implementation workflow
-- `docs/TESTING_RELEASE_CHECKLIST.md` — regression/release checklist
-- `docs/CODEX_START_PROMPT.md` — reusable first instruction for Codex
-- `docs/tasks/TASK_TEMPLATE.md` — template for individual implementation tasks
+更新日:
 
-<!--AGENTS.md = 常時ルール-->
-<!--ARCHITECTURE.md = 設計理解-->
-<!--REPOSITORY_MAP.md = ファイル探索-->
-<!--PERSISTENCE_COMPATIBILITY.md = データ保護-->
-<!--CODEX_WORKFLOW.md = 実装手順-->
-<!--TESTING_RELEASE_CHECKLIST.md = 検証-->
-<!--CODEX_START_PROMPT.md = Codex開始指示-->
-<!--TASK_TEMPLATE.md = 個別作業仕様-->
+`2026-09-26`
 
-## Existing repository document
+## ファイル構成
 
-The repository already contains:
+- `AGENTS.md` — Codex が常に守る最上位ルール
+- `docs/ARCHITECTURE.md` — architecture / file navigation
+- `docs/PERSISTENCE_COMPATIBILITY.md` — 既存ユーザーデータ保護ルール
+- `docs/REPOSITORY_MAP.md` — repository map
+- `docs/CODEX_WORKFLOW.md` — Codex Cloud 実装手順
+- `docs/TESTING_RELEASE_CHECKLIST.md` — regression / release checklist
+- `docs/CODEX_START_PROMPT.md` — Codex 開始時の共通 prompt
+- `docs/tasks/TASK_TEMPLATE.md` — feature task template
+
+既存 policy:
 
 `SwiftDataOperationPolicy.md`
 
-Keep it at the repository root. `AGENTS.md` intentionally requires Codex to read it.
+これは repository root に維持してください。
 
-## How to install
+---
 
-Copy `AGENTS.md` and the `docs/` directory into the repository root.
+## 現在の Repository 構成
 
-Do not delete or replace existing persistence-policy files.
+```text
+AGENTS.md
+SwiftDataOperationPolicy.md
+docs/
+MeMo.xcodeproj/
+MeMo/
+MeMoWatchComplication/
+MeMoWidgetExtension.entitlements
+```
 
-## Important snapshot limitation
+Application source は `MeMo/` 配下です。
 
-The audited GitHub tree does not show a complete Xcode project/workspace or main
-application asset catalog. Watch and Widget asset catalogs are gitignored.
+---
 
-Codex must inspect the local Xcode working copy before changing target membership,
-assets, signing, capabilities, or build settings.
+## Codex Cloud から見えるもの
+
+Git 管理されているため確認可能:
+
+- `MeMo.xcodeproj/project.pbxproj`
+- shared scheme
+- `Package.resolved`
+- `MeMo/` source
+- tracked Watch / Widget / Complication source
+- tracked entitlements / plist
+
+---
+
+## Codex Cloud から見えない可能性があるもの
+
+意図的に Git 管理外:
+
+- `Assets.xcassets/`
+- `MeMo_material/`
+- `MeMo-Support/`
+- `MeMo/MeMoWatch Watch App/WatchAssets.xcassets/`
+- `MeMo/MeMoWidget/Assets.xcassets/`
+
+これらを不足ファイルとして勝手に再作成しないでください。
+
+---
+
+## 基本運用
+
+Codex Cloud:
+
+- repository inspection
+- implementation
+- persistence compatibility review
+- Xcode project metadata review
+- diff review
+- Cloud で利用可能な test / static check
+- usable Xcode toolchain がある場合のみ build
+
+Local Xcode:
+
+- Simulator / device
+- ignored Asset
+- signing / capability
+- target-specific build
+- 最終リリース確認
+
+Codex は確認できなかった内容を「成功」とみなさず、local verification required として報告してください。

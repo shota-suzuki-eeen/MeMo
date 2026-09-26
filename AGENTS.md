@@ -1,142 +1,176 @@
-//
-//  AGENTS.md
-//  MeMo
-//
-//  Created by shota suzuki on 2026/09/26.
-//
+# MeMo Codex 作業ルール
 
-# MeMo Codex Instructions
+## 目的
 
-## Scope
-
-This file defines repository-wide implementation rules for MeMo.
+このファイルは、MeMo リポジトリ全体に適用する Codex 向けの最上位ルールです。
 
 - Repository: `shota-suzuki-eeen/MeMo`
-- Audited branch: `main`
-- Audited Git snapshot: `92563441704cf11712b17705b77b8b18f83c430f`
-- Audit date: `2026-09-26`
-- Product status: **released application**
-- Primary client: iOS
-- Related targets/features visible in the repository: Apple Watch, Widget / Live Activity, HealthKit, WeatherKit, AdMob, SpriteKit-based event game, local photo memories, walking route records.
+- Branch: `main`
+- 基準コミット: `448bb17895b60b4bcbd54690c327c8aa22bbadbe`
+- 更新日: `2026-09-26`
+- 状態: **すでにリリース済みのアプリ**
 
-Codex must read this file before changing code.
+Codex はコード変更前に必ずこのファイルを読むこと。
 
 ---
 
-# 1. Highest-priority rule: preserve existing user data
+# 1. 最優先ルール：既存ユーザーのデータを保護する
 
-MeMo is already released. Existing users may have long-lived local data.
+MeMo はすでにリリース済みです。
 
-**Data compatibility has higher priority than refactoring quality, naming consistency, architectural cleanup, or code simplification.**
+そのため、以下よりも **既存ユーザーの保存データ互換性を優先**してください。
 
-Before changing any persistent state, Codex must inspect the current implementation and confirm that existing users can still read the data produced by previous released versions.
+- リファクタリングの綺麗さ
+- 命名統一
+- アーキテクチャ整理
+- コード簡略化
+- 不要そうに見える旧仕様の削除
 
-Do not assume that a value is safe to rename merely because its current Swift name looks outdated.
+既存の保存名やキーが古い名称に見えても、リリース済みデータとの互換性のために意図的に残している可能性があります。
 
-Examples already present in the codebase include legacy backing names whose semantic meaning has changed while their persistent names intentionally remain unchanged.
+永続化に関係する変更を行う前に、必ず現在の読み書き箇所と旧データ互換性を確認してください。
 
 ---
 
-# 2. Persistent data contracts that must not be changed casually
+# 2. 現在のリポジトリ構成
 
-The following are compatibility contracts.
+Git リポジトリ直下には、現在 `MeMo.xcodeproj` も含まれています。
+
+主要な管理対象:
+
+- `MeMo.xcodeproj/`
+- `MeMo/`
+- `MeMoWatchComplication/`
+- `MeMoWidgetExtension.entitlements`
+- `AGENTS.md`
+- `SwiftDataOperationPolicy.md`
+- `docs/`
+
+アプリ本体の主要ソース:
+
+- `MeMo/Models/`
+- `MeMo/Managers/`
+- `MeMo/ViewModels/`
+- `MeMo/Views/`
+- `MeMo/MeMoWatch Watch App/`
+- `MeMo/MeMoWidget/`
+- `MeMo/BGMs/`
+- `MeMo/Movie/`
+
+旧構成の `Models/...` や `Views/...` を使用せず、現在の `MeMo/...` パスを使用してください。
+
+---
+
+# 3. 意図的に Git 管理外にしているもの
+
+以下は意図的に Git 管理対象から外しています。
+
+- `Assets.xcassets/`
+- `MeMo_material/`
+- `MeMo-Support/`
+- `MeMo/MeMoWatch Watch App/WatchAssets.xcassets/`
+- `MeMo/MeMoWidget/Assets.xcassets/`
+- `xcuserdata`
+- `*.xcuserstate`
+
+Codex Cloud ではこれらが存在しない可能性があります。
+
+その場合:
+
+- 不足ファイルとして勝手に再作成しない
+- ダミー Asset Catalog を作らない
+- 既存 Asset 名を推測で変更しない
+- Source / Xcode project 上の参照名を優先して確認する
+- 実アセット確認が必要な場合は「ローカル Xcode で確認が必要」と明記する
+- 大容量 Asset を勝手に Git 管理へ追加しない
+
+---
+
+# 4. 永続化に関する互換性ルール
 
 ## SwiftData
 
-Current `.modelContainer(for:)` registration contains:
+現在 `.modelContainer(for:)` に登録されているモデル:
 
 - `AppState`
 - `TodayPhotoEntry`
 - `WorkoutSessionRecord`
 
-Do not, without an explicit migration plan:
+明示的な移行設計なしに以下を変更しないこと。
 
-- rename an existing `@Model`
-- remove an existing `@Model`
-- remove a registered model from `.modelContainer(for:)`
-- rename a stored property
-- delete a stored property
-- change a stored property's type
-- change uniqueness semantics
-- reinterpret existing stored data incompatibly
+- 既存 `@Model` 名
+- 既存 `@Model` の削除
+- `.modelContainer(for:)` からの既存モデル削除
+- 既存保存プロパティ名
+- 既存保存プロパティの型
+- 既存保存プロパティの削除
+- uniqueness の意味
+- 既存保存値の意味
 
-If a new field is required, prefer an additive, backward-compatible change. If migration risk is unclear, stop the implementation at the design/report stage rather than guessing.
-
-Read the existing root document `SwiftDataOperationPolicy.md` before modifying any SwiftData model.
+SwiftData を変更する場合は必ず `SwiftDataOperationPolicy.md` を読むこと。
 
 ## UserDefaults / @AppStorage
 
-Existing keys are public compatibility identifiers for released users.
+既存の literal key はリリース済みユーザーとの互換性識別子です。
 
-Do not:
+以下を行わないこと。
 
-- rename an existing key string
-- replace a legacy key with a new key and stop reading the old key
-- change an encoded payload to an incompatible shape
-- reset a key simply because a new feature is introduced
-- reuse an existing key for a different semantic meaning
+- 既存 key の文字列変更
+- 新 key を導入して旧 key の読み込みを停止
+- 保存 payload を旧データが読めない形式へ変更
+- 新機能追加時に既存 key を初期化
+- 既存 key を別の意味に再利用
 
-When a new key supersedes an old key:
+既存コードに fallback / dual-read / dual-write がある場合は維持してください。
 
-1. Continue to read the old key.
-2. Migrate safely or provide fallback behavior.
-3. Preserve dual-read / dual-write behavior where existing code intentionally does so.
-4. Do not remove the legacy path until a separately approved migration policy exists.
+## Documents
 
-## Documents storage
-
-`TodayPhotoEntry` stores metadata while image bytes are stored under:
+`TodayPhotoEntry` の画像データは以下に保存されています。
 
 `Documents/memories/`
 
-Do not change without migration:
+移行処理なしに以下を変更しないこと。
 
-- `memories` directory name
-- existing file-name rules
-- JPEG representation expectations
-- the relationship between `TodayPhotoEntry.fileName` and the physical file
+- `memories` ディレクトリ名
+- fileName の命名ルール
+- JPEG 前提
+- `TodayPhotoEntry.fileName` と実ファイルの対応関係
 
-## Encoded Data / JSON
+## JSON / Data / Codable
 
-Several models persist JSON-encoded data in `Data` properties or UserDefaults.
+既存保存データが decode できなくなる変更は禁止です。
 
-Do not change a Codable payload so old values become undecodable.
+必要に応じて以下を使用してください。
 
-Use one or more of:
-
-- additive optional fields
+- Optional field の追加
 - `decodeIfPresent`
-- explicit versioning
+- versioning
 - old-format fallback
-- a tested migration path
+- 明示的な migration
 
-## Cross-target shared identifiers
+## Cross-target identifier
 
-Treat the following as compatibility contracts:
+以下は互換性契約として扱うこと。
 
-- App Group identifier currently referenced by code: `group.com.shota.CalPet`
-- existing Widget kind identifiers
-- existing App Group UserDefaults keys
-- existing WatchConnectivity message / context keys
-- Live Activity identifiers and state contracts
+- App Group: `group.com.shota.CalPet`
+- Widget kind
+- App Group UserDefaults key
+- WatchConnectivity message/context key
+- Live Activity identifier / state contract
 
-Do not rename them as part of cleanup.
+整理目的で変更しないこと。
 
 ---
 
-# 3. Required persistence preflight before implementation
+# 5. 永続化変更前の確認
 
-Before editing a feature that reads or writes state, Codex must search the repository for:
+保存状態に関係する機能を変更する前に、少なくとも以下を検索してください。
 
 - `@Model`
 - `.modelContainer`
 - `UserDefaults`
 - `@AppStorage`
 - `forKey:`
-- `data(forKey:`
-- `string(forKey:`
-- `integer(forKey:`
-- `bool(forKey:`
 - `suiteName:`
 - `FileManager`
 - `.documentDirectory`
@@ -146,112 +180,126 @@ Before editing a feature that reads or writes state, Codex must search the repos
 - `WCSession`
 - `sendMessage`
 - `updateApplicationContext`
-- Widget kind identifiers
-- App Group identifiers
+- Widget kind
+- App Group identifier
 
-For every persistence-affecting task, include a short compatibility impact section in the final report.
-
----
-
-# 4. Architecture and implementation rules
-
-Prefer the current architecture over introducing parallel systems.
-
-Current organization includes:
-
-- `Models/` — domain state, persistence, policies, feature stores
-- `Managers/` — system/service coordination
-- `ViewModels/` — presentation/domain coordination
-- `Views/` — SwiftUI/SpriteKit UI
-- `MeMoWatch Watch App/` — Watch application and connectivity
-- `MeMoWidget/` — Widget / Live Activity
-- `BGMs/` — bundled audio resources
-- `Movie/` — widget snapshot publishing support
-
-Implementation rules:
-
-- Modify existing abstractions when they already own the responsibility.
-- Do not create a second persistence mechanism for the same state.
-- Do not move persistence responsibilities during an unrelated feature task.
-- Avoid broad refactors while implementing a feature.
-- Avoid renaming files/types merely for style consistency.
-- Preserve existing public/internal call sites unless the task explicitly requires a change.
-- Prefer small, reviewable changes.
-- Keep feature-specific state namespaced.
-- Preserve existing legacy fallback logic.
+永続化に関係するタスクでは、最終報告に必ず「既存ユーザーデータへの影響」を含めてください。
 
 ---
 
-# 5. GitHub snapshot limitation
+# 6. 実装方針
 
-The audited GitHub tree does not expose a complete Xcode project/workspace or the main asset catalog.
+既存アーキテクチャを優先してください。
 
-In addition, `.gitignore` excludes:
+- `MeMo/Models/` — 状態・永続化・Policy・Store
+- `MeMo/Managers/` — OS / service coordination
+- `MeMo/ViewModels/` — presentation / domain coordination
+- `MeMo/Views/` — SwiftUI / SpriteKit UI
+- `MeMo/MeMoWatch Watch App/` — Watch app / WatchConnectivity
+- `MeMo/MeMoWidget/` — Widget / Live Activity
+- `MeMoWatchComplication/` — Complication
+- `MeMo/BGMs/` — audio
+- `MeMo/Movie/` — Widget snapshot support
 
-- `MeMoWatch Watch App/WatchAssets.xcassets/`
-- `MeMoWidget/Assets.xcassets/`
+ルール:
 
-Therefore, before implementation Codex must inspect the **local working copy** and confirm:
-
-- actual `.xcodeproj` / `.xcworkspace`
-- build targets and target membership
-- local asset catalogs
-- bundle resources
-- signing / capabilities configuration
-- local files not represented in the GitHub snapshot
-
-Do not infer target membership only from the GitHub tree.
-
----
-
-# 6. Build and verification
-
-After implementation:
-
-1. Inspect `git diff`.
-2. Confirm no unrelated persistence keys or stored properties changed.
-3. Build the affected iOS target.
-4. Build affected Widget / Watch targets when touched.
-5. Resolve compile errors caused by the change.
-6. Run available tests.
-7. Perform migration/compatibility checks if persistent data changed.
-8. Report exactly what was changed.
-
-Do not silently delete warnings that indicate data migration or decoding problems.
+- 既存 owner が存在する場合はそこへ追加する
+- 同じ state のために新しい persistence system を並立させない
+- unrelated refactor を行わない
+- style 統一だけを目的とした rename を行わない
+- legacy fallback を維持する
+- 小さく review 可能な diff を優先する
 
 ---
 
-# 7. Required final report from Codex
+# 7. Xcode project の扱い
 
-Every completed implementation should report:
+`MeMo.xcodeproj` は Git 管理され、Codex Cloud から参照可能です。
+
+Target / resource / package / capability / build setting に関係する変更では、必要に応じて以下を確認してください。
+
+- `MeMo.xcodeproj/project.pbxproj`
+- `MeMo.xcodeproj/xcshareddata/xcschemes/`
+- `MeMo.xcodeproj/project.xcworkspace/xcshareddata/swiftpm/Package.resolved`
+- relevant entitlements
+- relevant `Info.plist`
+
+Folder 名だけで Target Membership を推測しないでください。
+
+この project は file-system-synchronized group を使用しています。
+新規 Swift file を追加するたびに従来型の PBX file reference を手動追加する前提ではありません。
+
+Source-only の変更で不要な場合は `project.pbxproj` を変更しないでください。
+
+Git 管理外 Asset が project から参照されていても、Codex Cloud 上に存在しないことだけを理由に project broken と判断しないでください。
+
+---
+
+# 8. Codex Cloud での検証
+
+実装後:
+
+1. `git diff` を確認
+2. 永続化 key / stored property に不要な変更がないか確認
+3. Xcode project への影響を確認
+4. Cloud 環境で利用可能な test / static check を実行
+5. Xcode toolchain が実際に利用可能な場合のみ build
+6. 実施できたこと / できなかったことを明確に分けて報告
+
+Build を実行して成功していない限り、
+
+- iOS app
+- Widget
+- Watch app
+- Complication
+
+が build 成功したと書かないでください。
+
+Cloud で Xcode / Simulator / ignored Asset を確認できない場合は、ローカル Xcode で必要な確認内容を明記してください。
+
+---
+
+# 9. Codex の最終報告形式
 
 ## Changed files
-List every modified/created/deleted file.
+
+変更・追加・削除した file を列挙。
 
 ## Implementation
-Summarize functional changes.
+
+実装内容を簡潔に説明。
 
 ## Persistence compatibility
-State one of:
+
+以下のいずれかを明記。
 
 - `No persistent-data contract changed.`
 - `Persistent data changed additively; backward compatibility verified as follows: ...`
 - `Migration required; implementation not safe to release until: ...`
 
-## Verification
-Include:
+## Xcode / target impact
 
-- build command/result
-- tests run/result
-- affected targets
-- manual checks performed
+- affected target(s)
+- `MeMo.xcodeproj` 変更有無
+- Target Membership / Build Settings / Capability 変更有無
+- ignored/local Asset 依存有無
+
+## Verification
+
+- 実際に実行した command
+- build result
+- test / check result
+- ローカルで必要な追加確認
 
 ## Remaining risks
-List any unverified behavior, especially:
 
-- SwiftData migration
-- UserDefaults migration
-- Documents files
-- Widget/App Group state
+特に以下を明記。
+
+- SwiftData
+- UserDefaults
+- Documents
+- Widget / App Group
 - WatchConnectivity
-- StoreKit/entitlements
+- StoreKit / entitlements
+- Target Membership
+- ignored/local Assets

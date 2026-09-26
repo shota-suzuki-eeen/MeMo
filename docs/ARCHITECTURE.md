@@ -1,27 +1,75 @@
-# MeMo Architecture Guide
+# MeMo アーキテクチャガイド
 
-## Snapshot
+## 基準
 
-This guide was prepared from GitHub `main` at commit `92563441704cf11712b17705b77b8b18f83c430f` on 2026-09-26.
+- Repository: `shota-suzuki-eeen/MeMo`
+- Branch: `main`
+- 基準コミット: `448bb17895b60b4bcbd54690c327c8aa22bbadbe`
+- 更新日: `2026-09-26`
 
-It is a navigation document for Codex. It is not a substitute for reading the implementation before changing it.
+このファイルは Codex が実装場所を把握するためのナビゲーション用です。
+実際に変更する前には必ず現在の source を確認してください。
 
 ---
 
-## Application entry point
+## Repository root
 
-`Models/MeMoApp.swift`
+```text
+AGENTS.md
+SwiftDataOperationPolicy.md
+docs/
+MeMo.xcodeproj/
+MeMo/
+MeMoWatchComplication/
+MeMoWidgetExtension.entitlements
+```
 
-Responsibilities visible in the current source:
+現在は `MeMo.xcodeproj` も Git 管理されています。
 
-- SwiftUI application entry
-- global `BGMManager`
+Application source は `MeMo/` 配下です。
+
+例:
+
+- 旧: `Models/AppState.swift`
+- 現在: `MeMo/Models/AppState.swift`
+
+---
+
+## Xcode project
+
+`MeMo.xcodeproj`
+
+管理対象:
+
+- `project.pbxproj`
+- shared schemes
+- `Package.resolved`
+
+現在確認済みの Target:
+
+- `MeMo`
+- `MeMoWatch Watch App`
+- `MeMoWidgetExtension`
+- `MeMoWatchComplicationExtension`
+- `MeMoWatchComplicationExtensionExtension`
+
+Target Membership や Build Settings は folder 構成だけで判断せず、`project.pbxproj` を確認してください。
+
+---
+
+## App entry point
+
+`MeMo/Models/MeMoApp.swift`
+
+主な責務:
+
+- SwiftUI app entry
+- global manager setup
 - AdMob startup
-- iPad phone-canvas adaptation
-- appearance preference via `@AppStorage`
-- SwiftData model container registration
+- appearance preference
+- SwiftData model container
 
-Current SwiftData registration:
+現在の SwiftData registration:
 
 ```swift
 .modelContainer(for: [
@@ -31,50 +79,46 @@ Current SwiftData registration:
 ])
 ```
 
-This list is a persistence contract for released users.
+これはリリース済みユーザーとの永続化契約です。
 
 ---
 
-## Core persistent models
+## Core persistent model
 
 ### `AppState`
 
-`Models/AppState.swift`
+`MeMo/Models/AppState.swift`
 
-Central application state, including:
+主な内容:
 
-- step currency / pending step state
-- HealthKit sync timestamps
-- fixed goal backing storage
+- step currency
+- HealthKit sync state
 - cached today values
-- fullness state
-- feed / bath / toilet scheduling state
-- toilet-poop encoded state
-- current pet and owned pet IDs
-- notification preferences
+- fullness / care scheduling
+- current / owned pets
 - food inventory
-- favorite/reveal state
-- step-enjoy state and logs
+- notification preference
+- step-enjoy state
 
-Important: several backing property names intentionally preserve older terminology.
+古い名称の backing property が意図的に残っている場合があります。
 
 ### `TodayPhotoEntry`
 
-`Models/TodayPhotoEntry.swift`
+`MeMo/Models/TodayPhotoEntry.swift`
 
-Stores memory-photo metadata while the image itself is stored in `Documents/memories/`.
+Metadata は SwiftData、画像本体は `Documents/memories/` に保存。
 
 ### `WorkoutSessionRecord`
 
-`Models/StepModels.swift`
+`MeMo/Models/StepModels.swift`
 
-Stores walking/workout history and JSON-encoded route points.
+Walking / workout history と routeData を保持。
 
 ---
 
-## Feature-state extensions and stores
+## Feature state
 
-### AppState extensions
+`MeMo/Models/` 配下:
 
 - `AppState+DesiredFood.swift`
 - `AppState+Gacha.swift`
@@ -83,11 +127,6 @@ Stores walking/workout history and JSON-encoded route points.
 - `AppState+LiveActivity.swift`
 - `AppState+MeMoWidget.swift`
 - `AppState+Onboarding.swift`
-
-A recurring design pattern is to place new feature state in UserDefaults rather than reshaping the released SwiftData model.
-
-### Feature stores / policies
-
 - `EventManager.swift`
 - `Halloween2026EventModels.swift`
 - `Halloween2026EventStore.swift`
@@ -100,24 +139,26 @@ A recurring design pattern is to place new feature state in UserDefaults rather 
 - `SubscriptionAccessManager.swift`
 - `PetMaster.swift`
 
+リリース済み SwiftData schema を変えず、UserDefaults 側へ feature state を追加している実装が複数あります。
+
 ---
 
 ## Managers
 
-`Managers/`
+`MeMo/Managers/`
 
-- `AdMobManager.swift` — ad loading/display state and temporary failure pause state
-- `BGMManager.swift` — BGM / effect preferences and playback
-- `LocationTrackingManager.swift` — location tracking
-- `MeMoLiveActivityManager.swift` — ActivityKit lifecycle/settings
-- `WalkWeatherManager.swift` — weather integration for walk flow
-- `WorkoutRouteStore.swift` — persistence helper for workout routes
+- `AdMobManager.swift`
+- `BGMManager.swift`
+- `LocationTrackingManager.swift`
+- `MeMoLiveActivityManager.swift`
+- `WalkWeatherManager.swift`
+- `WorkoutRouteStore.swift`
 
 ---
 
 ## ViewModels
 
-`ViewModels/`
+`MeMo/ViewModels/`
 
 - `MemoOnboardingViewModel.swift`
 - `MemoriesViewModel.swift`
@@ -127,108 +168,107 @@ A recurring design pattern is to place new feature state in UserDefaults rather 
 
 ---
 
-## Main UI areas
+## Main UI
 
-`Views/`
+`MeMo/Views/`
 
-The repository currently contains views for:
+主な画面:
 
 - Home
 - Settings
 - Gacha
 - Fishing
 - Shop
-- Zukan / character catalog
-- Memories / daily photos
-- Walk start, walk flow, result, route capture/map
-- step activity dashboard
-- sleep mode
-- onboarding/tutorial
-- character sprite/video rendering
-- Live Activity settings/observation
-- Halloween 2026 event, exchange, reward, and SpriteKit run game
-- reusable event/media/memory/map components
+- Zukan
+- Memories
+- Walk
+- Onboarding
+- Live Activity
+- Halloween event / run game
 
-`HomeView.swift`, `FishingView.swift`, `CameraStyleView.swift`, and `GachaView.swift` are comparatively large files. Prefer targeted edits instead of opportunistic refactoring.
+大きな View file に対して unrelated refactor を行わないでください。
 
 ---
 
 ## Widget / Live Activity
 
-`MeMoWidget/`
+`MeMo/MeMoWidget/`
 
 - `MeMoWidget.swift`
 - `MeMoWidgetBundle.swift`
 - `MeMoWidgetLiveActivity.swift`
-- target `Info.plist`
+- `Info.plist`
 
-Shared app-to-widget state is also written from app-side bridge code.
+Widget entitlements:
 
-Current code references App Group:
+`MeMoWidgetExtension.entitlements`
+
+App Group:
 
 `group.com.shota.CalPet`
 
-Treat the identifier, shared keys, and Widget kinds as compatibility contracts.
+Widget kind / shared key / App Group ID は互換性契約として扱ってください。
 
 ---
 
 ## Apple Watch
 
-`MeMoWatch Watch App/`
+`MeMo/MeMoWatch Watch App/`
 
-### Models
-- `MeMoWatchApp.swift`
-- `MeMoWatchBridgeInstaller.swift`
-- `MeMoWatchConnectivityBridge.swift`
-- `MeMoWatchDynamicAssetSupport.swift`
+- `Models/`
+- `ViewModels/`
+- `Views/`
 
-### ViewModel
-- `MeMoWatchHomeViewModel.swift`
+WatchConnectivity bridge が存在します。
 
-### Views
-- `MeMoWatchCharacterSpriteView.swift`
-- `MeMoWatchHomeView.swift`
-
-The Watch implementation contains a substantial WatchConnectivity bridge. Message/context keys must be treated like a versioned protocol.
+Message / context key は versioned protocol として扱ってください。
 
 ---
 
-## System frameworks / capabilities visible in source
+## Complication
 
-- SwiftUI
-- SwiftData
-- UIKit
-- SpriteKit
-- ActivityKit / WidgetKit
-- HealthKit
-- WeatherKit
-- CoreLocation / Map-related APIs
-- WatchConnectivity
-- AV/media playback
-- Google Mobile Ads
-- StoreKit-oriented subscription abstraction
+`MeMoWatchComplication/`
 
-The committed `MeMo.entitlements` currently declares:
+Complication source と `Info.plist` を含みます。
 
-- APNs environment (`development`)
-- HealthKit
-- WeatherKit
-
-Do not alter signing/capabilities as a side effect of feature work.
+Target / Embed relationship を変更する場合は Xcode project を確認してください。
 
 ---
 
-## Resource layout
+## Entitlements
 
-### Audio
+Main app:
 
-`BGMs/` contains application BGM and effect MP3 files.
+`MeMo/MeMo.entitlements`
 
-### Shaders
+Widget:
 
-- `Models/CircularLiquidShaders.metal`
-- `Models/PhotoPrintShaders.metal`
+`MeMoWidgetExtension.entitlements`
 
-### Asset caveat
+Unrelated feature 変更で capability / signing を変更しないでください。
 
-The GitHub snapshot does not include a complete asset/project representation. Watch and Widget asset catalogs are explicitly gitignored. Always inspect the local Xcode working copy before adding or renaming resources.
+---
+
+## Resource
+
+Audio:
+
+`MeMo/BGMs/`
+
+Shader:
+
+- `MeMo/Models/CircularLiquidShaders.metal`
+- `MeMo/Models/PhotoPrintShaders.metal`
+
+---
+
+## Git 管理外 Asset
+
+- `Assets.xcassets/`
+- `MeMo/MeMoWatch Watch App/WatchAssets.xcassets/`
+- `MeMo/MeMoWidget/Assets.xcassets/`
+- `MeMo_material/`
+
+Codex Cloud では実体が見えない可能性があります。
+
+Asset task では source / project 上の参照名を維持し、実 Asset の確認が必要な場合はローカル Xcode 確認を要求してください。

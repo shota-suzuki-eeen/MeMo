@@ -1,28 +1,37 @@
-# Persistence & Backward Compatibility Contract
+# 永続化・後方互換ルール
 
-## Why this document exists
+## 目的
 
-MeMo is already released. Local persistence is therefore part of the product's external compatibility surface.
+MeMo はすでにリリース済みです。
 
-A code change can compile successfully and still cause user-data loss if a stored property, UserDefaults key, encoded payload, file path, or cross-target identifier changes.
+以下の変更は compile が通っても既存ユーザーのデータ破損につながる可能性があります。
 
-This document defines the minimum compatibility rules Codex must apply.
+- SwiftData stored property
+- UserDefaults / @AppStorage key
+- Codable payload
+- Documents path
+- Widget / App Group identifier
+- WatchConnectivity protocol
+
+現在の source path は `MeMo/` 配下です。
 
 ---
 
-# 1. SwiftData schema
+# 1. SwiftData
 
-Current registered models:
+現在登録されている model:
 
 | Model | Source | Role |
 |---|---|---|
-| `AppState` | `Models/AppState.swift` | Core application/progression state |
-| `TodayPhotoEntry` | `Models/TodayPhotoEntry.swift` | Memory-photo metadata |
-| `WorkoutSessionRecord` | `Models/StepModels.swift` | Walking/workout records |
+| `AppState` | `MeMo/Models/AppState.swift` | core application / progression state |
+| `TodayPhotoEntry` | `MeMo/Models/TodayPhotoEntry.swift` | memory photo metadata |
+| `WorkoutSessionRecord` | `MeMo/Models/StepModels.swift` | walking / workout records |
 
-## `AppState` — existing stored names are frozen unless migrated
+## `AppState`
 
-Verified stored properties include, among others:
+既存 stored property 名は migration なしに変更しないこと。
+
+代表例:
 
 - `walletSteps`
 - `pendingKcal`
@@ -60,33 +69,25 @@ Verified stored properties include, among others:
 - `stepEnjoyDailyRewardStepBank`
 - `stepEnjoyLastRewardAt`
 
-Some names represent legacy terminology intentionally retained for compatibility.
-
-**Do not rename them for readability.**
-
-Use computed properties/helpers when a new semantic name is needed.
+古い用語の property 名でも、readability のためだけに rename しないこと。
 
 ## `WorkoutSessionRecord`
 
-Existing stored contract includes:
+Source:
 
-- `id`
-- `startedAt`
-- `endedAt`
-- `elapsedSeconds`
-- `totalDistanceMeters`
-- `routeData`
-- `memo`
-- `characterID`
-- `createdAt`
+`MeMo/Models/StepModels.swift`
 
-`routeData` decodes `[WorkoutRoutePoint]`.
+`routeData` は `[WorkoutRoutePoint]` を encode/decode します。
 
-If the route-point shape changes, old route data must remain decodable.
+Shape を変更する場合でも旧 routeData が decode できるようにしてください。
 
 ## `TodayPhotoEntry`
 
-Existing stored contract includes:
+Source:
+
+`MeMo/Models/TodayPhotoEntry.swift`
+
+既存 metadata:
 
 - `dayKey`
 - `date`
@@ -97,45 +98,41 @@ Existing stored contract includes:
 
 ---
 
-# 2. File-system persistence
+# 2. Documents
 
-Memory images are stored in:
+画像は以下へ保存:
 
 `Documents/memories/`
 
-The database stores the `fileName`; the image is loaded using that name.
+migration なしに変更しない:
 
-Frozen without migration:
+- `memories` directory
+- fileName rule
+- JPEG 前提
+- metadata と physical file の対応
 
-- `memories` directory name
-- existing file naming behavior
-- JPEG storage assumptions
-- mapping from SwiftData metadata to physical file
-
-A directory move requires a migration that copies/moves old files and verifies success before abandoning the old location.
+移動する場合は old path → new path migration を作り、new file が読めることを確認してから old data を扱うこと。
 
 ---
 
-# 3. UserDefaults / AppStorage
+# 3. UserDefaults / @AppStorage
 
-## Rule
+literal key string が保存値の identity です。
 
-The literal key string is the identity of the stored value.
+Swift constant 名の変更は literal が同じなら問題ありませんが、literal key 自体の変更は migration が必要です。
 
-Renaming a Swift constant is safe only if the literal key remains identical. Renaming the literal itself is not safe without migration.
+## Gacha
 
-## Verified key families / examples
+Source:
 
-The following were observed in the audited snapshot.
+`MeMo/Models/AppState+Gacha.swift`
 
-### Gacha
-
-Legacy values intentionally retained:
+Legacy:
 
 - `memo.gacha.pityCounter`
 - `memo.gacha.guaranteedGoldNext`
 
-Newer per-machine state:
+Newer:
 
 - `memo.gacha.pityCountersByGacha`
 - `memo.gacha.guaranteedGoldNextByGacha`
@@ -144,11 +141,13 @@ Newer per-machine state:
 - `memo.gacha.specialItemCounts`
 - `memo.gacha.initialIPadFreeTenDrawConsumed`
 
-The current code preserves fallback/dual-write behavior for the legacy default gacha. Do not remove this compatibility path casually.
+既存 fallback / dual-write を維持すること。
 
-### Happiness
+## Happiness
 
-Base keys include:
+Source:
+
+`MeMo/Models/AppState+Happiness.swift`
 
 - `memo.happiness.point`
 - `memo.happiness.level`
@@ -159,88 +158,79 @@ Base keys include:
 - `memo.happiness.claimedRewardLevels`
 - `memo.happiness.sleepMode.endsAt`
 
-Some keys are dynamically suffixed by a happiness storage context / pet ID.
+Runtime では context / pet ID suffix が付く key もあります。
 
-Do not assume a repository search for one exact literal finds every effective runtime key.
-
-### Onboarding
-
-Observed namespace includes:
+## Onboarding
 
 - `memo.onboarding.mandatory.started`
 - `memo.onboarding.mandatory.completed`
 - `memo.onboarding.mandatory.currentStep`
 
-Additional onboarding keys exist in the source. Search the complete file before modifying onboarding persistence.
-
-### Walk challenge
-
-Observed namespace includes:
+## Walk
 
 - `memo.walk.activeSession`
 - `memo.walk.pendingResult`
 - `memo.walk.*`
 
-Search `Models/WalkChallengeStore.swift` before modifying walking-session persistence.
+Source:
 
-### Fishing
+`MeMo/Models/WalkChallengeStore.swift`
 
-Observed namespace includes:
+## Fishing
 
 - `memo.fishing.pointBalance`
 - `memo.fishing.pendingCounts`
 - `memo.fishing.lifetime*`
 
-Search `Views/FishingView.swift` before modifying fishing state.
+Source:
 
-### Halloween 2026 event
+`MeMo/Views/FishingView.swift`
+
+## Halloween 2026
 
 - `memo.event.halloween2026.progress.v1`
 
-The explicit version suffix is part of the key and must be preserved for existing progress.
+`v1` も key の一部です。
 
-### Sound settings
+## Sound
 
 - `memo.sound.bgm.enabled`
 - `memo.sound.bgm.volumeStep`
 - `memo.sound.effect.enabled`
 
-### Wallpaper
+## Wallpaper
 
 - `selectedHomeWallpaperAssetName`
 - `memo.work.focus.unlockedRewardAssetNames`
 
-### Appearance
+## Appearance
 
 - `memoAppearanceMode`
 
-### Developer mode
+## Developer mode
 
 - `isDeveloperMode`
 
-### Ads
-
-Observed state includes:
+## Ads
 
 - `memo.admob.rewarded.loadFailureRecords`
 - `memo.admob.temporaryPauseUntil`
 
-### Widget / shared state
+## Widget shared state
 
-Current code references App Group:
+App Group:
 
 `group.com.shota.CalPet`
 
-Observed shared values include:
+代表例:
 
 - `memo.homeWidget.snapshot.v1`
 - `memo.homeWidget.snapshot.signature.v1`
 - `currentPetID`
 - `todaySteps`
 - `toiletFlag`
-- additional widget snapshot keys
 
-The exact registry must be re-searched at implementation time.
+実装時は現在の source を再検索してください。
 
 ---
 
@@ -248,86 +238,97 @@ The exact registry must be re-searched at implementation time.
 
 ## Widget
 
-Do not casually change:
+Source:
+
+`MeMo/MeMoWidget/`
+
+変更注意:
 
 - App Group ID
 - Widget kind
-- shared UserDefaults keys
+- shared UserDefaults key
 - snapshot Codable shape
-- signatures/cache keys
+- signature/cache key
 
 ## Apple Watch
 
-Treat WatchConnectivity dictionaries as a protocol.
+Bridge:
 
-Before changing the bridge:
+`MeMo/MeMoWatch Watch App/Models/MeMoWatchConnectivityBridge.swift`
 
-1. Identify every message/context key.
-2. Check both sender and receiver.
-3. Consider old iPhone ↔ new Watch and new iPhone ↔ old Watch combinations.
-4. Add keys additively where possible.
-5. Preserve default/fallback behavior for missing keys.
-6. Do not require a newly added key unless the peer version can safely omit it.
+WatchConnectivity dictionary は protocol として扱ってください。
+
+変更時:
+
+1. sender / receiver 両方を確認
+2. old iPhone ↔ new Watch を考慮
+3. new iPhone ↔ old Watch を考慮
+4. additive field を優先
+5. missing key に default を用意
+6. 新 key を必須化しない
 
 ---
 
-# 5. JSON/Data compatibility
+# 5. Codable / Data
 
-Persistent encoded data currently includes multiple domains, including:
+保存対象には以下が含まれます。
 
-- owned food counts
-- toilet poop state
-- step-enjoy logs
+- food counts
+- toilet state
+- step-enjoy log
 - owned pet IDs
-- workout route points
-- gacha dictionaries
-- happiness claimed levels
-- event/fishing/walk payloads
+- workout route
+- gacha dictionary
+- happiness claim
+- event / fishing / walk payload
 
-When modifying a Codable model:
+変更時:
 
-- adding optional fields is safer than adding required fields
-- provide defaults for missing values
-- prefer custom decoding / `decodeIfPresent` when needed
-- never assume all installed users have the latest encoded shape
+- Optional field 追加を優先
+- missing value の default
+- `decodeIfPresent`
+- custom decoder
+- old format fallback
+
+を検討してください。
 
 ---
 
-# 6. Migration design rules
+# 6. Migration 原則
 
-A migration must be:
+Migration は以下を満たすこと。
 
 - idempotent
 - non-destructive
-- retryable after interruption
-- backward-readable until migration succeeds
-- explicit about source and destination format
+- retryable
+- migration 完了まで old data が読める
+- source / destination format が明確
 
-Recommended sequence:
+推奨:
 
-1. Read new format.
-2. If unavailable, read old format.
-3. Convert in memory.
-4. Write new format.
-5. Verify new format can be read.
-6. Keep old data unless deletion is explicitly required and safely staged.
+1. new format を読む
+2. なければ old format を読む
+3. memory 上で変換
+4. new format を保存
+5. new format が読めることを確認
+6. 明示的に安全と判断できるまで old data を消さない
 
-Never implement “migration” as unconditional reset-to-default.
+「初期値へリセット」は migration とみなさないこと。
 
 ---
 
-# 7. Mandatory compatibility review before merge
+# 7. PR / merge 前チェック
 
-For any PR touching persistence, Codex must answer:
+Persistence を触る場合は答えること。
 
-- Which stored models/keys/files/protocol fields were touched?
-- Were any literal keys renamed?
-- Were any SwiftData stored properties renamed/deleted/type-changed?
-- Can data from the previous release still be read?
-- Can an interrupted migration be retried?
-- Were existing photo files preserved?
-- Were Widget shared values preserved?
-- Were Watch peers with older payloads considered?
-- Was an upgrade scenario tested with non-empty existing data?
+- どの model / key / file / protocol field を変更したか
+- literal key を rename していないか
+- SwiftData stored property を rename / delete / type-change していないか
+- previous release data が読めるか
+- interrupted migration を再実行できるか
+- existing photo が残るか
+- Widget shared value が残るか
+- older Watch peer を考慮したか
+- non-empty existing data で upgrade test したか
 
-If any answer is unknown, the change is not release-ready.
+不明点が残る場合は release-ready としないこと。

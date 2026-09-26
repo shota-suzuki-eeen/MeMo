@@ -1,130 +1,183 @@
-# Codex Implementation Workflow for MeMo
+# MeMo Codex 実装ワークフロー
 
-## Purpose
+## 目的
 
-Use this workflow for each implementation task.
+Codex Cloud で各実装タスクを進める際の標準手順です。
 
 ---
 
-# Phase 1 — Read before editing
+# Phase 1 — 実装前に読む
 
-Codex must read:
+必須:
 
 1. `/AGENTS.md`
 2. `/SwiftDataOperationPolicy.md`
 3. `/docs/PERSISTENCE_COMPATIBILITY.md`
 4. `/docs/ARCHITECTURE.md`
-5. the task file under `/docs/tasks/`
+5. `/docs/CODEX_WORKFLOW.md`
+6. `/docs/tasks/` 配下の対象タスク
 
-Then inspect the local Xcode project, including files/resources not represented in GitHub.
+必要に応じて:
 
----
+- `/MeMo.xcodeproj/project.pbxproj`
+- `/MeMo.xcodeproj/xcshareddata/xcschemes/`
+- `/MeMo.xcodeproj/project.xcworkspace/xcshareddata/swiftpm/Package.resolved`
 
-# Phase 2 — Locate the feature owner
-
-Before coding:
-
-- find current feature types
-- find all references
-- find persistence reads/writes
-- find target membership / resource usage
-- identify adjacent features that must not change
-
-Do not create a new manager/store if an existing owner already exists.
+Git 管理外 Asset Catalog が Cloud に存在すると仮定しないこと。
 
 ---
 
-# Phase 3 — Persistence impact analysis
+# Phase 2 — Feature owner を特定
 
-Classify the task:
+コード変更前に確認:
+
+- current feature type
+- 全参照箇所
+- persistence read/write
+- relevant Target Membership
+- resource name
+- adjacent feature
+
+既存 owner が存在する場合、新しい Manager / Store を並立させないこと。
+
+現在の path 例:
+
+- `MeMo/Models/...`
+- `MeMo/Views/...`
+- `MeMo/Managers/...`
+- `MeMo/MeMoWatch Watch App/...`
+- `MeMo/MeMoWidget/...`
+- `MeMoWatchComplication/...`
+
+---
+
+# Phase 3 — Persistence impact を分類
 
 ## A. No persistence impact
 
-Examples:
+例:
 
-- visual layout
+- layout
 - animation
-- rendering-only change
+- rendering
 - non-persistent calculation
 
-Report: `No persistent-data contract changed.`
+報告:
+
+`No persistent-data contract changed.`
 
 ## B. Additive persistence
 
-Examples:
+例:
 
-- new independent UserDefaults key
-- new optional Codable field with safe fallback
+- 新規 UserDefaults key
+- optional Codable field
 - additive feature store
 
-Requirements:
+条件:
 
 - namespaced key
-- explicit default
-- old app data remains readable
-- no old keys reused
+- safe default
+- 旧データ読み込み可能
+- existing key を別用途に使わない
 
 ## C. Migration required
 
-Examples:
+例:
 
-- changing an existing SwiftData property
-- changing a persisted Codable payload incompatibly
-- moving Documents files
-- replacing existing UserDefaults key names
-- changing Watch/Widget shared protocol identifiers
+- SwiftData stored property 変更
+- incompatible Codable change
+- Documents path 移動
+- UserDefaults literal key 置換
+- Widget / Watch shared protocol identifier 変更
 
-Do not implement a destructive shortcut.
-
-Prepare migration and tests first.
+破壊的 shortcut を実装せず、migration と test を先に設計すること。
 
 ---
 
-# Phase 4 — Implement narrowly
+# Phase 4 — Xcode / Resource impact を確認
 
-Rules:
+確認項目:
 
-- smallest practical diff
-- no unrelated refactoring
-- no opportunistic naming cleanup in persistence code
-- preserve legacy fallback code
-- preserve legacy keys
-- reuse current patterns
-- keep old-data decoding paths
+- Target Membership
+- `project.pbxproj`
+- shared scheme
+- Swift Package
+- entitlements
+- capability
+- `Info.plist`
+- bundle resource
+- ignored/local Asset
 
----
+ルール:
 
-# Phase 5 — Verify
-
-At minimum:
-
-- inspect `git diff`
-- search diff for changed persistence key literals
-- search diff for changed `@Model` properties
-- build relevant targets
-- run tests
-- verify old/non-empty data scenario for persistence changes
-
-When Widget is affected:
-
-- verify app-to-widget shared state
-- verify Widget reload behavior
-- verify existing shared keys
-
-When Watch is affected:
-
-- verify reachable and background/application-context paths
-- verify missing/new fields are tolerated
-
-When memories are affected:
-
-- verify an existing file in `Documents/memories/` still opens
+- project metadata を触る前に現在の project を確認
+- source-only 変更で不要なら `project.pbxproj` を変更しない
+- file-system-synchronized group を考慮
+- ignored Asset Catalog を再作成しない
+- physical Asset が Cloud にない場合は local verification を明記
 
 ---
 
-# Phase 6 — Report
+# Phase 5 — 実装
 
-Codex must return:
+- diff は最小限
+- unrelated refactor 禁止
+- persistence naming cleanup 禁止
+- legacy fallback / key を維持
+- old-data decoding path を維持
+- project file churn を避ける
+
+---
+
+# Phase 6 — Codex Cloud で検証
+
+最低限:
+
+- `git diff`
+- persistence literal / `@Model` 差分確認
+- Xcode project impact 確認
+- 利用可能な test / static check
+- usable Xcode toolchain がある場合のみ build
+- 確認できなかった ignored Asset を列挙
+
+Widget 変更時:
+
+- shared state contract
+- App Group key
+- Widget Target configuration
+
+Watch 変更時:
+
+- old/missing field tolerance
+- Watch Target configuration
+- WatchConnectivity compatibility
+
+Memories 変更時:
+
+- `Documents/memories/` の維持
+- existing file を使った upgrade test 要否
+
+---
+
+# Phase 7 — ローカル Xcode で最終確認
+
+Cloud で確認できない場合、リリース前にローカルで確認:
+
+- `MeMo` scheme build/run
+- affected Widget / Watch / Complication scheme
+- Target Membership
+- entitlements / capability
+- ignored Asset name resolution
+- Simulator / device behavior
+- existing non-empty data を使った upgrade behavior
+
+Cloud で Xcode が使えないこと自体は失敗ではありません。
+ただし「未確認」として明示してください。
+
+---
+
+# Phase 8 — 最終報告
 
 ```text
 Changed files:
@@ -136,17 +189,17 @@ Implementation:
 Persistence compatibility:
 - ...
 
-Build:
+Xcode / target impact:
 - ...
 
-Tests:
+Cloud verification:
 - ...
 
-Manual verification:
+Local Xcode verification required:
 - ...
 
 Remaining risks:
 - ...
 ```
 
-A successful compile is not sufficient evidence of persistence compatibility.
+Compile 成功だけでは persistence compatibility の証明にはなりません。

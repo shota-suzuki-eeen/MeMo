@@ -1,144 +1,162 @@
-# Release & Regression Checklist
+# Release / Regression Checklist
 
-Use this checklist for implementation work intended for a released MeMo version.
-
----
-
-## 1. Repository / diff safety
-
-- [ ] `AGENTS.md` read
-- [ ] `SwiftDataOperationPolicy.md` read
-- [ ] task specification read
-- [ ] local `.xcodeproj` / `.xcworkspace` confirmed
-- [ ] changed files are limited to task scope
-- [ ] no accidental file/type renames
-- [ ] no accidental resource renames
-- [ ] no unrelated cleanup mixed into the change
+リリース済み MeMo の変更時に使用します。
 
 ---
 
-## 2. SwiftData compatibility
+## 1. Repository / diff
 
-- [ ] `AppState` remains registered
-- [ ] `TodayPhotoEntry` remains registered
-- [ ] `WorkoutSessionRecord` remains registered
-- [ ] no existing stored property renamed
-- [ ] no existing stored property deleted
-- [ ] no existing stored property type changed
-- [ ] encoded `Data` remains backward-decodable
-- [ ] upgrade with an existing non-empty store was considered/tested
+- [ ] `AGENTS.md` を読んだ
+- [ ] `SwiftDataOperationPolicy.md` を読んだ
+- [ ] task spec を読んだ
+- [ ] current path が `MeMo/...` であることを確認した
+- [ ] Target / project 影響がある場合 `project.pbxproj` を確認した
+- [ ] ignored Asset 依存を確認した
+- [ ] unrelated file change がない
+- [ ] accidental rename がない
+- [ ] unrelated cleanup がない
+
+---
+
+## 2. SwiftData
+
+- [ ] `AppState` が残っている
+- [ ] `TodayPhotoEntry` が残っている
+- [ ] `WorkoutSessionRecord` が残っている
+- [ ] stored property rename なし
+- [ ] stored property delete なし
+- [ ] stored property type change なし
+- [ ] encoded `Data` が backward-decodable
+- [ ] existing non-empty store で upgrade を考慮した
 
 ---
 
 ## 3. UserDefaults / AppStorage
 
-- [ ] no existing literal key renamed
-- [ ] legacy keys remain readable
-- [ ] fallback/dual-write behavior preserved
-- [ ] new keys are namespaced
-- [ ] new keys have safe defaults
-- [ ] old data is not reset on first launch after update
+- [ ] existing literal key rename なし
+- [ ] legacy key が読める
+- [ ] fallback / dual-write 維持
+- [ ] new key は namespaced
+- [ ] safe default がある
+- [ ] update 後に旧データを reset しない
 
 ---
 
-## 4. Files / memories
+## 4. Documents / Memories
 
-- [ ] `Documents/memories/` compatibility preserved
-- [ ] existing `fileName` values still resolve
-- [ ] existing JPEG files still load
-- [ ] any directory/file migration is idempotent and retryable
+- [ ] `Documents/memories/` を維持
+- [ ] existing `fileName` が解決できる
+- [ ] existing JPEG が読める
+- [ ] migration は idempotent / retryable
 
 ---
 
-## 5. Core smoke tests
+## 5. Core smoke test
 
 - [ ] cold launch
-- [ ] launch with existing user data
-- [ ] Home renders
-- [ ] step state loads
-- [ ] current pet loads
-- [ ] owned pets remain owned
-- [ ] food inventory remains intact
-- [ ] fullness state remains intact
-- [ ] toilet/bath/feed scheduling still works
-- [ ] notification toggles retain values
-- [ ] happiness level/points remain intact
-- [ ] claimed happiness rewards remain claimed
-- [ ] gacha pity state remains intact
-- [ ] gacha free-slot state behaves correctly
-- [ ] gacha special items remain intact
-- [ ] fishing points/inventory remain intact
-- [ ] wallpaper selection/unlocks remain intact
-- [ ] appearance/audio preferences remain intact
-- [ ] memories still open
-- [ ] historical workout/walk routes decode
+- [ ] existing data で launch
+- [ ] Home
+- [ ] step state
+- [ ] current pet
+- [ ] owned pet
+- [ ] food inventory
+- [ ] fullness
+- [ ] care scheduling
+- [ ] notification settings
+- [ ] happiness / claimed rewards
+- [ ] gacha pity / free slot / special item
+- [ ] fishing
+- [ ] wallpaper
+- [ ] appearance / audio
+- [ ] memories
+- [ ] workout / walk history
 
 ---
 
-## 6. Event-specific regression
+## 6. Event
 
-When touching Halloween/event code:
+Halloween / event code 変更時:
 
-- [ ] previous event progress still loads
-- [ ] `memo.event.halloween2026.progress.v1` is not repurposed
-- [ ] reward claims cannot be duplicated after update
-- [ ] exchange balances do not reset
-- [ ] run-game result persistence remains consistent
+- [ ] previous progress が読める
+- [ ] `memo.event.halloween2026.progress.v1` を再利用していない
+- [ ] reward duplication が起きない
+- [ ] exchange balance が reset されない
+- [ ] run-game result persistence が維持される
 
 ---
 
 ## 7. Widget / Live Activity
 
-When affected:
-
-- [ ] existing App Group identifier preserved
-- [ ] shared keys preserved
-- [ ] Widget kind preserved unless explicitly migrated
-- [ ] app writes shared snapshot successfully
-- [ ] Widget reads previous snapshot format
-- [ ] Widget refresh works
-- [ ] Live Activity state starts/updates/ends normally
+- [ ] App Group ID 維持
+- [ ] shared key 維持
+- [ ] Widget kind 維持
+- [ ] snapshot compatibility 維持
+- [ ] Live Activity lifecycle 確認
+- [ ] `MeMoWidgetExtension.entitlements` 変更は意図的
+- [ ] ignored Widget Asset を必要に応じ local 確認
 
 ---
 
-## 8. Apple Watch
+## 8. Apple Watch / Complication
 
-When affected:
-
-- [ ] WatchConnectivity session activates
-- [ ] old/missing message fields are tolerated
-- [ ] phone-to-watch sync works
-- [ ] watch-to-phone action works
-- [ ] application-context/background path works
-- [ ] current pet/step/care state is not reset
-- [ ] dynamic asset behavior remains functional
+- [ ] WatchConnectivity activation
+- [ ] old/missing field tolerance
+- [ ] phone → watch
+- [ ] watch → phone
+- [ ] application context / background path
+- [ ] pet / step / care state 維持
+- [ ] dynamic asset
+- [ ] Watch Target Membership
+- [ ] Complication Target
+- [ ] ignored Watch Asset を local 確認
 
 ---
 
-## 9. Build matrix
+## 9. Codex Cloud verification
 
-At minimum build every touched target.
+- [ ] `git diff`
+- [ ] persistence literal / model diff
+- [ ] relevant Xcode project metadata
+- [ ] available tests / static checks
+- [ ] usable Xcode toolchain がある場合のみ build
+- [ ] build 未実行を build success と書いていない
+- [ ] ignored Asset の local verification を列挙
 
-Suggested checks:
+---
 
-- [ ] iOS app target
-- [ ] Widget extension target if affected
-- [ ] Watch app target if affected
+## 10. Local Xcode
+
+Affected scheme を確認:
+
+- [ ] `MeMo`
+- [ ] `MeMoWidgetExtension`
+- [ ] `MeMoWatch Watch App`
+- [ ] `MeMoWatchComplicationExtension`
+- [ ] `MeMoWatchComplicationExtensionExtension`
+
+必要に応じ:
+
 - [ ] Debug build
-- [ ] Release build before distribution when practical
+- [ ] Release build
+- [ ] Simulator / device
+- [ ] Target Membership
+- [ ] signing / capability
+- [ ] ignored Asset reference
 
-Use the actual local scheme names; do not invent scheme names from the GitHub folder structure.
+Project が parse できることだけを build success とみなさないこと。
 
 ---
 
-## 10. Final release gate
+## 11. Release gate
 
-Do not mark a task release-ready if any of these are unresolved:
+以下が unresolved の場合 release-ready としない。
 
-- data migration uncertainty
-- undecodable previous payloads
-- accidental key changes
-- existing photo/file path breakage
+- migration uncertainty
+- previous payload decode failure
+- accidental key change
+- file path breakage
 - Watch protocol incompatibility
 - Widget shared-state incompatibility
-- unverified build for a changed target
+- changed target の build 未確認
+- Target Membership 不明
+- required Asset 未確認
