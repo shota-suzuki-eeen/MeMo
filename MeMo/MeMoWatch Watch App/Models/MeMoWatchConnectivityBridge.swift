@@ -1360,7 +1360,7 @@ final class MeMoWatchConnectivityBridge: NSObject, ObservableObject {
             names.append(baseCharacterName)
         }
 
-        names.append(String(min(40, max(0, snapshot.happinessLevel))))
+        names.append(String(min(75, max(0, snapshot.happinessLevel))))
         names.append(snapshot.backgroundAssetName)
 
         if let desired = snapshot.desiredFoodAssetName {
