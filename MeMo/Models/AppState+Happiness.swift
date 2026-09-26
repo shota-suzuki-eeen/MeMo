@@ -14,7 +14,7 @@ private enum HappinessNotificationName {
 
 extension AppState {
     static let happinessMaxPointsPerLevel: Int = 100
-    static let happinessMaxLevel: Int = 40
+    static let happinessMaxLevel: Int = 75
     static let happinessTouchesPerPoint: Int = 5
     static let happinessDailyPettingPointLimit: Int = 100
     static let happinessDecayIntervalSeconds: TimeInterval = 5 * 60

@@ -11,7 +11,7 @@
 //  - mini_person
 //  - current pet asset from PetMaster
 //  - glass_heart
-//  - numeric level badge assets: "0"..."40"
+//  - numeric level badge assets: "0"..."75"
 //  - glass_stomach
 //
 
@@ -588,7 +588,7 @@ private struct WatchHappinessGauge: View {
     }
 
     private var levelAssetName: String {
-        String(min(40, max(0, level)))
+        String(min(75, max(0, level)))
     }
 
     var body: some View {
@@ -626,7 +626,7 @@ private struct WatchHappinessGauge: View {
                 } else {
                     // Never leave the level blank while the decorative number
                     // image is being synchronized from the iPhone.
-                    Text("\(min(40, max(0, level)))")
+                    Text("\(min(75, max(0, level)))")
                         .font(
                             .system(
                                 size: 30 * scale,
