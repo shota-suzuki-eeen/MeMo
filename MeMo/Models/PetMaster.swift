@@ -204,7 +204,20 @@ enum PetMaster {
         .init(id: "street_sankuma", name: "サンクマ"),
         .init(id: "street_spiky", name: "スパイキー"),
         .init(id: "street_yarn", name: "ヤーン"),
-        .init(id: "street_yuma", name: "ユーマ")
+        .init(id: "street_yuma", name: "ユーマ"),
+        .init(id: "cyberpunk_blanc", name: "ブラン"),
+        .init(id: "cyberpunk_blitz", name: "ブリッツ"),
+        .init(id: "cyberpunk_chelsea", name: "チェルシー"),
+        .init(id: "cyberpunk_hazard", name: "ハザード"),
+        .init(id: "cyberpunk_neon", name: "ネオン"),
+        .init(id: "cyberpunk_noa", name: "ノア"),
+        .init(id: "cyberpunk_rapid", name: "ラピッド"),
+        .init(id: "cyberpunk_reb", name: "リブ"),
+        .init(id: "cyberpunk_rey", name: "レイ"),
+        .init(id: "cyberpunk_sieg", name: "ジーク"),
+        .init(id: "cyberpunk_vic", name: "ヴィク"),
+        .init(id: "cyberpunk_volt", name: "ボルト"),
+        .init(id: "cyberpunk_yasha", name: "ヤシャ")
     ]
 
     static func assetName(for petID: String) -> String {
@@ -328,6 +341,19 @@ enum PetMaster {
         case "street_spiky": return "spiky"
         case "street_yarn": return "yarn"
         case "street_yuma": return "yuma"
+        case "cyberpunk_blanc": return "blanc"
+        case "cyberpunk_blitz": return "blitz"
+        case "cyberpunk_chelsea": return "chelsea"
+        case "cyberpunk_hazard": return "hazard"
+        case "cyberpunk_neon": return "neon"
+        case "cyberpunk_noa": return "noa"
+        case "cyberpunk_rapid": return "rapid"
+        case "cyberpunk_reb": return "reb"
+        case "cyberpunk_rey": return "rey"
+        case "cyberpunk_sieg": return "sieg"
+        case "cyberpunk_vic": return "vic"
+        case "cyberpunk_volt": return "volt"
+        case "cyberpunk_yasha": return "yasha"
         default: return "person"
         }
     }
@@ -342,6 +368,8 @@ enum PetMaster {
         case let id where id.hasPrefix("moja_"):
             return "\(base)_wc"
         case let id where id.hasPrefix("street_"):
+            return "\(base)_wc"
+        case let id where id.hasPrefix("cyberpunk_"):
             return "\(base)_wc"
         default:
             return base
@@ -358,6 +386,8 @@ enum PetMaster {
         case let id where id.hasPrefix("moja_"):
             return ["\(base)_idle_blink_0001", "\(base)_idle_blink_0002"]
         case let id where id.hasPrefix("street_"):
+            return ["\(base)_idle_blink_0001", "\(base)_idle_blink_0002"]
+        case let id where id.hasPrefix("cyberpunk_"):
             return ["\(base)_idle_blink_0001", "\(base)_idle_blink_0002"]
         default:
             return []
