@@ -217,7 +217,25 @@ enum PetMaster {
         .init(id: "cyberpunk_sieg", name: "ジーク"),
         .init(id: "cyberpunk_vic", name: "ヴィク"),
         .init(id: "cyberpunk_volt", name: "ボルト"),
-        .init(id: "cyberpunk_yasha", name: "ヤシャ")
+        .init(id: "cyberpunk_yasha", name: "ヤシャ"),
+        .init(id: "hyakka_asaka", name: "朝霞"),
+        .init(id: "hyakka_ayame", name: "絢匁"),
+        .init(id: "hyakka_botan", name: "牡丹"),
+        .init(id: "hyakka_hibana", name: "彼花"),
+        .init(id: "hyakka_himari", name: "日葵"),
+        .init(id: "hyakka_iroha", name: "彩葉"),
+        .init(id: "hyakka_keika", name: "桂花"),
+        .init(id: "hyakka_kikuno", name: "菊乃"),
+        .init(id: "hyakka_nadeshiko", name: "撫子"),
+        .init(id: "hyakka_renka", name: "蓮香"),
+        .init(id: "hyakka_rose", name: "薔薇"),
+        .init(id: "hyakka_sakura", name: "櫻"),
+        .init(id: "hyakka_satsuki", name: "皐月"),
+        .init(id: "hyakka_suiran", name: "水蘭"),
+        .init(id: "hyakka_touka", name: "桃花"),
+        .init(id: "hyakka_tsubaki", name: "椿"),
+        .init(id: "hyakka_ume", name: "梅"),
+        .init(id: "hyakka_yuri", name: "百合")
     ]
 
     static func assetName(for petID: String) -> String {
@@ -354,6 +372,24 @@ enum PetMaster {
         case "cyberpunk_vic": return "vic"
         case "cyberpunk_volt": return "volt"
         case "cyberpunk_yasha": return "yasha"
+        case "hyakka_asaka": return "asaka"
+        case "hyakka_ayame": return "ayame"
+        case "hyakka_botan": return "botan"
+        case "hyakka_hibana": return "hibana"
+        case "hyakka_himari": return "himari"
+        case "hyakka_iroha": return "iroha"
+        case "hyakka_keika": return "keika"
+        case "hyakka_kikuno": return "kikuno"
+        case "hyakka_nadeshiko": return "nadeshiko"
+        case "hyakka_renka": return "renka"
+        case "hyakka_rose": return "rose"
+        case "hyakka_sakura": return "sakura"
+        case "hyakka_satsuki": return "satsuki"
+        case "hyakka_suiran": return "suiran"
+        case "hyakka_touka": return "touka"
+        case "hyakka_tsubaki": return "tsubaki"
+        case "hyakka_ume": return "ume"
+        case "hyakka_yuri": return "yuri"
         default: return "person"
         }
     }
@@ -370,6 +406,8 @@ enum PetMaster {
         case let id where id.hasPrefix("street_"):
             return "\(base)_wc"
         case let id where id.hasPrefix("cyberpunk_"):
+            return "\(base)_wc"
+        case let id where id.hasPrefix("hyakka_"):
             return "\(base)_wc"
         default:
             return base
@@ -388,6 +426,8 @@ enum PetMaster {
         case let id where id.hasPrefix("street_"):
             return ["\(base)_idle_blink_0001", "\(base)_idle_blink_0002"]
         case let id where id.hasPrefix("cyberpunk_"):
+            return ["\(base)_idle_blink_0001", "\(base)_idle_blink_0002"]
+        case let id where id.hasPrefix("hyakka_"):
             return ["\(base)_idle_blink_0001", "\(base)_idle_blink_0002"]
         default:
             return []

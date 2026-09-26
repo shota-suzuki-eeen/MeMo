@@ -106,6 +106,7 @@ fileprivate enum GachaRewardPool: Hashable {
     case mojaCharacters
     case streetAnimalsCharacters
     case cyberpunkRacersCharacters
+    case hyakkaryouranCharacters
 }
 
 fileprivate struct FoodGachaCharacter: Identifiable, Hashable {
@@ -130,6 +131,13 @@ fileprivate struct StreetAnimalsGachaCharacter: Identifiable, Hashable {
 }
 
 fileprivate struct CyberpunkRacersGachaCharacter: Identifiable, Hashable {
+    let id: String
+    let name: String
+    let assetName: String
+    let rarity: GachaRarity
+}
+
+fileprivate struct HyakkaryouranGachaCharacter: Identifiable, Hashable {
     let id: String
     let name: String
     let assetName: String
@@ -172,6 +180,11 @@ fileprivate struct GachaDefinition: Identifiable, Hashable {
 
         case .cyberpunkRacersCharacters:
             return GachaCatalog.cyberpunkRacersCharacters.map {
+                GachaEmissionCharacter(id: $0.id, name: $0.name, imageName: $0.assetName)
+            }
+
+        case .hyakkaryouranCharacters:
+            return GachaCatalog.hyakkaryouranCharacters.map {
                 GachaEmissionCharacter(id: $0.id, name: $0.name, imageName: $0.assetName)
             }
         }
@@ -271,6 +284,27 @@ fileprivate enum GachaCatalog {
         .init(id: "cyberpunk_yasha", name: "ヤシャ", assetName: "yasha", rarity: .gold)
     ]
 
+    static let hyakkaryouranCharacters: [HyakkaryouranGachaCharacter] = [
+        .init(id: "hyakka_asaka", name: "朝霞", assetName: "asaka", rarity: .gold),
+        .init(id: "hyakka_ayame", name: "絢匁", assetName: "ayame", rarity: .gold),
+        .init(id: "hyakka_botan", name: "牡丹", assetName: "botan", rarity: .gold),
+        .init(id: "hyakka_hibana", name: "彼花", assetName: "hibana", rarity: .gold),
+        .init(id: "hyakka_himari", name: "日葵", assetName: "himari", rarity: .gold),
+        .init(id: "hyakka_iroha", name: "彩葉", assetName: "iroha", rarity: .gold),
+        .init(id: "hyakka_keika", name: "桂花", assetName: "keika", rarity: .gold),
+        .init(id: "hyakka_kikuno", name: "菊乃", assetName: "kikuno", rarity: .gold),
+        .init(id: "hyakka_nadeshiko", name: "撫子", assetName: "nadeshiko", rarity: .gold),
+        .init(id: "hyakka_renka", name: "蓮香", assetName: "renka", rarity: .gold),
+        .init(id: "hyakka_rose", name: "薔薇", assetName: "rose", rarity: .gold),
+        .init(id: "hyakka_sakura", name: "櫻", assetName: "sakura", rarity: .gold),
+        .init(id: "hyakka_satsuki", name: "皐月", assetName: "satsuki", rarity: .gold),
+        .init(id: "hyakka_suiran", name: "水蘭", assetName: "suiran", rarity: .gold),
+        .init(id: "hyakka_touka", name: "桃花", assetName: "touka", rarity: .gold),
+        .init(id: "hyakka_tsubaki", name: "椿", assetName: "tsubaki", rarity: .gold),
+        .init(id: "hyakka_ume", name: "梅", assetName: "ume", rarity: .gold),
+        .init(id: "hyakka_yuri", name: "百合", assetName: "yuri", rarity: .gold)
+    ]
+
     static let gachas: [GachaDefinition] = [
         GachaDefinition(
             id: "always",
@@ -301,6 +335,12 @@ fileprivate enum GachaCatalog {
             title: "サイバーパンクレーサーズ",
             machineAssetName: "gatyaMachine_cyberpunkRacers",
             rewardPool: .cyberpunkRacersCharacters
+        ),
+        GachaDefinition(
+            id: "hyakkaryouran",
+            title: "百花繚乱",
+            machineAssetName: "gatyaMachine_hyakkaryouran",
+            rewardPool: .hyakkaryouranCharacters
         )
     ]
 
@@ -311,6 +351,7 @@ fileprivate enum GachaCatalog {
             && !mojaCharacters.contains(where: { $0.id == pet.id })
             && !streetAnimalsCharacters.contains(where: { $0.id == pet.id })
             && !cyberpunkRacersCharacters.contains(where: { $0.id == pet.id })
+            && !hyakkaryouranCharacters.contains(where: { $0.id == pet.id })
     }
 
     static func resolvedCharacterName(for pet: PetMasterItem) -> String {
@@ -359,6 +400,13 @@ fileprivate enum GachaCatalog {
         }
     }
 
+    static func remainingHyakkaryouranCharacters(state: AppState, rarity: GachaRarity? = nil) -> [HyakkaryouranGachaCharacter] {
+        let owned = Set(state.ownedPetIDs())
+        return hyakkaryouranCharacters.filter {
+            !owned.contains($0.id) && (rarity == nil || $0.rarity == rarity)
+        }
+    }
+
     static func canGoldAppear(in gacha: GachaDefinition, state: AppState) -> Bool {
         switch gacha.rewardPool {
         case .normalCharacters:
@@ -371,6 +419,8 @@ fileprivate enum GachaCatalog {
             return !remainingStreetAnimalsCharacters(state: state, rarity: .gold).isEmpty
         case .cyberpunkRacersCharacters:
             return !remainingCyberpunkRacersCharacters(state: state, rarity: .gold).isEmpty
+        case .hyakkaryouranCharacters:
+            return !remainingHyakkaryouranCharacters(state: state, rarity: .gold).isEmpty
         }
     }
 
@@ -386,6 +436,8 @@ fileprivate enum GachaCatalog {
             return makeStreetAnimalsGachaReward(for: rarity, state: state)
         case .cyberpunkRacersCharacters:
             return makeCyberpunkRacersGachaReward(for: rarity, state: state)
+        case .hyakkaryouranCharacters:
+            return makeHyakkaryouranGachaReward(for: rarity, state: state)
         }
     }
 
@@ -501,6 +553,25 @@ fileprivate enum GachaCatalog {
                 kind: .character(petID: character.id),
                 title: character.name,
                 subtitle: "サイバーパンクレーサーズ / SR",
+                imageName: character.assetName
+            )
+        }
+    }
+
+    private static func makeHyakkaryouranGachaReward(for rarity: GachaRarity, state: AppState) -> GachaReward? {
+        switch rarity {
+        case .blue, .red:
+            return makeAlwaysGachaReward(for: rarity, state: state)
+
+        case .gold:
+            let candidates = remainingHyakkaryouranCharacters(state: state, rarity: .gold)
+            let pool = candidates.isEmpty ? hyakkaryouranCharacters : candidates
+            guard let character = pool.randomElement() else { return nil }
+            return GachaReward(
+                rarity: .gold,
+                kind: .character(petID: character.id),
+                title: character.name,
+                subtitle: "百花繚乱 / SR",
                 imageName: character.assetName
             )
         }

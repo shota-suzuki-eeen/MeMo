@@ -141,6 +141,7 @@ final class BGMManager: NSObject, ObservableObject, AVAudioPlayerDelegate {
         case moja = "BGM_moja"
         case streetAnimals = "BGM_streetAnimals"
         case cyberpunkRacers = "BGM_cyberpunkRacers"
+        case hyakkaryouran = "BGM_hyakkaryouran"
         case gacha = "BGM_gacha"
         case zukan = "BGM_zukan"
         case fishing = "BGM_fishing"
@@ -502,6 +503,9 @@ final class BGMManager: NSObject, ObservableObject, AVAudioPlayerDelegate {
         }
         if normalizedID.hasPrefix("cyberpunk_") {
             return .cyberpunkRacers
+        }
+        if normalizedID.hasPrefix("hyakka_") {
+            return .hyakkaryouran
         }
         return .main
     }

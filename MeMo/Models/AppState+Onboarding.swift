@@ -244,12 +244,14 @@ extension AppState {
             && !PetMaster.isHappinessRewardPetID($0.id)
             && !$0.id.hasPrefix("street_")
             && !$0.id.hasPrefix("cyberpunk_")
+            && !$0.id.hasPrefix("hyakka_")
             && $0.id != normalizedCurrentPetID
         }
         let fallbackCandidates = PetMaster.all.filter {
             !PetMaster.isHappinessRewardPetID($0.id)
             && !$0.id.hasPrefix("street_")
             && !$0.id.hasPrefix("cyberpunk_")
+            && !$0.id.hasPrefix("hyakka_")
             && $0.id != normalizedCurrentPetID
         }
 
