@@ -104,6 +104,7 @@ fileprivate enum GachaRewardPool: Hashable {
     case normalCharacters
     case foodCharacters
     case mojaCharacters
+    case streetAnimalsCharacters
 }
 
 fileprivate struct FoodGachaCharacter: Identifiable, Hashable {
@@ -114,6 +115,13 @@ fileprivate struct FoodGachaCharacter: Identifiable, Hashable {
 }
 
 fileprivate struct MojaGachaCharacter: Identifiable, Hashable {
+    let id: String
+    let name: String
+    let assetName: String
+    let rarity: GachaRarity
+}
+
+fileprivate struct StreetAnimalsGachaCharacter: Identifiable, Hashable {
     let id: String
     let name: String
     let assetName: String
@@ -146,6 +154,11 @@ fileprivate struct GachaDefinition: Identifiable, Hashable {
 
         case .mojaCharacters:
             return GachaCatalog.mojaCharacters.map {
+                GachaEmissionCharacter(id: $0.id, name: $0.name, imageName: $0.assetName)
+            }
+
+        case .streetAnimalsCharacters:
+            return GachaCatalog.streetAnimalsCharacters.map {
                 GachaEmissionCharacter(id: $0.id, name: $0.name, imageName: $0.assetName)
             }
         }
@@ -202,6 +215,33 @@ fileprivate enum GachaCatalog {
         .init(id: "moja_wareware", name: "ワレワレ", assetName: "wareware", rarity: .gold)
     ]
 
+    static let streetAnimalsCharacters: [StreetAnimalsGachaCharacter] = [
+        .init(id: "street_ageriter", name: "アゲリーター", assetName: "ageriter", rarity: .gold),
+        .init(id: "street_arako", name: "アラコ", assetName: "arako", rarity: .gold),
+        .init(id: "street_borderkeniy", name: "ボーダーケニー", assetName: "borderkeniy", rarity: .gold),
+        .init(id: "street_fantosu", name: "ファントス", assetName: "fantosu", rarity: .gold),
+        .init(id: "street_fax", name: "ファックス", assetName: "fax", rarity: .gold),
+        .init(id: "street_fried", name: "フライド", assetName: "fried", rarity: .gold),
+        .init(id: "street_guin", name: "グイン", assetName: "guin", rarity: .gold),
+        .init(id: "street_hamstar", name: "ハム・スター", assetName: "hamstar", rarity: .gold),
+        .init(id: "street_hayne", name: "ヘイン", assetName: "hayne", rarity: .gold),
+        .init(id: "street_kabarapi", name: "カバラピ", assetName: "kabarapi", rarity: .gold),
+        .init(id: "street_kuro", name: "クロ", assetName: "kuro", rarity: .gold),
+        .init(id: "street_monmasu", name: "モンマス", assetName: "monmasu", rarity: .gold),
+        .init(id: "street_rabi", name: "ラビ", assetName: "rabi", rarity: .gold),
+        .init(id: "street_raccun", name: "ラックン", assetName: "raccun", rarity: .gold),
+        .init(id: "street_raian", name: "ライアン", assetName: "raian", rarity: .gold),
+        .init(id: "street_rattyu", name: "ラッチュ", assetName: "rattyu", rarity: .gold),
+        .init(id: "street_rautan", name: "ラウタン", assetName: "rautan", rarity: .gold),
+        .init(id: "street_reita", name: "レイタ", assetName: "reita", rarity: .gold),
+        .init(id: "street_rigora", name: "リゴラ", assetName: "rigora", rarity: .gold),
+        .init(id: "street_rissu", name: "リッス", assetName: "rissu", rarity: .gold),
+        .init(id: "street_sankuma", name: "サンクマ", assetName: "sankuma", rarity: .gold),
+        .init(id: "street_spiky", name: "スパイキー", assetName: "spiky", rarity: .gold),
+        .init(id: "street_yarn", name: "ヤーン", assetName: "yarn", rarity: .gold),
+        .init(id: "street_yuma", name: "ユーマ", assetName: "yuma", rarity: .gold)
+    ]
+
     static let gachas: [GachaDefinition] = [
         GachaDefinition(
             id: "always",
@@ -220,6 +260,12 @@ fileprivate enum GachaCatalog {
             title: "もじゃガチャ",
             machineAssetName: "gatyaMachine_moja",
             rewardPool: .mojaCharacters
+        ),
+        GachaDefinition(
+            id: "streetAnimals",
+            title: "ストリートアニマルズ",
+            machineAssetName: "gatyaMachine_streetAnimals",
+            rewardPool: .streetAnimalsCharacters
         )
     ]
 
@@ -228,6 +274,7 @@ fileprivate enum GachaCatalog {
             && !PetMaster.isHappinessRewardPetID(pet.id)
             && !foodCharacters.contains(where: { $0.id == pet.id })
             && !mojaCharacters.contains(where: { $0.id == pet.id })
+            && !streetAnimalsCharacters.contains(where: { $0.id == pet.id })
     }
 
     static func resolvedCharacterName(for pet: PetMasterItem) -> String {
@@ -262,6 +309,13 @@ fileprivate enum GachaCatalog {
         }
     }
 
+    static func remainingStreetAnimalsCharacters(state: AppState, rarity: GachaRarity? = nil) -> [StreetAnimalsGachaCharacter] {
+        let owned = Set(state.ownedPetIDs())
+        return streetAnimalsCharacters.filter {
+            !owned.contains($0.id) && (rarity == nil || $0.rarity == rarity)
+        }
+    }
+
     static func canGoldAppear(in gacha: GachaDefinition, state: AppState) -> Bool {
         switch gacha.rewardPool {
         case .normalCharacters:
@@ -270,6 +324,8 @@ fileprivate enum GachaCatalog {
             return !remainingFoodCharacters(state: state, rarity: .gold).isEmpty
         case .mojaCharacters:
             return !remainingMojaCharacters(state: state, rarity: .gold).isEmpty
+        case .streetAnimalsCharacters:
+            return !remainingStreetAnimalsCharacters(state: state, rarity: .gold).isEmpty
         }
     }
 
@@ -281,6 +337,8 @@ fileprivate enum GachaCatalog {
             return makeFoodGachaReward(for: rarity, state: state)
         case .mojaCharacters:
             return makeMojaGachaReward(for: rarity, state: state)
+        case .streetAnimalsCharacters:
+            return makeStreetAnimalsGachaReward(for: rarity, state: state)
         }
     }
 
@@ -359,6 +417,25 @@ fileprivate enum GachaCatalog {
                 title: mojaCharacter.name,
                 subtitle: "もじゃキャラクター / SR",
                 imageName: mojaCharacter.assetName
+            )
+        }
+    }
+
+    private static func makeStreetAnimalsGachaReward(for rarity: GachaRarity, state: AppState) -> GachaReward? {
+        switch rarity {
+        case .blue, .red:
+            return makeAlwaysGachaReward(for: rarity, state: state)
+
+        case .gold:
+            let candidates = remainingStreetAnimalsCharacters(state: state, rarity: .gold)
+            let pool = candidates.isEmpty ? streetAnimalsCharacters : candidates
+            guard let character = pool.randomElement() else { return nil }
+            return GachaReward(
+                rarity: .gold,
+                kind: .character(petID: character.id),
+                title: character.name,
+                subtitle: "ストリートアニマルズ / SR",
+                imageName: character.assetName
             )
         }
     }
