@@ -653,7 +653,8 @@ struct GachaView: View {
     }
 
     private var availableGachas: [GachaDefinition] {
-        isAlwaysGachaOnlyMode ? [alwaysGacha] : GachaCatalog.gachas
+        guard !isAlwaysGachaOnlyMode, let state else { return [alwaysGacha] }
+        return GachaCatalog.gachas.filter { state.gachaIsMachineUnlocked(id: $0.id) }
     }
 
     private var selectedGacha: GachaDefinition {

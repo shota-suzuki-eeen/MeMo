@@ -22,25 +22,54 @@ extension AppState {
     static let happinessSleepModeDurationSeconds: TimeInterval = 8 * 60 * 60
 
     struct HappinessRewardDefinition: Identifiable, Equatable {
+        enum Reward: Equatable {
+            case character(petID: String)
+            case ticket(itemID: String, count: Int)
+            case gachaMachine(machineID: String)
+        }
+
         let level: Int
-        let petID: String
+        let reward: Reward
         let assetName: String
-        let characterName: String
+        let displayName: String
 
         var id: Int { level }
+
+        init(level: Int, reward: Reward, assetName: String, displayName: String) {
+            self.level = level
+            self.reward = reward
+            self.assetName = assetName
+            self.displayName = displayName
+        }
+
+        init(level: Int, petID: String, assetName: String, characterName: String) {
+            self.init(
+                level: level,
+                reward: .character(petID: petID),
+                assetName: assetName,
+                displayName: characterName
+            )
+        }
     }
 
-    /// 通常キャラクター用の幸せ報酬ラインナップ。
+    /// 通常の幸せ度メーター用のV2報酬ラインナップ。
     /// 既存参照互換のため `happinessRewardDefinitions` も同じ値を返す。
     static let standardHappinessRewardDefinitions: [HappinessRewardDefinition] = [
-        .init(level: 5, petID: "reward_000", assetName: "girl_A", characterName: "ガール（A）"),
-        .init(level: 10, petID: "reward_001", assetName: "boy_A", characterName: "ボーイ（A）"),
-        .init(level: 15, petID: "reward_002", assetName: "girl_B", characterName: "ガール（B）"),
-        .init(level: 20, petID: "reward_003", assetName: "boy_B", characterName: "ボーイ（B）"),
-        .init(level: 25, petID: "reward_004", assetName: "girl_C", characterName: "ガール（C）"),
-        .init(level: 30, petID: "reward_005", assetName: "boy_C", characterName: "ボーイ（C）"),
-        .init(level: 35, petID: "reward_006", assetName: "girl_D", characterName: "ガール（D）"),
-        .init(level: 40, petID: "reward_007", assetName: "boy_D", characterName: "ボーイ（D）")
+        .init(level: 5, reward: .ticket(itemID: "gachaTicket_nomal", count: 10), assetName: "gachaTicket_nomal", displayName: "ガチャチケット ×10"),
+        .init(level: 10, reward: .ticket(itemID: "gachaTicket_special", count: 1), assetName: "gachaTicket_special", displayName: "キャラ確定ガチャチケット ×1"),
+        .init(level: 15, reward: .gachaMachine(machineID: "food"), assetName: "gatyaMachine_food", displayName: "フードガチャ解放"),
+        .init(level: 20, reward: .ticket(itemID: "gachaTicket_nomal", count: 10), assetName: "gachaTicket_nomal", displayName: "ガチャチケット ×10"),
+        .init(level: 25, reward: .ticket(itemID: "gachaTicket_special", count: 1), assetName: "gachaTicket_special", displayName: "キャラ確定ガチャチケット ×1"),
+        .init(level: 30, reward: .gachaMachine(machineID: "moja"), assetName: "gatyaMachine_moja", displayName: "もじゃガチャ解放"),
+        .init(level: 35, reward: .ticket(itemID: "gachaTicket_nomal", count: 10), assetName: "gachaTicket_nomal", displayName: "ガチャチケット ×10"),
+        .init(level: 40, reward: .ticket(itemID: "gachaTicket_special", count: 1), assetName: "gachaTicket_special", displayName: "キャラ確定ガチャチケット ×1"),
+        .init(level: 45, reward: .gachaMachine(machineID: "streetAnimals"), assetName: "gatyaMachine_streetAnimals", displayName: "ストリートアニマルズ解放"),
+        .init(level: 50, reward: .ticket(itemID: "gachaTicket_nomal", count: 10), assetName: "gachaTicket_nomal", displayName: "ガチャチケット ×10"),
+        .init(level: 55, reward: .ticket(itemID: "gachaTicket_special", count: 1), assetName: "gachaTicket_special", displayName: "キャラ確定ガチャチケット ×1"),
+        .init(level: 60, reward: .gachaMachine(machineID: "cyberpunkRacers"), assetName: "gatyaMachine_cyberpunkRacers", displayName: "サイバーパンクレーサーズ解放"),
+        .init(level: 65, reward: .ticket(itemID: "gachaTicket_nomal", count: 10), assetName: "gachaTicket_nomal", displayName: "ガチャチケット ×10"),
+        .init(level: 70, reward: .ticket(itemID: "gachaTicket_special", count: 1), assetName: "gachaTicket_special", displayName: "キャラ確定ガチャチケット ×1"),
+        .init(level: 75, reward: .gachaMachine(machineID: "hyakkaryouran"), assetName: "gatyaMachine_hyakkaryouran", displayName: "百花繚乱解放")
     ]
 
     static let happinessRewardDefinitions: [HappinessRewardDefinition] = standardHappinessRewardDefinitions
@@ -93,9 +122,9 @@ extension AppState {
 
     struct HappinessRewardClaimResult: Equatable {
         let level: Int
-        let petID: String
+        let reward: HappinessRewardDefinition.Reward
         let assetName: String
-        let characterName: String
+        let displayName: String
     }
 
     private enum HappinessStorageKeys {
@@ -106,6 +135,7 @@ extension AppState {
         static let pettingPointsToday = "memo.happiness.petting.pointsToday"
         static let pettingDayKey = "memo.happiness.petting.dayKey"
         static let claimedRewardLevels = "memo.happiness.claimedRewardLevels"
+        static let standardV2ClaimedRewardLevels = "memo.happiness.standardRewardV2.claimedLevels"
         static let sleepModeEndsAt = "memo.happiness.sleepMode.endsAt"
     }
 
@@ -300,17 +330,70 @@ extension AppState {
     }
 
     private func claimedHappinessRewardLevels() -> Set<Int> {
-        guard let data = happinessDefaults.data(forKey: happinessStorageKey(HappinessStorageKeys.claimedRewardLevels)),
+        let key = happinessStorageContextKey == AppState.happinessStandardStorageContextKey
+            ? HappinessStorageKeys.standardV2ClaimedRewardLevels
+            : happinessStorageKey(HappinessStorageKeys.claimedRewardLevels)
+        guard let data = happinessDefaults.data(forKey: key),
               let values = try? JSONDecoder().decode([Int].self, from: data) else {
-            return []
+            return repairedStandardV2HappinessRewardLevels(from: [])
         }
-        return Set(values)
+        return repairedStandardV2HappinessRewardLevels(from: Set(values))
     }
 
     private func setClaimedHappinessRewardLevels(_ levels: Set<Int>) {
         let sorted = levels.sorted()
         let data = try? JSONEncoder().encode(sorted)
-        happinessDefaults.set(data, forKey: happinessStorageKey(HappinessStorageKeys.claimedRewardLevels))
+        let key = happinessStorageContextKey == AppState.happinessStandardStorageContextKey
+            ? HappinessStorageKeys.standardV2ClaimedRewardLevels
+            : happinessStorageKey(HappinessStorageKeys.claimedRewardLevels)
+        happinessDefaults.set(data, forKey: key)
+    }
+
+    private func standardV2TicketApplicationID(level: Int) -> String {
+        "memo.happiness.standardRewardV2.ticketApplied.level.\(level)"
+    }
+
+    /// Reconciles the two additive V2 stores after an interrupted claim.
+    /// Legacy care-pet reward contexts intentionally bypass this repair path.
+    private func repairedStandardV2HappinessRewardLevels(from storedLevels: Set<Int>) -> Set<Int> {
+        guard happinessStorageContextKey == AppState.happinessStandardStorageContextKey else {
+            return storedLevels
+        }
+
+        var repairedLevels = storedLevels
+
+        for definition in AppState.standardHappinessRewardDefinitions {
+            switch definition.reward {
+            case .character:
+                continue
+            case .ticket(let itemID, let count):
+                let applicationID = standardV2TicketApplicationID(level: definition.level)
+                let isClaimed = repairedLevels.contains(definition.level)
+                let isApplied = gachaHasSpecialItemRewardApplication(applicationID: applicationID)
+                guard isClaimed || isApplied else { continue }
+
+                if gachaApplySpecialItemRewardOnce(
+                    id: itemID,
+                    count: count,
+                    applicationID: applicationID
+                ) {
+                    repairedLevels.insert(definition.level)
+                }
+            case .gachaMachine(let machineID):
+                let isClaimed = repairedLevels.contains(definition.level)
+                let isUnlocked = gachaIsMachineUnlocked(id: machineID)
+                guard isClaimed || isUnlocked else { continue }
+
+                if gachaUnlockMachine(id: machineID) {
+                    repairedLevels.insert(definition.level)
+                }
+            }
+        }
+
+        if repairedLevels != storedLevels {
+            setClaimedHappinessRewardLevels(repairedLevels)
+        }
+        return repairedLevels
     }
 
     @discardableResult
@@ -599,22 +682,43 @@ extension AppState {
         var claimed = claimedHappinessRewardLevels()
         guard !claimed.contains(level) else { return nil }
 
-        claimed.insert(level)
-        setClaimedHappinessRewardLevels(claimed)
+        switch reward.reward {
+        case .character(let petID):
+            // Preserve the existing Legacy reward write order and ownership behavior.
+            claimed.insert(level)
+            setClaimedHappinessRewardLevels(claimed)
 
-        if PetMaster.all.contains(where: { $0.id == reward.petID }) {
-            var owned = ownedPetIDs()
-            if !owned.contains(reward.petID) {
-                owned.append(reward.petID)
-                setOwnedPetIDs(owned)
+            if PetMaster.all.contains(where: { $0.id == petID }) {
+                var owned = ownedPetIDs()
+                if !owned.contains(petID) {
+                    owned.append(petID)
+                    setOwnedPetIDs(owned)
+                }
             }
+        case .ticket(let itemID, let count):
+            let applicationID = standardV2TicketApplicationID(level: level)
+            guard gachaApplySpecialItemRewardOnce(
+                id: itemID,
+                count: count,
+                applicationID: applicationID
+            ) else {
+                return nil
+            }
+
+            claimed.insert(level)
+            setClaimedHappinessRewardLevels(claimed)
+        case .gachaMachine(let machineID):
+            guard gachaUnlockMachine(id: machineID) else { return nil }
+
+            claimed.insert(level)
+            setClaimedHappinessRewardLevels(claimed)
         }
 
         return .init(
             level: level,
-            petID: reward.petID,
+            reward: reward.reward,
             assetName: reward.assetName,
-            characterName: reward.characterName
+            displayName: reward.displayName
         )
     }
 }

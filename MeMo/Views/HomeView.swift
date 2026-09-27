@@ -4540,13 +4540,13 @@ private struct HomeHappinessRewardsContent: View {
     private var summaryText: String {
         if let claimableLevel,
            let reward = rewardDefinitions.first(where: { $0.level == claimableLevel }) {
-            return "Lv.\(claimableLevel) の \(reward.characterName) を受け取れます"
+            return "Lv.\(claimableLevel) の \(reward.displayName) を受け取れます"
         }
 
         if let nextRewardLevel,
            let reward = rewardDefinitions.first(where: { $0.level == nextRewardLevel }) {
             let remaining = max(0, nextRewardLevel - happinessLevel)
-            return "次は Lv.\(nextRewardLevel) の \(reward.characterName) まであと Lv.\(remaining)"
+            return "次は Lv.\(nextRewardLevel) の \(reward.displayName) まであと Lv.\(remaining)"
         }
 
         return "現在の幸せ報酬はすべて受け取り済みです"
@@ -4683,7 +4683,7 @@ private struct HomeHappinessRewardRow: View {
                     .layoutPriority(3)
 
 
-                Text(reward.characterName)
+                Text(reward.displayName)
                     .font(.system(size: 14, weight: .bold))
                     .foregroundStyle(.white.opacity(0.92))
                     .lineLimit(1)
