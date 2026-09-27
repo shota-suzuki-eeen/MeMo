@@ -189,6 +189,11 @@ fileprivate struct GachaDefinition: Identifiable, Hashable {
             }
         }
     }
+
+    func isComplete(ownedPetIDs: Set<String>) -> Bool {
+        let characters = emissionCharacters
+        return !characters.isEmpty && characters.allSatisfy { ownedPetIDs.contains($0.id) }
+    }
 }
 
 fileprivate enum GachaCatalog {
@@ -663,6 +668,11 @@ struct GachaView: View {
         return gachas[safeIndex]
     }
 
+    private var isSelectedGachaComplete: Bool {
+        guard let state else { return false }
+        return selectedGacha.isComplete(ownedPetIDs: Set(state.ownedPetIDs()))
+    }
+
     private var canSelectPreviousGacha: Bool { availableGachas.indices.contains(selectedGachaIndex - 1) }
     private var canSelectNextGacha: Bool { availableGachas.indices.contains(selectedGachaIndex + 1) }
     private var isOverlayVisible: Bool { phase != .idle }
@@ -859,12 +869,23 @@ struct GachaView: View {
     private func gachaMachineSelector(machineWidth: CGFloat, contentWidth: CGFloat) -> some View {
         VStack(spacing: 8) {
             ZStack(alignment: .topTrailing) {
-                Image(selectedGacha.machineAssetName)
-                    .resizable()
-                    .scaledToFit()
-                    .frame(width: machineWidth)
-                    .padding(.top, 2)
-                    .frame(maxWidth: contentWidth)
+                ZStack {
+                    Image(selectedGacha.machineAssetName)
+                        .resizable()
+                        .scaledToFit()
+                        .frame(width: machineWidth)
+
+                    if isSelectedGachaComplete {
+                        Image("complete")
+                            .resizable()
+                            .scaledToFit()
+                            .frame(width: machineWidth * 0.62)
+                            .allowsHitTesting(false)
+                            .accessibilityHidden(true)
+                    }
+                }
+                .padding(.top, 2)
+                .frame(maxWidth: contentWidth)
 
                 if availableGachas.count > 1 {
                     HStack {
