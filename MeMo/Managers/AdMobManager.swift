@@ -738,7 +738,7 @@ final class AdMobManager: ObservableObject {
     }
 
     private func currentClaimedHappinessRewardLevels() -> Set<Int> {
-        guard let data = UserDefaults.standard.data(forKey: "memo.happiness.claimedRewardLevels"),
+        guard let data = UserDefaults.standard.data(forKey: "memo.happiness.standardRewardV2.claimedLevels"),
               let values = try? JSONDecoder().decode([Int].self, from: data) else {
             return []
         }

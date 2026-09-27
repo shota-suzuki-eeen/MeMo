@@ -62,6 +62,7 @@ extension AppState {
         static let freeAdDayKey = "memo.gacha.freeAd.dayKey"
         static let freeAdUsedSlots = "memo.gacha.freeAd.usedSlots"
         static let specialItemCounts = "memo.gacha.specialItemCounts"
+        static let unlockedMachineIDsV2 = "memo.gacha.unlockedMachineIDs.v2"
         static let initialIPadFreeTenDrawConsumed = "memo.gacha.initialIPadFreeTenDrawConsumed"
     }
 
@@ -176,6 +177,26 @@ extension AppState {
         set { gachaDefaults.set(newValue, forKey: GachaStorageKeys.initialIPadFreeTenDrawConsumed) }
     }
 
+    private var gachaUnlockedMachineIDsStorage: Set<String> {
+        get { Set(gachaDefaults.stringArray(forKey: GachaStorageKeys.unlockedMachineIDsV2) ?? []) }
+        set { gachaDefaults.set(newValue.sorted(), forKey: GachaStorageKeys.unlockedMachineIDsV2) }
+    }
+
+    func gachaIsMachineUnlocked(id: String) -> Bool {
+        let machineID = Self.normalizedGachaID(id)
+        return machineID == GachaStorageKeys.defaultGachaID || gachaUnlockedMachineIDsStorage.contains(machineID)
+    }
+
+    @discardableResult
+    func gachaUnlockMachine(id: String) -> Bool {
+        let machineID = Self.normalizedGachaID(id)
+        guard machineID != GachaStorageKeys.defaultGachaID else { return true }
+        var unlocked = gachaUnlockedMachineIDsStorage
+        unlocked.insert(machineID)
+        gachaUnlockedMachineIDsStorage = unlocked
+        return gachaIsMachineUnlocked(id: machineID)
+    }
+
     func gachaResetIfNeeded(now: Date = Date()) {
         ensureDailyResetIfNeeded(now: now)
 
@@ -232,6 +253,10 @@ extension AppState {
         return max(0, dict[id] ?? 0)
     }
 
+    func gachaHasSpecialItemRewardApplication(applicationID: String) -> Bool {
+        max(0, gachaSpecialItemCountsStorage[applicationID] ?? 0) > 0
+    }
+
     @discardableResult
     func gachaAddSpecialItem(id: String, count: Int = 1) -> Bool {
         let add = max(0, count)
@@ -242,6 +267,30 @@ extension AppState {
         dict[id] = current + add
         gachaSpecialItemCountsStorage = dict
         return true
+    }
+
+    /// Adds an item reward and its application marker in one encoded dictionary write.
+    /// Retrying with the same application ID is safe and does not increment the item again.
+    @discardableResult
+    func gachaApplySpecialItemRewardOnce(
+        id: String,
+        count: Int,
+        applicationID: String
+    ) -> Bool {
+        let add = max(0, count)
+        guard add > 0, !applicationID.isEmpty else { return false }
+
+        var dict = gachaSpecialItemCountsStorage
+        if max(0, dict[applicationID] ?? 0) > 0 {
+            return true
+        }
+
+        let current = max(0, dict[id] ?? 0)
+        dict[id] = current + add
+        dict[applicationID] = 1
+        gachaSpecialItemCountsStorage = dict
+
+        return max(0, gachaSpecialItemCountsStorage[applicationID] ?? 0) > 0
     }
 
     @discardableResult
