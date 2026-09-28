@@ -879,7 +879,7 @@ struct GachaView: View {
                         Image("complete")
                             .resizable()
                             .scaledToFit()
-                            .frame(width: machineWidth * 0.62)
+                            .frame(width: machineWidth * 0.85)
                             .allowsHitTesting(false)
                             .accessibilityHidden(true)
                     }
