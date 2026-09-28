@@ -71,6 +71,16 @@ MeMo はすでにリリース済みです。
 
 古い用語の property 名でも、readability のためだけに rename しないこと。
 
+### Legacy notification settings
+
+- `notifyFeed`
+- `notifyBath`
+- `notifyToilet`
+
+上記は現在の通知機能では使用しない。
+既存SwiftData schemaとの互換性維持のためAppStateから削除しないこと。
+新規通知設定では再利用しない。
+
 ## `WorkoutSessionRecord`
 
 Source:
