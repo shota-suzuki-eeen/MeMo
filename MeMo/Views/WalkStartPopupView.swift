@@ -70,6 +70,7 @@ struct WalkStartPopupView: View {
                     systemImageName: nil,
                     showsLoadingIndicator: false,
                     isPrimary: false,
+                    usesRewardedAdStyle: false,
                     isEnabled: true,
                     action: onLater
                 )
@@ -80,6 +81,7 @@ struct WalkStartPopupView: View {
                         systemImageName: nil,
                         showsLoadingIndicator: false,
                         isPrimary: true,
+                        usesRewardedAdStyle: false,
                         isEnabled: true,
                         action: onStartRainFree
                     )
@@ -89,6 +91,7 @@ struct WalkStartPopupView: View {
                         systemImageName: adStartButtonSystemImageName,
                         showsLoadingIndicator: shouldShowAdStartLoadingIndicator,
                         isPrimary: true,
+                        usesRewardedAdStyle: !isTemporaryPauseMode,
                         isEnabled: !shouldDisableAdStartButton,
                         action: onStartWithAd
                     )
@@ -135,20 +138,9 @@ private struct WalkPopupButton: View {
     let systemImageName: String?
     let showsLoadingIndicator: Bool
     let isPrimary: Bool
+    let usesRewardedAdStyle: Bool
     let isEnabled: Bool
     let action: () -> Void
-
-    private var buttonBackgroundColor: Color {
-        if !isEnabled {
-            return isPrimary
-            ? Color(red: 0.92, green: 0.15, blue: 0.14).opacity(0.58)
-            : Color.white.opacity(0.48)
-        }
-
-        return isPrimary
-        ? Color(red: 0.92, green: 0.15, blue: 0.14)
-        : Color.white.opacity(0.72)
-    }
 
     var body: some View {
         Button(action: action) {
@@ -173,18 +165,11 @@ private struct WalkPopupButton: View {
             .foregroundStyle(isPrimary ? .white : .primary)
             .frame(maxWidth: .infinity)
             .frame(height: 50)
-            .background(
-                RoundedRectangle(cornerRadius: 18, style: .continuous)
-                    .fill(buttonBackgroundColor)
-            )
-            .overlay(
-                RoundedRectangle(cornerRadius: 18, style: .continuous)
-                    .stroke(Color.white.opacity(isPrimary ? 0.34 : 0.42), lineWidth: 1.5)
-            )
-            .clipShape(RoundedRectangle(cornerRadius: 18, style: .continuous))
-            .shadow(color: .black.opacity(isEnabled ? 0.14 : 0.08), radius: 8, x: 0, y: 5)
         }
-        .buttonStyle(.plain)
+        .memoGlassButtonStyle(
+            prominent: isPrimary,
+            tint: usesRewardedAdStyle ? Color(red: 0.92, green: 0.15, blue: 0.14) : nil
+        )
         .disabled(!isEnabled)
         .opacity(isEnabled ? 1 : 0.68)
         .accessibilityHint("")
