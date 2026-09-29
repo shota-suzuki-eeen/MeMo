@@ -557,8 +557,23 @@ struct HomeView: View {
         lifecycleConfiguredHomeView
     }
 
-    private var lifecycleConfiguredHomeView: some View {
+    private var notificationObservedHomeView: some View {
         modalConfiguredHomeView
+            .onReceive(notificationManager.$pendingRoute) { route in
+                guard route != nil else { return }
+                handlePendingNotificationRouteIfReady()
+            }
+            .onReceive(notificationManager.$isPendingRouteReadyForHome) { isReady in
+                guard isReady else { return }
+                handlePendingNotificationRouteIfReady()
+            }
+            .onReceive(NotificationCenter.default.publisher(for: .memoMandatoryOnboardingDidComplete)) { _ in
+                handleNotificationHomeArrival()
+            }
+    }
+
+    private var lifecycleConfiguredHomeView: some View {
+        notificationObservedHomeView
             .task {
                 guard !hasCompletedInitialLoad else { return }
                 let previousSnapshot = makeHomePersistenceSnapshot()
@@ -634,17 +649,6 @@ struct HomeView: View {
                 updateToiletWiggle()
                 syncCharacterBaseFromState(force: true)
                 updateWidgetSnapshot(forceReload: true)
-            }
-            .onReceive(notificationManager.$pendingRoute) { route in
-                guard route != nil else { return }
-                handlePendingNotificationRouteIfReady()
-            }
-            .onReceive(notificationManager.$isPendingRouteReadyForHome) { isReady in
-                guard isReady else { return }
-                handlePendingNotificationRouteIfReady()
-            }
-            .onReceive(NotificationCenter.default.publisher(for: .memoMandatoryOnboardingDidComplete)) { _ in
-                handleNotificationHomeArrival()
             }
             .onDisappear {
                 isHomeVisible = false
@@ -949,17 +953,27 @@ struct HomeView: View {
         NavigationStack(path: $homeNavigationPath) {
             homeSceneView
                 .navigationDestination(for: HomeNavigationDestination.self) { destination in
-                    switch destination {
-                    case .settings:
-                        SettingsView().memoOnboardingScreen(.settings)
-                    case .zukan:
-                        ZukanView().memoOnboardingScreen(.zukan)
-                    case .memories:
-                        MemoriesView().memoOnboardingScreen(.memories)
-                    }
+                    homeNavigationDestination(destination)
                 }
         }
         .navigationBarHidden(true)
+    }
+
+    @ViewBuilder
+    private func homeNavigationDestination(
+        _ destination: HomeNavigationDestination
+    ) -> some View {
+        switch destination {
+        case .settings:
+            SettingsView()
+                .memoOnboardingScreen(.settings)
+        case .zukan:
+            ZukanView()
+                .memoOnboardingScreen(.zukan)
+        case .memories:
+            MemoriesView()
+                .memoOnboardingScreen(.memories)
+        }
     }
 
     private var homeSceneView: some View {
