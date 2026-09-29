@@ -20,6 +20,8 @@ struct MeMoApp: App {
     @StateObject private var bgmManager = BGMManager()
 
     init() {
+        MemoNotificationManager.shared.configure()
+
         // ✅ AdMob 初期化（アプリ起動時に1回だけ）
         AdMobManager.shared.start()
 
@@ -66,6 +68,7 @@ private struct MemoAppRootContainer: View {
     var body: some View {
         RootView()
             .environmentObject(bgmManager)
+            .environmentObject(MemoNotificationManager.shared)
             // iPadではiPhone相当のキャンバスに収め、既存のiPhone UIを崩さず中央表示する
             .memoIPadPhoneCanvas()
             // SwiftUI側の色環境を切り替える
