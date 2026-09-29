@@ -331,15 +331,10 @@ struct ShopView: View {
                 }
                 .foregroundStyle(.white)
                 .frame(minWidth: 78, minHeight: 48)
-                .background(
-                    isMaximum
-                        ? Color.gray
-                        : (canAfford ? Color(red: 0.10, green: 0.63, blue: 0.88) : Color.gray),
-                    in: Capsule()
-                )
                 .contentShape(Capsule())
             }
-            .buttonStyle(.plain)
+            .memoGlassButtonStyle(prominent: true)
+            .tint(isMaximum || !canAfford ? .gray : Color(red: 0.10, green: 0.63, blue: 0.88))
             .disabled(isMaximum)
             .accessibilityLabel(
                 isMaximum
@@ -923,9 +918,9 @@ struct ShopView: View {
                         .font(.system(size: 16, weight: .black))
                         .foregroundStyle(.white)
                         .frame(maxWidth: .infinity, minHeight: 48)
-                        .background(Color(red: 0.10, green: 0.63, blue: 0.88), in: Capsule())
                 }
-                .buttonStyle(.plain)
+                .memoGlassButtonStyle(prominent: true)
+                .tint(Color(red: 0.10, green: 0.63, blue: 0.88))
 
                 Button {
                     presentedGearUpgradeModal = nil
@@ -935,7 +930,7 @@ struct ShopView: View {
                         .foregroundStyle(.secondary)
                         .frame(maxWidth: .infinity, minHeight: 44)
                 }
-                .buttonStyle(.plain)
+                .memoGlassButtonStyle()
             }
 
         case .upgraded, .insufficient, .maximum, .failed:
@@ -946,9 +941,9 @@ struct ShopView: View {
                     .font(.system(size: 16, weight: .black))
                     .foregroundStyle(.white)
                     .frame(maxWidth: .infinity, minHeight: 48)
-                    .background(Color.secondary, in: Capsule())
             }
-            .buttonStyle(.plain)
+            .memoGlassButtonStyle(prominent: true)
+            .tint(.secondary)
         }
     }
 
@@ -1122,14 +1117,9 @@ struct ShopView: View {
                         .font(.system(size: 16, weight: .black))
                         .foregroundStyle(.white)
                         .frame(maxWidth: .infinity, minHeight: 48)
-                        .background(
-                            maximumQuantity > 0
-                                ? Color(red: 0.10, green: 0.63, blue: 0.88)
-                                : Color.gray,
-                            in: Capsule()
-                        )
                 }
-                .buttonStyle(.plain)
+                .memoGlassButtonStyle(prominent: true)
+                .tint(maximumQuantity > 0 ? Color(red: 0.10, green: 0.63, blue: 0.88) : .gray)
                 .disabled(maximumQuantity <= 0 || quantity <= 0)
 
                 Button {
@@ -1140,7 +1130,7 @@ struct ShopView: View {
                         .foregroundStyle(.secondary)
                         .frame(maxWidth: .infinity, minHeight: 44)
                 }
-                .buttonStyle(.plain)
+                .memoGlassButtonStyle()
             }
 
         case .confirmation(let target, _):
@@ -1152,9 +1142,9 @@ struct ShopView: View {
                         .font(.system(size: 16, weight: .black))
                         .foregroundStyle(.white)
                         .frame(maxWidth: .infinity, minHeight: 48)
-                        .background(Color(red: 0.10, green: 0.63, blue: 0.88), in: Capsule())
                 }
-                .buttonStyle(.plain)
+                .memoGlassButtonStyle(prominent: true)
+                .tint(Color(red: 0.10, green: 0.63, blue: 0.88))
 
                 Button {
                     presentedExchangeModal = nil
@@ -1164,7 +1154,7 @@ struct ShopView: View {
                         .foregroundStyle(.secondary)
                         .frame(maxWidth: .infinity, minHeight: 44)
                 }
-                .buttonStyle(.plain)
+                .memoGlassButtonStyle()
             }
 
         case .exchanged(let target, _):
@@ -1179,9 +1169,9 @@ struct ShopView: View {
                             .font(.system(size: 16, weight: .black))
                             .foregroundStyle(.white)
                             .frame(maxWidth: .infinity, minHeight: 48)
-                            .background(Color.green, in: Capsule())
                     }
-                    .buttonStyle(.plain)
+                    .memoGlassButtonStyle(prominent: true)
+                    .tint(.green)
 
                     Button {
                         presentedExchangeModal = nil
@@ -1191,7 +1181,7 @@ struct ShopView: View {
                             .foregroundStyle(.secondary)
                             .frame(maxWidth: .infinity, minHeight: 44)
                     }
-                    .buttonStyle(.plain)
+                    .memoGlassButtonStyle()
                 }
 
             case .item:
@@ -1211,9 +1201,9 @@ struct ShopView: View {
                         .font(.system(size: 16, weight: .black))
                         .foregroundStyle(.white)
                         .frame(maxWidth: .infinity, minHeight: 48)
-                        .background(Color.green, in: Capsule())
                 }
-                .buttonStyle(.plain)
+                .memoGlassButtonStyle(prominent: true)
+                .tint(.green)
 
                 closeModalButton
             }
@@ -1231,9 +1221,9 @@ struct ShopView: View {
                 .font(.system(size: 16, weight: .black))
                 .foregroundStyle(.white)
                 .frame(maxWidth: .infinity, minHeight: 48)
-                .background(Color.secondary, in: Capsule())
         }
-        .buttonStyle(.plain)
+        .memoGlassButtonStyle(prominent: true)
+        .tint(.secondary)
     }
 }
 

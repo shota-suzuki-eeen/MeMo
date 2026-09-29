@@ -294,7 +294,7 @@ struct ZukanView: View {
                                 .frame(maxWidth: .infinity)
                                 .padding(.vertical, 12)
                         }
-                        .buttonStyle(.borderedProminent)
+                        .memoGlassButtonStyle(prominent: true)
                         .disabled(isSwitchDisabled)
                         .opacity(isSwitchDisabled ? 0.65 : 1.0)
                     }
@@ -354,7 +354,7 @@ struct ZukanView: View {
                         .frame(maxWidth: .infinity)
                         .padding(.vertical, 12)
                     }
-                    .buttonStyle(.borderedProminent)
+                    .memoGlassButtonStyle(prominent: true)
                     .disabled(isCurrentWallpaper)
                     .opacity(isCurrentWallpaper ? 0.65 : 1.0)
                 }
@@ -877,19 +877,19 @@ private struct ZukanPetNameEditorPopup: View {
                 Button("名前を戻す") {
                     onReset()
                 }
-                .buttonStyle(.bordered)
+                .memoGlassButtonStyle()
 
                 Spacer(minLength: 0)
 
                 Button("キャンセル") {
                     onCancel()
                 }
-                .buttonStyle(.bordered)
+                .memoGlassButtonStyle()
 
                 Button("決定") {
                     onSave()
                 }
-                .buttonStyle(.borderedProminent)
+                .memoGlassButtonStyle(prominent: true)
                 .disabled(canSave == false)
             }
         }

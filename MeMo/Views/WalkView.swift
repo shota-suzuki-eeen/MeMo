@@ -292,17 +292,9 @@ private struct WalkEndButton: View {
                 .font(.system(size: 17, weight: .black, design: .rounded))
                 .foregroundStyle(.white)
                 .frame(width: 132, height: 46)
-                .background(
-                    RoundedRectangle(cornerRadius: 18, style: .continuous)
-                        .fill(Color.black.opacity(0.58))
-                )
-                .overlay(
-                    RoundedRectangle(cornerRadius: 18, style: .continuous)
-                        .stroke(Color.white.opacity(0.46), lineWidth: 1.5)
-                )
-                .shadow(color: .black.opacity(0.24), radius: 8, x: 0, y: 5)
         }
-        .buttonStyle(.plain)
+        .memoGlassButtonStyle(prominent: true)
+        .tint(.black.opacity(0.58))
         .disabled(!isEnabled)
         .opacity(isEnabled ? 1 : 0.55)
         .accessibilityLabel("お散歩を終了")
@@ -325,7 +317,7 @@ private struct WalkInactiveMessageView: View {
             Button("Homeへ戻る") {
                 onClose()
             }
-            .buttonStyle(.borderedProminent)
+            .memoGlassButtonStyle(prominent: true)
         }
         .padding(.horizontal, 22)
         .padding(.vertical, 24)

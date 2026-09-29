@@ -224,13 +224,13 @@ struct SettingsView: View {
                             bgmManager.playSE(.push)
                             closeDeveloperPinPopup()
                         }
-                        .buttonStyle(.bordered)
+                        .memoGlassButtonStyle()
 
                         Button("決定") {
                             bgmManager.playSE(.push)
                             confirmDeveloperMode()
                         }
-                        .buttonStyle(.borderedProminent)
+                        .memoGlassButtonStyle(prominent: true)
                     }
                 }
                 .padding(20)
@@ -338,17 +338,9 @@ struct SettingsView: View {
             .foregroundStyle(isSelected ? .white : .primary)
             .frame(maxWidth: .infinity)
             .padding(.vertical, 11)
-            .background(
-                RoundedRectangle(cornerRadius: 12)
-                    .fill(isSelected ? Color.accentColor : Color.primary.opacity(0.08))
-            )
-            .overlay(
-                RoundedRectangle(cornerRadius: 12)
-                    .stroke(isSelected ? Color.accentColor : Color.primary.opacity(0.12), lineWidth: 1)
-            )
             .contentShape(RoundedRectangle(cornerRadius: 12))
         }
-        .buttonStyle(.plain)
+        .memoGlassButtonStyle(prominent: isSelected, tint: isSelected ? .accentColor : nil)
     }
 
     private func selectAppearanceMode(_ mode: MemoAppearanceMode) {

@@ -1672,28 +1672,9 @@ private struct FishingBoostConfirmationOverlay: View {
                             .foregroundStyle(.white)
                             .frame(maxWidth: .infinity)
                             .frame(height: 50)
-                            .background(
-                                LinearGradient(
-                                    colors: [
-                                        Color(red: 0.98, green: 0.24, blue: 0.20),
-                                        Color(red: 0.82, green: 0.07, blue: 0.06)
-                                    ],
-                                    startPoint: .top,
-                                    endPoint: .bottom
-                                ),
-                                in: RoundedRectangle(cornerRadius: 15, style: .continuous)
-                            )
-                            .overlay {
-                                ClayGrainOverlay(seed: 1901, density: 120)
-                                    .clipShape(RoundedRectangle(cornerRadius: 15, style: .continuous))
-                            }
-                            .overlay {
-                                RoundedRectangle(cornerRadius: 15, style: .continuous)
-                                    .stroke(Color.white.opacity(0.52), lineWidth: 1)
-                            }
-                            .shadow(color: .black.opacity(0.24), radius: 5, x: 0, y: 4)
                         }
-                        .buttonStyle(ClayButtonPressStyle())
+                        .memoGlassButtonStyle(prominent: true)
+                        .tint(Color(red: 0.92, green: 0.14, blue: 0.12))
 
                         Button(action: onCancel) {
                             Text("キャンセル")
@@ -1701,9 +1682,8 @@ private struct FishingBoostConfirmationOverlay: View {
                                 .foregroundStyle(.primary)
                                 .frame(maxWidth: .infinity)
                                 .frame(height: 46)
-                                .background(Color.black.opacity(0.07), in: RoundedRectangle(cornerRadius: 15, style: .continuous))
                         }
-                        .buttonStyle(.plain)
+                        .memoGlassButtonStyle()
                     }
                 }
                 .padding(20)

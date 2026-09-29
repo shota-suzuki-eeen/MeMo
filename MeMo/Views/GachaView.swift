@@ -1037,36 +1037,34 @@ struct GachaView: View {
         action: @escaping () -> Void
     ) -> some View {
         Button(action: action) {
-            ZStack {
-                let fillColor = fillsAccent ? Color(red: 0.92, green: 0.15, blue: 0.14) : Color.black.opacity(0.48)
-                RoundedRectangle(cornerRadius: Layout.buttonCornerRadius, style: .continuous).fill(fillColor)
-                RoundedRectangle(cornerRadius: Layout.buttonCornerRadius, style: .continuous).stroke(accent.opacity(0.95), lineWidth: 2)
-                HStack(spacing: 7) {
-                    if showsLoadingIndicator {
-                        ProgressView()
-                            .progressViewStyle(.circular)
-                            .tint(accent)
-                            .scaleEffect(0.78)
-                            .frame(width: 17, height: 17)
-                    } else if let systemImageName {
-                        Image(systemName: systemImageName)
-                            .font(.system(size: 17, weight: .black))
-                    }
-
-                    Text(title)
-                        .font(.system(size: 20, weight: .black))
-                        .foregroundStyle(accent)
-                        .multilineTextAlignment(.center)
-                        .lineLimit(1)
-                        .minimumScaleFactor(0.68)
-                        .allowsTightening(true)
+            HStack(spacing: 7) {
+                if showsLoadingIndicator {
+                    ProgressView()
+                        .progressViewStyle(.circular)
+                        .tint(accent)
+                        .scaleEffect(0.78)
+                        .frame(width: 17, height: 17)
+                } else if let systemImageName {
+                    Image(systemName: systemImageName)
+                        .font(.system(size: 17, weight: .black))
                 }
-                .padding(.horizontal, 10)
+
+                Text(title)
+                    .font(.system(size: 20, weight: .black))
+                    .foregroundStyle(accent)
+                    .multilineTextAlignment(.center)
+                    .lineLimit(1)
+                    .minimumScaleFactor(0.68)
+                    .allowsTightening(true)
             }
+            .padding(.horizontal, 10)
             .frame(maxWidth: .infinity)
             .frame(height: Layout.buttonHeight)
         }
-        .buttonStyle(.plain)
+        .memoGlassButtonStyle(
+            prominent: fillsAccent,
+            tint: fillsAccent ? Color(red: 0.92, green: 0.15, blue: 0.14) : accent
+        )
         .disabled(!isEnabled)
         .opacity(isEnabled ? 1 : 0.45)
     }
