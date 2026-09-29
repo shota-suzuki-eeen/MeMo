@@ -9,13 +9,13 @@ import Foundation
 import Combine
 import UserNotifications
 
-enum MemoNotificationRoute: String, Sendable {
+nonisolated enum MemoNotificationRoute: String, Sendable {
     case home
     case gacha
     case fishing
 }
 
-enum MemoNotificationKind: String, CaseIterable, Identifiable, Sendable {
+nonisolated enum MemoNotificationKind: String, CaseIterable, Identifiable, Sendable {
     case fullnessZero
     case toilet
     case sleepEnded
@@ -41,7 +41,7 @@ enum MemoNotificationKind: String, CaseIterable, Identifiable, Sendable {
     var preferenceKey: String { "memo.notifications.\(rawValue).enabled" }
 }
 
-enum MemoNotificationRequestID: String, CaseIterable, Identifiable, Sendable {
+nonisolated enum MemoNotificationRequestID: String, CaseIterable, Identifiable, Sendable {
     case fullnessZero = "memo.notification.fullnessZero"
     case toilet = "memo.notification.toilet"
     case sleepEnded = "memo.notification.sleepEnded"
@@ -72,7 +72,7 @@ enum MemoNotificationRequestID: String, CaseIterable, Identifiable, Sendable {
     }
 }
 
-enum MemoNotificationPreferences {
+nonisolated enum MemoNotificationPreferences {
     static let masterEnabledKey = "memo.notifications.enabled"
 
     static func value(forKey key: String, defaults: UserDefaults = .standard) -> Bool {
@@ -110,14 +110,14 @@ struct MemoLocalNotificationRequest: Sendable {
     }
 }
 
+private nonisolated enum MemoNotificationUserInfoKey {
+    static let kind = "memoNotificationKind"
+    static let route = "memoNotificationRoute"
+}
+
 @MainActor
 final class MemoNotificationManager: NSObject, ObservableObject {
     static let shared = MemoNotificationManager()
-
-    enum UserInfoKey {
-        static let kind = "memoNotificationKind"
-        static let route = "memoNotificationRoute"
-    }
 
     @Published private(set) var authorizationStatus: UNAuthorizationStatus = .notDetermined
     @Published private(set) var pendingRoute: MemoNotificationRoute?
@@ -172,8 +172,8 @@ final class MemoNotificationManager: NSObject, ObservableObject {
         content.sound = .default
         content.categoryIdentifier = request.kind.categoryIdentifier
         content.userInfo = [
-            UserInfoKey.kind: request.kind.rawValue,
-            UserInfoKey.route: request.kind.route.rawValue
+            MemoNotificationUserInfoKey.kind: request.kind.rawValue,
+            MemoNotificationUserInfoKey.route: request.kind.route.rawValue
         ]
 
         let notificationRequest = UNNotificationRequest(
@@ -232,7 +232,7 @@ final class MemoNotificationManager: NSObject, ObservableObject {
     }
 
     nonisolated private static func kind(from userInfo: [AnyHashable: Any]) -> MemoNotificationKind? {
-        guard let rawValue = userInfo[UserInfoKey.kind] as? String else { return nil }
+        guard let rawValue = userInfo[MemoNotificationUserInfoKey.kind] as? String else { return nil }
         return MemoNotificationKind(rawValue: rawValue)
     }
 
@@ -240,7 +240,7 @@ final class MemoNotificationManager: NSObject, ObservableObject {
         if let kind = kind(from: userInfo) {
             return kind.route
         }
-        guard let rawValue = userInfo[UserInfoKey.route] as? String else { return nil }
+        guard let rawValue = userInfo[MemoNotificationUserInfoKey.route] as? String else { return nil }
         return MemoNotificationRoute(rawValue: rawValue)
     }
 }
