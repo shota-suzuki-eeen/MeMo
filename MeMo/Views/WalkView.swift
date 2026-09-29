@@ -293,8 +293,10 @@ private struct WalkEndButton: View {
                 .foregroundStyle(.white)
                 .frame(width: 132, height: 46)
         }
-        .buttonStyle(.glassProminent)
-        .tint(.black.opacity(0.58))
+        .memoGlassButtonStyle(
+            prominent: true,
+            tint: .black.opacity(0.58)
+        )
         .disabled(!isEnabled)
         .opacity(isEnabled ? 1 : 0.55)
         .accessibilityLabel("お散歩を終了")
@@ -317,7 +319,7 @@ private struct WalkInactiveMessageView: View {
             Button("Homeへ戻る") {
                 onClose()
             }
-            .buttonStyle(.glassProminent)
+            .memoGlassButtonStyle(prominent: true)
         }
         .padding(.horizontal, 22)
         .padding(.vertical, 24)

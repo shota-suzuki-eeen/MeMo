@@ -481,7 +481,7 @@ private struct AuthRequestView: View {
             Button("許可してはじめる") {
                 onAuthorize()
             }
-            .buttonStyle(.glassProminent)
+            .memoGlassButtonStyle(prominent: true)
 
             if let errorMessage {
                 Text(errorMessage)
@@ -511,7 +511,7 @@ private struct DeniedView: View {
                     openURL(url)
                 }
             }
-            .buttonStyle(.glassProminent)
+            .memoGlassButtonStyle(prominent: true)
         }
         .padding()
     }
