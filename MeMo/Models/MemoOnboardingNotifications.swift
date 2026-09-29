@@ -9,6 +9,7 @@
 import Foundation
 
 extension Notification.Name {
+    static let memoMandatoryOnboardingDidComplete = Notification.Name("memo.onboarding.mandatory.didComplete")
     static let memoOnboardingRequestScreen = Notification.Name("memo.onboarding.requestScreen")
     static let memoOnboardingRequestFoodTutorial = Notification.Name("memo.onboarding.requestFoodTutorial")
     static let memoOnboardingRequestToiletTutorial = Notification.Name("memo.onboarding.requestToiletTutorial")

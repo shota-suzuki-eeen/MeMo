@@ -126,6 +126,7 @@ extension AppState {
         memoOnboardingDefaults.set(true, forKey: MemoOnboardingStorageKeys.mandatoryCompleted)
         memoMandatoryOnboardingCurrentStep = nil
         _ = memoMarkFoodTutorialCompleted()
+        NotificationCenter.default.post(name: .memoMandatoryOnboardingDidComplete, object: nil)
         return true
     }
 
@@ -133,6 +134,7 @@ extension AppState {
     func memoSkipAllOnboardingForIPadIfNeeded() -> Bool {
         guard MemoDevice.isIPad else { return false }
 
+        let wasMandatoryOnboardingCompleted = memoMandatoryOnboardingCompleted
         var didChange = false
 
         @discardableResult
@@ -155,6 +157,10 @@ extension AppState {
         for screen in MemoOnboardingScreen.allCases where screen.shouldRememberAsScreenVisit {
             let key = MemoOnboardingStorageKeys.screenPrefix + screen.rawValue
             didChange = setTrueIfNeeded(key) || didChange
+        }
+
+        if !wasMandatoryOnboardingCompleted && memoMandatoryOnboardingCompleted {
+            NotificationCenter.default.post(name: .memoMandatoryOnboardingDidComplete, object: nil)
         }
 
         return didChange

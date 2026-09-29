@@ -77,7 +77,9 @@ final class AppState {
     var currentPetID: String
     var ownedPetIDsData: Data?
 
-    // ✅ 通知設定（MVP：トグル保存のみ）
+    // Legacy notification settings. Current notification system does not use these values.
+    // Kept only for released-app SwiftData schema compatibility. Do not delete / rename /
+    // change type. New notification preferences use `memo.notifications.*`.
     var notifyFeed: Bool
     var notifyBath: Bool
     var notifyToilet: Bool

@@ -28,6 +28,7 @@ struct RootView: View {
     @State private var onboardingViewModel = MemoOnboardingViewModel()
 
     @EnvironmentObject private var bgmManager: BGMManager
+    @ObservedObject private var notificationManager = MemoNotificationManager.shared
 
     @ObservedObject private var walkStore = WalkChallengeStore.shared
     @ObservedObject private var walkWeatherManager = WalkWeatherManager.shared
@@ -117,7 +118,10 @@ struct RootView: View {
                             stepGainPopupLayer
                         }
                     }
-                    .fullScreenCover(isPresented: $showWalkView) {
+                    .fullScreenCover(
+                        isPresented: $showWalkView,
+                        onDismiss: finishNotificationRootDismissalIfPossible
+                    ) {
                         WalkView(
                             state: sharedState,
                             onSave: { saveRootState() }
@@ -130,6 +134,7 @@ struct RootView: View {
                         onDismiss: {
                             // イベント画面自体が閉じられた場合も必ず解除する。
                             isHalloweenRunGameActive = false
+                            finishNotificationRootDismissalIfPossible()
                         }
                     ) {
                         Halloween2026EventView(
@@ -167,6 +172,17 @@ struct RootView: View {
                     }
                     .onReceive(NotificationCenter.default.publisher(for: .memoShowWalkStart)) { _ in
                         handleWalkMenuRequest()
+                    }
+                    .onReceive(notificationManager.$pendingRoute) { route in
+                        guard route != nil else { return }
+                        prepareRootForPendingNotificationRoute(state: sharedState)
+                    }
+                    .onReceive(NotificationCenter.default.publisher(for: .memoMandatoryOnboardingDidComplete)) { _ in
+                        prepareRootForPendingNotificationRoute(state: sharedState)
+                    }
+                    .onChange(of: walkStore.pendingResult) { _, pendingResult in
+                        guard pendingResult == nil else { return }
+                        finishNotificationRootDismissalIfPossible()
                     }
                     .onChange(of: sharedState.walletSteps) { oldValue, newValue in
                         if isHalloweenRunGameActive {
@@ -395,6 +411,29 @@ struct RootView: View {
         withAnimation(.easeInOut(duration: 0.18)) {
             showWalkStartPopup = true
         }
+    }
+
+    @MainActor
+    private func prepareRootForPendingNotificationRoute(state: AppState) {
+        guard notificationManager.pendingRoute != nil else { return }
+        guard state.memoMandatoryOnboardingCompleted else { return }
+
+        notificationManager.beginRootPresentationDismissal()
+        let hadPresentedRootCover = showWalkView || showHalloweenEvent
+        walkStartMessage = nil
+        showWalkStartPopup = false
+        showWalkView = false
+        showHalloweenEvent = false
+        if !hadPresentedRootCover {
+            finishNotificationRootDismissalIfPossible()
+        }
+    }
+
+    @MainActor
+    private func finishNotificationRootDismissalIfPossible() {
+        guard !showWalkView, !showHalloweenEvent else { return }
+        guard walkStore.pendingResult == nil else { return }
+        notificationManager.markPendingRouteReadyForHome()
     }
 
     private func closeWalkStartPopup() {

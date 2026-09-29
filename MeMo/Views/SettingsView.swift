@@ -6,6 +6,7 @@
 //
 
 import SwiftUI
+import UIKit
 
 struct SettingsView: View {
     @Environment(\.openURL) private var openURL
@@ -129,6 +130,10 @@ struct SettingsView: View {
 
                     settingsSection(title: "ロック画面") {
                         MeMoLiveActivitySettingsSection()
+                    }
+
+                    settingsSection(title: "通知") {
+                        MemoNotificationSettingsSection()
                     }
 
                     settingsSection(title: "アプリ") {
@@ -421,6 +426,122 @@ struct SettingsView: View {
         withAnimation(.easeInOut(duration: 0.2)) { showToast = true }
         DispatchQueue.main.asyncAfter(deadline: .now() + 1.4) {
             withAnimation(.easeInOut(duration: 0.2)) { showToast = false }
+        }
+    }
+}
+
+private struct MemoNotificationSettingsSection: View {
+    @Environment(\.scenePhase) private var scenePhase
+    @ObservedObject private var manager = MemoNotificationManager.shared
+
+    @AppStorage(MemoNotificationPreferences.masterEnabledKey)
+    private var masterEnabled = true
+    @AppStorage("memo.notifications.fullnessZero.enabled")
+    private var fullnessZeroEnabled = true
+    @AppStorage("memo.notifications.toilet.enabled")
+    private var toiletEnabled = true
+    @AppStorage("memo.notifications.sleepEnded.enabled")
+    private var sleepEndedEnabled = true
+    @AppStorage("memo.notifications.gachaFreeTen.enabled")
+    private var gachaFreeTenEnabled = true
+    @AppStorage("memo.notifications.fishingTimeBoostEnded.enabled")
+    private var fishingTimeBoostEndedEnabled = true
+    @AppStorage("memo.notifications.fishingBasketFull.enabled")
+    private var fishingBasketFullEnabled = true
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 12) {
+            HStack {
+                Text("端末側の通知状態")
+                    .font(.headline)
+                Spacer()
+                Text(authorizationStatusText)
+                    .foregroundStyle(.secondary)
+            }
+
+            if manager.authorizationStatus == .denied {
+                Button("端末設定を開く") {
+                    guard let url = URL(string: UIApplication.openNotificationSettingsURLString) else { return }
+                    UIApplication.shared.open(url)
+                }
+                .memoGlassButtonStyle(prominent: true)
+                .accessibilityHint("MeMoの通知を変更できる端末設定を開きます")
+            }
+
+            Divider()
+
+            notificationToggle("すべての通知", isOn: $masterEnabled)
+                .font(.headline)
+                .onChange(of: masterEnabled) { _, enabled in
+                    if !enabled { manager.cancelAll() }
+                }
+
+            notificationGroup("お世話") {
+                notificationToggle("満腹度が0", isOn: $fullnessZeroEnabled)
+                    .onChange(of: fullnessZeroEnabled) { _, enabled in
+                        if !enabled { manager.cancel(.fullnessZero) }
+                    }
+                notificationToggle("トイレ", isOn: $toiletEnabled)
+                    .onChange(of: toiletEnabled) { _, enabled in
+                        if !enabled { manager.cancel(.toilet) }
+                    }
+                notificationToggle("おやすみ終了", isOn: $sleepEndedEnabled)
+                    .onChange(of: sleepEndedEnabled) { _, enabled in
+                        if !enabled { manager.cancel(.sleepEnded) }
+                    }
+            }
+
+            notificationGroup("ガチャ") {
+                notificationToggle("無料10回ガチャ", isOn: $gachaFreeTenEnabled)
+                    .onChange(of: gachaFreeTenEnabled) { _, enabled in
+                        if !enabled { manager.cancel(.gachaFreeTen) }
+                    }
+            }
+
+            notificationGroup("釣り") {
+                notificationToggle("タイムブースト終了", isOn: $fishingTimeBoostEndedEnabled)
+                    .onChange(of: fishingTimeBoostEndedEnabled) { _, enabled in
+                        if !enabled { manager.cancel(.fishingTimeBoostEnded) }
+                    }
+                notificationToggle("釣りカゴ満杯", isOn: $fishingBasketFullEnabled)
+                    .onChange(of: fishingBasketFullEnabled) { _, enabled in
+                        if !enabled { manager.cancel(.fishingBasketFull) }
+                    }
+            }
+        }
+        .task { await manager.refreshAuthorizationStatus() }
+        .onChange(of: scenePhase) { _, phase in
+            guard phase == .active else { return }
+            Task { await manager.refreshAuthorizationStatus() }
+        }
+    }
+
+    private var authorizationStatusText: String {
+        switch manager.authorizationStatus {
+        case .notDetermined: return "未選択"
+        case .denied: return "OFF"
+        case .authorized: return "許可済み"
+        case .provisional: return "仮許可"
+        case .ephemeral: return "一時許可"
+        @unknown default: return "不明"
+        }
+    }
+
+    private func notificationToggle(_ title: String, isOn: Binding<Bool>) -> some View {
+        Toggle(title, isOn: isOn)
+            .disabled(!masterEnabled && title != "すべての通知")
+            .accessibilityLabel(title)
+    }
+
+    private func notificationGroup<Content: View>(
+        _ title: String,
+        @ViewBuilder content: () -> Content
+    ) -> some View {
+        VStack(alignment: .leading, spacing: 8) {
+            Text(title)
+                .font(.subheadline.weight(.semibold))
+                .foregroundStyle(.secondary)
+            content()
         }
     }
 }

@@ -80,6 +80,20 @@ MeMo はすでにリリース済みです。
 上記は現在の通知機能では使用しない。
 既存SwiftData schemaとの互換性維持のためAppStateから削除しないこと。
 新規通知設定では再利用しない。
+現在のruntime通知設定は、standard UserDefaultsのadditive key `memo.notifications.*` を使用する。
+旧3値は新設定へmigrationせず、新設定の初期値決定にも使用しない。
+
+### Local notification settings
+
+以下はすべてstandard UserDefaultsのadditive keyで、key未存在時は `true` として扱う。
+
+- `memo.notifications.enabled`
+- `memo.notifications.fullnessZero.enabled`
+- `memo.notifications.toilet.enabled`
+- `memo.notifications.sleepEnded.enabled`
+- `memo.notifications.gachaFreeTen.enabled`
+- `memo.notifications.fishingTimeBoostEnded.enabled`
+- `memo.notifications.fishingBasketFull.enabled`
 
 ## `WorkoutSessionRecord`
 

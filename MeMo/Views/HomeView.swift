@@ -17,10 +17,17 @@ import MetalKit
 import WidgetKit
 #endif
 
+private enum HomeNavigationDestination: Hashable {
+    case settings
+    case zukan
+    case memories
+}
+
 struct HomeView: View {
     @Environment(\.modelContext) private var modelContext
     @Environment(\.scenePhase) private var scenePhase
     @EnvironmentObject private var bgmManager: BGMManager
+    @ObservedObject private var notificationManager = MemoNotificationManager.shared
     @ObservedObject private var sleepModeAd = AdMobManager.shared.rewardSleepMode
     @State private var touchTapSEPool = TouchTapSEPool()
     @AppStorage(WallpaperCatalog.selectedHomeWallpaperAssetNameKey)
@@ -52,6 +59,8 @@ struct HomeView: View {
 
     @State private var showFishingView: Bool = false
     @State private var showGachaView: Bool = false
+    @State private var homeNavigationPath = NavigationPath()
+    @State private var isPreparingNotificationRoute: Bool = false
 
     @State private var showShopView: Bool = false
     @State private var showRightMenuPopup: Bool = false
@@ -601,6 +610,7 @@ struct HomeView: View {
             .onAppear {
                 isHomeVisible = true
                 MemoOnboardingHomeHooks.homeAppeared(state: state)
+                handleNotificationHomeArrival()
 
                 _ = state.normalizeFixedDailyStepGoal()
                 syncCharacterBaseFromState(force: true)
@@ -624,6 +634,17 @@ struct HomeView: View {
                 updateToiletWiggle()
                 syncCharacterBaseFromState(force: true)
                 updateWidgetSnapshot(forceReload: true)
+            }
+            .onReceive(notificationManager.$pendingRoute) { route in
+                guard route != nil else { return }
+                handlePendingNotificationRouteIfReady()
+            }
+            .onReceive(notificationManager.$isPendingRouteReadyForHome) { isReady in
+                guard isReady else { return }
+                handlePendingNotificationRouteIfReady()
+            }
+            .onReceive(NotificationCenter.default.publisher(for: .memoMandatoryOnboardingDidComplete)) { _ in
+                handleNotificationHomeArrival()
             }
             .onDisappear {
                 isHomeVisible = false
@@ -789,7 +810,10 @@ struct HomeView: View {
                 picoStyleCameraOverlay
             }
             .statusBarHidden(showPicoStyleCamera)
-            .fullScreenCover(isPresented: $showShopView) {
+            .fullScreenCover(
+                isPresented: $showShopView,
+                onDismiss: finishPendingNotificationRouteIfPossible
+            ) {
                 ShopView()
                     .memoOnboardingRoot(state: state, viewModel: shopOnboardingViewModel)
                     .onAppear {
@@ -797,14 +821,71 @@ struct HomeView: View {
                     }
                     .memoIPadPresentedPhoneCanvas()
             }
-            .fullScreenCover(isPresented: $showGachaView) {
+            .fullScreenCover(
+                isPresented: $showGachaView,
+                onDismiss: finishPendingNotificationRouteIfPossible
+            ) {
                 GachaView()
                     .environmentObject(bgmManager)
                     .memoIPadPresentedPhoneCanvas()
             }
-            .fullScreenCover(isPresented: $showFishingView) {
+            .fullScreenCover(
+                isPresented: $showFishingView,
+                onDismiss: finishPendingNotificationRouteIfPossible
+            ) {
                 fishingPresentedView
             }
+    }
+
+    @MainActor
+    private func handleNotificationHomeArrival() {
+        guard state.memoMandatoryOnboardingCompleted else { return }
+        handlePendingNotificationRouteIfReady()
+        Task { await notificationManager.requestAuthorizationFromHomeIfNeeded() }
+    }
+
+    @MainActor
+    private func handlePendingNotificationRouteIfReady() {
+        guard state.memoMandatoryOnboardingCompleted else { return }
+        guard notificationManager.pendingRoute != nil,
+              notificationManager.isPendingRouteReadyForHome else { return }
+
+        isPreparingNotificationRoute = true
+        homeNavigationPath = NavigationPath()
+
+        let hadPresentedHomeCover = showShopView || showGachaView || showFishingView
+        showShopView = false
+        showPicoStyleCamera = false
+        showSleepModePopup = false
+        sleepModeMessage = nil
+        showRightMenuPopup = false
+        activeTopInfoPopup = nil
+        showFoodSelector = false
+        showToiletLockedPopup = false
+        showNoFoodPopup = false
+        showGachaView = false
+        showFishingView = false
+
+        if !hadPresentedHomeCover {
+            finishPendingNotificationRouteIfPossible()
+        }
+    }
+
+    @MainActor
+    private func finishPendingNotificationRouteIfPossible() {
+        guard isPreparingNotificationRoute else { return }
+        guard !showShopView, !showGachaView, !showFishingView else { return }
+        guard let route = notificationManager.consumePendingRouteIfReady() else { return }
+
+        isPreparingNotificationRoute = false
+        switch route {
+        case .home:
+            break
+        case .gacha:
+            showGachaView = true
+        case .fishing:
+            showFishingView = true
+        }
     }
 
     @ViewBuilder
@@ -865,8 +946,18 @@ struct HomeView: View {
     }
 
     private var homeRootView: some View {
-        NavigationStack {
+        NavigationStack(path: $homeNavigationPath) {
             homeSceneView
+                .navigationDestination(for: HomeNavigationDestination.self) { destination in
+                    switch destination {
+                    case .settings:
+                        SettingsView().memoOnboardingScreen(.settings)
+                    case .zukan:
+                        ZukanView().memoOnboardingScreen(.zukan)
+                    case .memories:
+                        MemoriesView().memoOnboardingScreen(.memories)
+                    }
+                }
         }
         .navigationBarHidden(true)
     }
@@ -4985,7 +5076,7 @@ private struct RightSideButtons: View {
                     }
                     .buttonStyle(.plain)
                 } else {
-                    NavigationLink { MemoriesView().memoOnboardingScreen(.memories) } label: {
+                    NavigationLink(value: HomeNavigationDestination.memories) {
                         MenuPopupActionIcon(imageName: "omoide_button", buttonSize: buttonSize)
                     }
                     .simultaneousGesture(TapGesture().onEnded {
@@ -5004,7 +5095,7 @@ private struct RightSideButtons: View {
                     }
                     .buttonStyle(.plain)
                 } else {
-                    NavigationLink { ZukanView().memoOnboardingScreen(.zukan) } label: {
+                    NavigationLink(value: HomeNavigationDestination.zukan) {
                         MenuPopupActionIcon(imageName: "picture_button", buttonSize: buttonSize)
                     }
                     .simultaneousGesture(TapGesture().onEnded {
@@ -5038,7 +5129,7 @@ private struct RightSideButtons: View {
                     }
                     .buttonStyle(.plain)
                 } else {
-                    NavigationLink { SettingsView().memoOnboardingScreen(.settings) } label: {
+                    NavigationLink(value: HomeNavigationDestination.settings) {
                         MenuPopupActionIcon(imageName: "option_button", buttonSize: buttonSize)
                     }
                     .simultaneousGesture(TapGesture().onEnded {
