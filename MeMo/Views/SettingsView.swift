@@ -224,13 +224,13 @@ struct SettingsView: View {
                             bgmManager.playSE(.push)
                             closeDeveloperPinPopup()
                         }
-                        .buttonStyle(.glass)
+                        .memoGlassButtonStyle()
 
                         Button("決定") {
                             bgmManager.playSE(.push)
                             confirmDeveloperMode()
                         }
-                        .buttonStyle(.glassProminent)
+                        .memoGlassButtonStyle(prominent: true)
                     }
                 }
                 .padding(20)

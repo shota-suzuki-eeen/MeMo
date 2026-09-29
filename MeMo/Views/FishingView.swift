@@ -1673,8 +1673,10 @@ private struct FishingBoostConfirmationOverlay: View {
                             .frame(maxWidth: .infinity)
                             .frame(height: 50)
                         }
-                        .buttonStyle(.glassProminent)
-                        .tint(Color(red: 0.92, green: 0.14, blue: 0.12))
+                        .memoGlassButtonStyle(
+                            prominent: true,
+                            tint: Color(red: 0.92, green: 0.14, blue: 0.12)
+                        )
 
                         Button(action: onCancel) {
                             Text("キャンセル")
@@ -1683,7 +1685,7 @@ private struct FishingBoostConfirmationOverlay: View {
                                 .frame(maxWidth: .infinity)
                                 .frame(height: 46)
                         }
-                        .buttonStyle(.glass)
+                        .memoGlassButtonStyle()
                     }
                 }
                 .padding(20)
