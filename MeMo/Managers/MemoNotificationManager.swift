@@ -161,6 +161,11 @@ final class MemoNotificationManager: NSObject, ObservableObject {
     }
 
     func schedule(_ request: MemoLocalNotificationRequest) async throws {
+        let status = await refreshAuthorizationStatus()
+        guard status == .authorized || status == .provisional || status == .ephemeral else {
+            cancel(requestID: request.requestID)
+            return
+        }
         guard MemoNotificationPreferences.isKindEnabled(request.kind) else {
             cancel(request.kind)
             return

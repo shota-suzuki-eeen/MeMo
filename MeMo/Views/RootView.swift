@@ -100,6 +100,10 @@ struct RootView: View {
                                 .frame(width: 0, height: 0)
                                 .allowsHitTesting(false)
 
+                            MemoNotificationStateObserver(state: sharedState)
+                                .frame(width: 0, height: 0)
+                                .allowsHitTesting(false)
+
                             walkStartPopupLayer
 
                             if let pendingResult = walkStore.pendingResult {

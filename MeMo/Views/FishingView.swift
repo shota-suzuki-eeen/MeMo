@@ -606,7 +606,7 @@ final class FishingStore: ObservableObject {
 
     /// 指定した実時間区間で釣りタイマーが何秒進むかを積算する。
     /// 時間ブースト区間だけ、現在レベルのウキ性能を追加で1倍ぶん加算して合計2倍にする。
-    private func progressedFishingSeconds(from start: Date, to end: Date) -> TimeInterval {
+    func progressedFishingSeconds(from start: Date, to end: Date) -> TimeInterval {
         guard end > start else { return 0 }
 
         let baseMultiplier = max(0.01, timeProgressMultiplier)
@@ -626,6 +626,36 @@ final class FishingStore: ObservableObject {
         let additionalBoostMultiplier = max(0, Self.boostMultiplier - 1.0)
         return (totalElapsed * baseMultiplier)
             + (boostedOverlap * baseMultiplier * additionalBoostMultiplier)
+    }
+
+    /// Predicts the first future time at which the current basket is guaranteed to be full
+    /// under the same capped-away-time and piecewise boost progression used by `refresh`.
+    /// No fishing state, rewards, random draws, or persistence values are changed.
+    func predictedBasketFullDate(now: Date = Date()) -> Date? {
+        let remainingSlots = basketCapacity - pendingCatchCount
+        guard remainingSlots > 0, let lastCalculatedAt else { return nil }
+        guard lastCalculatedAt <= now else { return nil }
+
+        let requiredProgress = TimeInterval(remainingSlots) * Self.baseCatchInterval
+        let latestGuaranteedDate = lastCalculatedAt.addingTimeInterval(Self.maximumAwayDuration)
+        guard latestGuaranteedDate > now,
+              progressedFishingSeconds(from: lastCalculatedAt, to: latestGuaranteedDate) >= requiredProgress
+        else { return nil }
+
+        var lower = lastCalculatedAt
+        var upper = latestGuaranteedDate
+        for _ in 0..<52 {
+            let midpoint = Date(timeIntervalSinceReferenceDate: (
+                lower.timeIntervalSinceReferenceDate + upper.timeIntervalSinceReferenceDate
+            ) / 2)
+            if progressedFishingSeconds(from: lastCalculatedAt, to: midpoint) >= requiredProgress {
+                upper = midpoint
+            } else {
+                lower = midpoint
+            }
+        }
+
+        return upper > now ? upper : nil
     }
 
     /// endを終点として、指定した釣りタイマー上の進行秒数を保持できる基準日時を二分探索で求める。

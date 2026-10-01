@@ -933,6 +933,20 @@ extension AppState {
         return max(0, remaining)
     }
 
+    /// Existing fullness decay semantics expressed as the next future transition to zero.
+    /// This is pure: notification reconciliation must never normalize or persist game state.
+    func fullnessZeroDate(now: Date = Date()) -> Date? {
+        let level = computedSatisfaction(now: now).level
+        guard level > 0,
+              let untilNextDecay = satisfactionRemainingSecondsUntilNextDecay(now: now)
+        else { return nil }
+
+        let remaining = untilNextDecay
+            + (TimeInterval(level - 1) * AppState.fullnessDecayUnitSeconds)
+        guard remaining > 0 else { return nil }
+        return now.addingTimeInterval(remaining)
+    }
+
     @discardableResult
     func applySatisfactionDecayIfNeeded(now: Date = Date()) -> Int {
         ensureDailyResetIfNeeded(now: now)
