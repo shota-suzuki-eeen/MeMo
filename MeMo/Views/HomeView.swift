@@ -845,7 +845,11 @@ struct HomeView: View {
     private func handleNotificationHomeArrival() {
         guard state.memoMandatoryOnboardingCompleted else { return }
         handlePendingNotificationRouteIfReady()
-        Task { await notificationManager.requestAuthorizationFromHomeIfNeeded() }
+        Task {
+            await notificationManager.requestAuthorizationFromHomeIfNeeded()
+            MemoNotificationReconciler.shared.register(appState: state)
+            await MemoNotificationReconciler.shared.reconcileAll()
+        }
     }
 
     @MainActor
@@ -1976,6 +1980,7 @@ struct HomeView: View {
             onReward: {
                 let now = Date()
                 state.activateHappinessSleepMode(now: now)
+                Task { await MemoNotificationReconciler.shared.reconcileHome(now: now) }
                 state.refreshHappinessDecayTracking(fullnessLevel: state.currentSatisfaction(now: now), now: now)
                 save(forceWidgetReload: true)
                 syncDisplayedHappiness(animated: false)

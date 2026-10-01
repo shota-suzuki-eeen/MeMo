@@ -473,39 +473,39 @@ private struct MemoNotificationSettingsSection: View {
             notificationToggle("すべての通知", isOn: $masterEnabled)
                 .font(.headline)
                 .onChange(of: masterEnabled) { _, enabled in
-                    if !enabled { manager.cancelAll() }
+                    if !enabled { manager.cancelAll() } else { reconcileEnabledNotifications() }
                 }
 
             notificationGroup("お世話") {
                 notificationToggle("満腹度が0", isOn: $fullnessZeroEnabled)
                     .onChange(of: fullnessZeroEnabled) { _, enabled in
-                        if !enabled { manager.cancel(.fullnessZero) }
+                        if !enabled { manager.cancel(.fullnessZero) } else { reconcileEnabledNotifications() }
                     }
                 notificationToggle("トイレ", isOn: $toiletEnabled)
                     .onChange(of: toiletEnabled) { _, enabled in
-                        if !enabled { manager.cancel(.toilet) }
+                        if !enabled { manager.cancel(.toilet) } else { reconcileEnabledNotifications() }
                     }
                 notificationToggle("おやすみ終了", isOn: $sleepEndedEnabled)
                     .onChange(of: sleepEndedEnabled) { _, enabled in
-                        if !enabled { manager.cancel(.sleepEnded) }
+                        if !enabled { manager.cancel(.sleepEnded) } else { reconcileEnabledNotifications() }
                     }
             }
 
             notificationGroup("ガチャ") {
                 notificationToggle("無料10回ガチャ", isOn: $gachaFreeTenEnabled)
                     .onChange(of: gachaFreeTenEnabled) { _, enabled in
-                        if !enabled { manager.cancel(.gachaFreeTen) }
+                        if !enabled { manager.cancel(.gachaFreeTen) } else { reconcileEnabledNotifications() }
                     }
             }
 
             notificationGroup("釣り") {
                 notificationToggle("タイムブースト終了", isOn: $fishingTimeBoostEndedEnabled)
                     .onChange(of: fishingTimeBoostEndedEnabled) { _, enabled in
-                        if !enabled { manager.cancel(.fishingTimeBoostEnded) }
+                        if !enabled { manager.cancel(.fishingTimeBoostEnded) } else { reconcileEnabledNotifications() }
                     }
                 notificationToggle("釣りカゴ満杯", isOn: $fishingBasketFullEnabled)
                     .onChange(of: fishingBasketFullEnabled) { _, enabled in
-                        if !enabled { manager.cancel(.fishingBasketFull) }
+                        if !enabled { manager.cancel(.fishingBasketFull) } else { reconcileEnabledNotifications() }
                     }
             }
         }
@@ -525,6 +525,10 @@ private struct MemoNotificationSettingsSection: View {
         case .ephemeral: return "一時許可"
         @unknown default: return "不明"
         }
+    }
+
+    private func reconcileEnabledNotifications() {
+        Task { await MemoNotificationReconciler.shared.reconcileAll() }
     }
 
     private func notificationToggle(_ title: String, isOn: Binding<Bool>) -> some View {

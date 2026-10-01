@@ -14,6 +14,14 @@ enum GachaFreeAdSlot: String, CaseIterable, Codable, Identifiable {
 
     var id: String { rawValue }
 
+    var startHour: Int {
+        switch self {
+        case .morning: return 5
+        case .noon: return 10
+        case .evening: return 15
+        }
+    }
+
     var title: String {
         switch self {
         case .morning: return "朝"
