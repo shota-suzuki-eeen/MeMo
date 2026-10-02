@@ -50,7 +50,9 @@ struct Halloween2026GachaView: View {
                             action("10回 / 500キャンディ", enabled: !busy && store.candyCount >= 500) { draw(count: 10) }
                         }
                         action(rewarded.isLoading ? "広告を準備中" : (rewarded.isAvailableWithoutAd ? "無料10回ガチャ" : "広告視聴で無料10回"),
-                               enabled: !busy && claim != nil && rewarded.isReady) { if let claim { showAd(claim: claim) } }
+                               enabled: !busy && claim != nil && rewarded.isReady,
+                               tint: rewarded.isAvailableWithoutAd ? .orange : .red,
+                               loading: rewarded.isLoading) { if let claim { showAd(claim: claim) } }
                         Text(claim.map { "\($0.slot.title)の枠（\($0.slot.windowText)）" } ?? "無料枠は時間外または使用済みです")
                             .font(.caption).multilineTextAlignment(.center)
                         Text("無料枠：5〜10時 / 10〜15時 / 15〜23時 · 各1回\n通常ガチャの無料枠とは別です")
@@ -65,13 +67,13 @@ struct Halloween2026GachaView: View {
                 .foregroundStyle(.white).padding(20).frame(maxWidth: 560).frame(maxWidth: .infinity)
             }
             .background {
-                Image("halloween_shop").resizable().scaledToFill().ignoresSafeArea()
-                    .overlay(.black.opacity(0.3)).clipped()
+                HalloweenEventBackground(assetName: "halloween_shop")
             }
         }
         .sheet(item: $result) { batch in
             HalloweenGachaResultView(batch: batch)
         }
+        .statusBarHidden()
         .onAppear {
             recover()
             bgmManager.switchBackground(to: .gacha)
@@ -84,11 +86,14 @@ struct Halloween2026GachaView: View {
         }
     }
 
-    private func action(_ title: String, enabled: Bool, perform: @escaping () -> Void) -> some View {
+    private func action(_ title: String, enabled: Bool, tint: Color = .orange, loading: Bool = false, perform: @escaping () -> Void) -> some View {
         Button(action: perform) {
-            Text(title).font(.headline).multilineTextAlignment(.center)
+            HStack(spacing: 7) {
+                if loading { ProgressView().tint(.white) }
+                Text(title).font(.headline).multilineTextAlignment(.center)
+            }
                 .frame(maxWidth: .infinity, minHeight: 56).padding(.horizontal, 6)
-        }.memoGlassButtonStyle(prominent: true, tint: .orange).disabled(!enabled).opacity(enabled ? 1 : 0.45)
+        }.memoGlassButtonStyle(prominent: true, tint: tint).disabled(!enabled).opacity(enabled ? 1 : 0.45)
     }
 
     private func rewardInformation(at date: Date) -> some View {
@@ -167,9 +172,11 @@ private struct HalloweenGachaResultView: View {
                         }.padding(12).background(.thinMaterial, in: RoundedRectangle(cornerRadius: 16))
                     }
                 }.padding(18)
-            }.navigationTitle("獲得した報酬")
+            }.background { HalloweenEventBackground(assetName: "halloween_shop") }
+                .navigationTitle("獲得した報酬")
                 .toolbar { ToolbarItem(placement: .confirmationAction) { Button("完了") { dismiss() } } }
         }
+        .preferredColorScheme(.dark)
     }
     private func image(_ reward: HalloweenGachaReward) -> String {
         switch reward.kind {

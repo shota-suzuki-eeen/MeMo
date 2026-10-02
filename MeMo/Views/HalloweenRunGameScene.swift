@@ -7,7 +7,7 @@
 //  - SKPhysicsを使用せず、少数ノードへの手動衝突判定に変更。
 //  - 距離・キャンディ・カウントダウンHUDはSpriteKit内で完結。
 //  - SwiftUIへの通知はGAME OVER時の1回だけ。
-//  - 仮アセットはSKSpriteNode中心の軽量描画。
+//  - 登録済みテクスチャと上限付き回収エフェクトで軽量描画。
 //
 
 import SpriteKit
@@ -33,7 +33,9 @@ final class HalloweenRunGameScene: SKScene {
     /// Results and throttled endless checkpoints are delivered outside the frame update.
     var onGameOver: ((HalloweenRunResult) -> Void)?
     var onCheckpoint: ((HalloweenRunResult) -> Void)?
+    var onCandyCollected: (() -> Void)?
     let runMode: HalloweenRunMode
+    private let playerAssetName: String
     private var stageAttempt: HalloweenStageAttempt?
     private var stageLevel: Int {
         Halloween2026Configuration.level(forStage: stageAttempt?.number ?? 1)
@@ -44,6 +46,19 @@ final class HalloweenRunGameScene: SKScene {
     private let roadMarkLayer = SKNode()
     private let movingLayer = SKNode()
     private let hudLayer = SKNode()
+    private let backgroundLayer = SKNode()
+    private let collectionLayer = SKNode()
+    private let hudPanel = SKShapeNode()
+    private var pumpkinNodes: [SKSpriteNode] = []
+    private var safeAreaInsets: UIEdgeInsets = .zero
+    private lazy var runTexture = SKTexture(imageNamed: "halloween_run")
+    private lazy var candyTexture = SKTexture(imageNamed: "halloween_candy")
+    private lazy var woodTexture = SKTexture(imageNamed: "halloween_wood")
+    private lazy var pumpkinTexture = SKTexture(imageNamed: "halloween_level_pumpkin")
+    private var layout: HalloweenRunHUDLayout {
+        .init(width: Double(size.width), height: Double(size.height), safeTop: Double(safeAreaInsets.top))
+    }
+    private var lastCollectionSoundTime: TimeInterval = -1
 
     // MARK: - Player
 
@@ -69,8 +84,6 @@ final class HalloweenRunGameScene: SKScene {
     private let newLevelAnnouncement = SKLabelNode(fontNamed: "AvenirNext-Heavy")
     private let countdownLabel = SKLabelNode(fontNamed: "AvenirNext-Heavy")
     private let readyLabel = SKLabelNode(fontNamed: "AvenirNext-Bold")
-    private let leftHintLabel = SKLabelNode(fontNamed: "AvenirNext-Bold")
-    private let rightHintLabel = SKLabelNode(fontNamed: "AvenirNext-Bold")
 
     // MARK: - Runtime
 
@@ -103,8 +116,9 @@ final class HalloweenRunGameScene: SKScene {
     private let candyHaptic = UIImpactFeedbackGenerator(style: .soft)
     private let gameOverHaptic = UINotificationFeedbackGenerator()
 
-    init(size: CGSize, mode: HalloweenRunMode, stageNumber: Int?) {
+    init(size: CGSize, mode: HalloweenRunMode, stageNumber: Int?, playerAssetName: String) {
         runMode = mode
+        self.playerAssetName = playerAssetName
         stageAttempt = mode == .endless ? nil : HalloweenStageAttempt(number: stageNumber ?? 1)
         super.init(size: size)
         scaleMode = .resizeFill
@@ -133,6 +147,14 @@ final class HalloweenRunGameScene: SKScene {
         levelLabel.isHidden = runMode == .bonus
         hudLayer.addChild(levelLabel)
         levelLabel.text = "Lv\(currentLevel)"
+        pumpkinNodes = (0..<5).map { _ in
+            let node = SKSpriteNode(texture: pumpkinTexture)
+            node.size = CGSize(width: 18, height: 18)
+            node.isHidden = runMode == .bonus
+            hudLayer.addChild(node)
+            return node
+        }
+        updatePumpkins()
         for announcement in [oldLevelAnnouncement, newLevelAnnouncement] {
             announcement.fontSize = 26
             announcement.fontColor = .orange
@@ -141,7 +163,7 @@ final class HalloweenRunGameScene: SKScene {
         }
         updateHUDPositions()
         if let attempt = stageAttempt {
-            distanceTitleLabel.text = attempt.mode == .bonus ? "BONUS \(attempt.number)" : "STAGE \(attempt.number) · Lv\(stageLevel)"
+            distanceTitleLabel.text = attempt.mode == .bonus ? "BONUS \(attempt.number) · Lv\(stageLevel)" : "STAGE \(attempt.number)"
             distanceLabel.text = "\(Int(attempt.duration))秒"
             candyLabel.isHidden = attempt.mode == .stage
         }
@@ -180,7 +202,7 @@ final class HalloweenRunGameScene: SKScene {
     }
 
     private func setGameplayActionsPaused(_ paused: Bool) {
-        for node in [playerNode, movingLayer, roadMarkLayer, hudLayer] { node.isPaused = paused }
+        for node in [playerNode, movingLayer, roadMarkLayer, hudLayer, collectionLayer] { node.isPaused = paused }
     }
 
     private func updateResumeHUD() {
@@ -207,11 +229,18 @@ final class HalloweenRunGameScene: SKScene {
             y: size.height * Config.playerYRatio
         )
         updateHUDPositions()
+        layoutBackground()
     }
 
     // MARK: - Setup
 
     private func setupLayers() {
+        backgroundLayer.removeAllChildren()
+        backgroundLayer.zPosition = -20
+        addChild(backgroundLayer)
+        collectionLayer.removeAllChildren()
+        collectionLayer.zPosition = 90
+        addChild(collectionLayer)
         roadMarkLayer.zPosition = -5
         addChild(roadMarkLayer)
 
@@ -225,13 +254,8 @@ final class HalloweenRunGameScene: SKScene {
     private func setupRoad() {
         lanePositions = Config.laneXRatio.map { size.width * $0 }
 
-        let road = SKSpriteNode(
-            color: UIColor(red: 0.13, green: 0.09, blue: 0.21, alpha: 1),
-            size: CGSize(width: size.width * 0.86, height: size.height * 1.1)
-        )
-        road.position = CGPoint(x: size.width * 0.5, y: size.height * 0.5)
-        road.zPosition = -10
-        addChild(road)
+        for _ in 0..<2 { backgroundLayer.addChild(SKSpriteNode(texture: runTexture)) }
+        layoutBackground()
 
         let dividerXs = [
             (lanePositions[0] + lanePositions[1]) * 0.5,
@@ -267,20 +291,41 @@ final class HalloweenRunGameScene: SKScene {
         playerNode.zPosition = 20
         playerNode.name = "player"
 
-        // 仮キャラクターの目。2ノードだけなので負荷は無視できる。
-        let leftEye = SKShapeNode(circleOfRadius: 5)
-        leftEye.fillColor = .black
-        leftEye.strokeColor = .clear
-        leftEye.position = CGPoint(x: -10, y: 10)
-        playerNode.addChild(leftEye)
-
-        let rightEye = SKShapeNode(circleOfRadius: 5)
-        rightEye.fillColor = .black
-        rightEye.strokeColor = .clear
-        rightEye.position = CGPoint(x: 10, y: 10)
-        playerNode.addChild(rightEye)
+        let texture = SKTexture(imageNamed: playerAssetName)
+        playerNode.texture = texture
+        playerNode.size = fittedSize(texture: texture, bounds: CGSize(width: 52, height: 62))
 
         addChild(playerNode)
+    }
+
+    private func fittedSize(texture: SKTexture, bounds: CGSize) -> CGSize {
+        let dimensions = texture.size()
+        let scale = min(bounds.width / max(1, dimensions.width), bounds.height / max(1, dimensions.height))
+        return CGSize(width: dimensions.width * scale, height: dimensions.height * scale)
+    }
+
+    private func layoutBackground() {
+        let dimensions = runTexture.size()
+        let scale = max(size.width / max(1, dimensions.width), size.height / max(1, dimensions.height))
+        let tileSize = CGSize(width: dimensions.width * scale, height: dimensions.height * scale)
+        for (index, child) in backgroundLayer.children.enumerated() {
+            guard let node = child as? SKSpriteNode else { continue }
+            node.size = tileSize
+            node.position = CGPoint(x: size.width / 2, y: tileSize.height * (CGFloat(index) + 0.5))
+        }
+    }
+
+    func updateSafeArea(_ insets: UIEdgeInsets) {
+        guard insets != safeAreaInsets else { return }
+        safeAreaInsets = insets
+        updateHUDPositions()
+    }
+
+    private func updatePumpkins() {
+        for (index, node) in pumpkinNodes.enumerated() {
+            node.color = .black
+            node.colorBlendFactor = index < currentLevel ? 0 : 1
+        }
     }
 
     private func setupHUD() {
@@ -299,7 +344,7 @@ final class HalloweenRunGameScene: SKScene {
         candyLabel.text = "CANDY  0"
         candyLabel.fontSize = 17
         candyLabel.fontColor = .white
-        candyLabel.horizontalAlignmentMode = .right
+        candyLabel.horizontalAlignmentMode = runMode == .bonus ? .center : .right
         candyLabel.verticalAlignmentMode = .center
 
         countdownLabel.text = "3"
@@ -314,45 +359,39 @@ final class HalloweenRunGameScene: SKScene {
         readyLabel.horizontalAlignmentMode = .center
         readyLabel.verticalAlignmentMode = .center
 
-        leftHintLabel.text = "← LEFT"
-        leftHintLabel.fontSize = 11
-        leftHintLabel.fontColor = UIColor.white.withAlphaComponent(0.62)
-        leftHintLabel.horizontalAlignmentMode = .left
-        leftHintLabel.verticalAlignmentMode = .center
-
-        rightHintLabel.text = "RIGHT →"
-        rightHintLabel.fontSize = 11
-        rightHintLabel.fontColor = UIColor.white.withAlphaComponent(0.62)
-        rightHintLabel.horizontalAlignmentMode = .right
-        rightHintLabel.verticalAlignmentMode = .center
-
+        hudPanel.fillColor = UIColor.black.withAlphaComponent(0.62)
+        hudPanel.strokeColor = UIColor.white.withAlphaComponent(0.16)
+        hudPanel.zPosition = -1
+        hudLayer.addChild(hudPanel)
         hudLayer.addChild(distanceTitleLabel)
         hudLayer.addChild(distanceLabel)
         hudLayer.addChild(candyLabel)
         hudLayer.addChild(countdownLabel)
         hudLayer.addChild(readyLabel)
-        hudLayer.addChild(leftHintLabel)
-        hudLayer.addChild(rightHintLabel)
 
         updateHUDPositions()
         updateCountdownHUD(force: true)
     }
 
     private func updateHUDPositions() {
-        let topY = size.height - 68
-        levelLabel.position = CGPoint(x: 22, y: size.height - 132)
+        let hud = layout
+        hudPanel.path = CGPath(roundedRect: CGRect(x: 10, y: size.height - CGFloat(hud.headerClearance),
+            width: max(1, size.width - 20), height: 118), cornerWidth: 20, cornerHeight: 20, transform: nil)
+        levelLabel.position = CGPoint(x: 20, y: hud.levelY)
+        for (index, node) in pumpkinNodes.enumerated() {
+            node.position = CGPoint(x: hud.pumpkinCenters[index], y: hud.pumpkinY)
+        }
         oldLevelAnnouncement.position = CGPoint(x: size.width / 2, y: size.height * 0.62)
         newLevelAnnouncement.position = oldLevelAnnouncement.position
 
-        distanceTitleLabel.position = CGPoint(x: size.width * 0.5, y: topY + 10)
-        distanceLabel.position = CGPoint(x: size.width * 0.5, y: topY - 14)
-        candyLabel.position = CGPoint(x: size.width - 18, y: topY - 3)
+        distanceTitleLabel.position = CGPoint(x: size.width * 0.5, y: hud.titleY)
+        distanceLabel.position = CGPoint(x: size.width * 0.5, y: hud.valueY)
+        candyLabel.position = CGPoint(x: runMode == .bonus ? CGFloat(hud.candyCenterX) : size.width - 22, y: hud.candyY)
 
         countdownLabel.position = CGPoint(x: size.width * 0.5, y: size.height * 0.56)
         readyLabel.position = CGPoint(x: size.width * 0.5, y: size.height * 0.56 - 72)
 
-        leftHintLabel.position = CGPoint(x: 26, y: 34)
-        rightHintLabel.position = CGPoint(x: size.width - 26, y: 34)
+
     }
 
     // MARK: - Frame update
@@ -416,7 +455,7 @@ final class HalloweenRunGameScene: SKScene {
             let previousLevel = runDifficulty.level
             let resumed = runDifficulty.advance(distance: Int(distanceMeters),
                 objectsAreEmpty: movingLayer.children.isEmpty, seconds: deltaTime)
-            if runDifficulty.level != previousLevel { announceLevel(from: previousLevel) }
+            if runDifficulty.level != previousLevel { announceLevel(from: previousLevel); updatePumpkins() }
             if case let .draining(target) = runDifficulty.phase {
                 levelLabel.text = "Lv\(currentLevel) → Lv\(target)"
             } else { levelLabel.text = "Lv\(currentLevel)" }
@@ -439,7 +478,7 @@ final class HalloweenRunGameScene: SKScene {
 
     private func scrollSpeed(for level: Int) -> Double {
         Halloween2026Configuration.scrollSpeed(forLevel: level, sceneHeight: Double(size.height),
-            playerY: Double(playerNode.position.y), collisionHalfHeight: 55)
+            playerY: Double(playerNode.position.y), collisionHalfHeight: 55, headerClearance: layout.headerClearance)
     }
 
     private var currentScrollSpeed: CGFloat {
@@ -540,10 +579,8 @@ final class HalloweenRunGameScene: SKScene {
             height: Config.obstacleHeight
         )
 
-        let node = SKSpriteNode(
-            color: UIColor(red: 0.92, green: 0.25, blue: 0.18, alpha: 1),
-            size: obstacleSize
-        )
+        let node = SKSpriteNode(texture: woodTexture)
+        node.size = fittedSize(texture: woodTexture, bounds: obstacleSize)
         node.position = CGPoint(x: lanePositions[lane], y: y)
         node.name = "obstacle"
         node.userData = NSMutableDictionary()
@@ -596,11 +633,8 @@ final class HalloweenRunGameScene: SKScene {
     private func spawnCandy(lane: Int, y: CGFloat) {
         guard lanePositions.indices.contains(lane) else { return }
 
-        // アセット準備前は最軽量のSpriteNodeをキャンディ代替表示として使用。
-        let node = SKSpriteNode(
-            color: UIColor(red: 1.00, green: 0.39, blue: 0.66, alpha: 1),
-            size: CGSize(width: 30, height: 30)
-        )
+        let node = SKSpriteNode(texture: candyTexture)
+        node.size = fittedSize(texture: candyTexture, bounds: CGSize(width: 30, height: 30))
         node.position = CGPoint(x: lanePositions[lane], y: y)
         node.name = "candy"
         node.userData = NSMutableDictionary()
@@ -622,6 +656,9 @@ final class HalloweenRunGameScene: SKScene {
         // childrenはArrayのスナップショットなので、ループ中にremoveしても安全。
         for node in movingLayer.children {
             node.position.y -= deltaY
+            // Spawns enter the visible playfield below the HUD; the reaction-time
+            // clamp uses this same edge. Collection effects may reach the counter.
+            node.isHidden = node.position.y > size.height - CGFloat(layout.headerClearance)
 
             if node.name == "obstacle" {
                 let xDistance = abs(node.position.x - playerNode.position.x)
@@ -666,7 +703,7 @@ final class HalloweenRunGameScene: SKScene {
 
     private func collectCandy(_ node: SKNode) {
         guard node.parent != nil else { return }
-
+        let origin = node.position
         node.removeFromParent()
         if runMode == .bonus {
             stageAttempt?.collectCandy()
@@ -676,12 +713,33 @@ final class HalloweenRunGameScene: SKScene {
         }
         candyLabel.text = "CANDY  \(candyCount)"
         queueCheckpoint()
+        if elapsedTime - lastCollectionSoundTime >= 0.09 {
+            lastCollectionSoundTime = elapsedTime
+            onCandyCollected?()
+        }
+        if runMode == .bonus, !UIAccessibility.isReduceMotionEnabled, collectionLayer.children.count < 10 {
+            let flying = SKSpriteNode(texture: candyTexture)
+            flying.size = CGSize(width: 24, height: 20)
+            flying.position = origin
+            collectionLayer.addChild(flying)
+            let move = SKAction.move(to: candyLabel.position, duration: 0.34)
+            move.timingMode = .easeOut
+            flying.run(.sequence([.group([move, .scale(to: 0.28, duration: 0.34)]), .removeFromParent()]))
+            candyLabel.run(.sequence([.scale(to: 1.08, duration: 0.08), .scale(to: 1, duration: 0.12)]), withKey: "collectionPulse")
+            candyLabel.fontColor = .yellow
+            candyLabel.run(.sequence([.wait(forDuration: 0.15), .run { [weak self] in self?.candyLabel.fontColor = .white }]), withKey: "collectionLight")
+        }
 
         candyHaptic.impactOccurred(intensity: 0.64)
     }
 
     private func updateRoadMarks(deltaTime: TimeInterval, speed: CGFloat) {
         let deltaY = speed * CGFloat(deltaTime)
+        for child in backgroundLayer.children {
+            guard let tile = child as? SKSpriteNode else { continue }
+            tile.position.y -= deltaY
+            if tile.position.y + tile.size.height / 2 < 0 { tile.position.y += tile.size.height * 2 }
+        }
         let resetY = size.height + 80
 
         for node in roadMarkLayer.children {
@@ -728,6 +786,11 @@ final class HalloweenRunGameScene: SKScene {
         moveHaptic.impactOccurred(intensity: 0.72)
     }
 
+    func requestLaneMove(by delta: Int) {
+        guard !isGameOver, !hasShutDown, countdownRemaining <= 0, interruption.canSimulate else { return }
+        movePlayer(by: delta < 0 ? -1 : 1)
+    }
+
     // MARK: - Finish / cleanup
 
     private func finishGame(clearedStage: Bool = false) {
@@ -763,6 +826,7 @@ final class HalloweenRunGameScene: SKScene {
         isGameOver = true
         onGameOver = nil
         onCheckpoint = nil
+        onCandyCollected = nil
         lifecycleObservers.forEach(NotificationCenter.default.removeObserver)
         lifecycleObservers.removeAll()
         previousUpdateTime = nil
@@ -772,6 +836,7 @@ final class HalloweenRunGameScene: SKScene {
         movingLayer.removeAllActions()
         roadMarkLayer.removeAllActions()
         hudLayer.removeAllActions()
+        collectionLayer.removeAllChildren()
 
         isPaused = true
     }
