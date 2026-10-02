@@ -79,7 +79,7 @@ struct Halloween2026EventView: View {
             ZStack {
                 background
 
-                if EventManager.isActive(.halloween2026, at: timeline.date) {
+                if EventManager.areRewardsAvailable(.halloween2026, at: timeline.date) {
                     activeContent
                 } else {
                     endedContent
@@ -280,6 +280,7 @@ struct Halloween2026EventView: View {
             .shadow(color: Color.orange.opacity(0.32), radius: 24, x: 0, y: 12)
         }
         .buttonStyle(.plain)
+        .disabled(!EventManager.isActive(.halloween2026))
     }
 
     private var rewardButton: some View {
