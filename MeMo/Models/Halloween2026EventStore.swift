@@ -34,6 +34,8 @@ final class Halloween2026EventStore: ObservableObject {
         var srDailyCounts: [String: Int] = [:]
         var eventAdDayKey: String = ""
         var usedEventAdSlots: Set<String> = []
+        var pendingGachaBatch: HalloweenGachaBatch? = nil
+        var completedGachaBatchIDs: Set<String> = []
 
         init() {}
 
@@ -55,6 +57,8 @@ final class Halloween2026EventStore: ObservableObject {
             case srDailyCounts
             case eventAdDayKey
             case usedEventAdSlots
+            case pendingGachaBatch
+            case completedGachaBatchIDs
         }
 
         init(from decoder: Decoder) throws {
@@ -76,6 +80,8 @@ final class Halloween2026EventStore: ObservableObject {
             srDailyCounts = try values.decodeIfPresent([String: Int].self, forKey: .srDailyCounts) ?? [:]
             eventAdDayKey = try values.decodeIfPresent(String.self, forKey: .eventAdDayKey) ?? ""
             usedEventAdSlots = try values.decodeIfPresent(Set<String>.self, forKey: .usedEventAdSlots) ?? []
+            pendingGachaBatch = try values.decodeIfPresent(HalloweenGachaBatch.self, forKey: .pendingGachaBatch)
+            completedGachaBatchIDs = try values.decodeIfPresent(Set<String>.self, forKey: .completedGachaBatchIDs) ?? []
         }
     }
 
@@ -98,6 +104,8 @@ final class Halloween2026EventStore: ObservableObject {
     @Published private(set) var srDailyCounts: [String: Int] = [:]
     @Published private(set) var eventAdDayKey: String = ""
     @Published private(set) var usedEventAdSlots: Set<String> = []
+    @Published private(set) var pendingGachaBatch: HalloweenGachaBatch? = nil
+    @Published private(set) var completedGachaBatchIDs: Set<String> = []
 
     init(defaults: UserDefaults = .standard) {
         self.defaults = defaults
@@ -283,6 +291,93 @@ final class Halloween2026EventStore: ObservableObject {
         }
     }
 
+    func currentSRCounts(at date: Date = Date()) -> [String: Int] {
+        srDayKey == Halloween2026Configuration.tokyoDayKey(at: date) ? srDailyCounts : [:]
+    }
+
+    func availableEventAdClaim(at date: Date = Date(), calendar: Calendar = .current) -> HalloweenGachaAdClaim? {
+        guard EventManager.areRewardsAvailable(.halloween2026, at: date), pendingGachaBatch == nil,
+              let slot = GachaFreeAdSlot.current(at: date, calendar: calendar) else { return nil }
+        let day = HalloweenGachaCatalog.localDayKey(at: date, calendar: calendar)
+        guard eventAdDayKey != day || !usedEventAdSlots.contains(slot.rawValue) else { return nil }
+        return HalloweenGachaAdClaim(slot: slot, dayKey: day, startedAt: date)
+    }
+
+    /// Debited candy, draw count, SR caps, ad slot and delivery journal share one payload write.
+    /// Call on MainActor with a saved inventory snapshot; no async work occurs during admission.
+    func prepareGachaBatch(id: String, count: Int, inventory: HalloweenGachaInventory,
+                           adClaim: HalloweenGachaAdClaim? = nil, at date: Date = Date(),
+                           calendar: Calendar = .current,
+                           random: () -> Double = { Double.random(in: 0..<1) }) -> HalloweenGachaBatch? {
+        guard !id.isEmpty, !completedGachaBatchIDs.contains(id) else { return nil }
+        if let pendingGachaBatch { return pendingGachaBatch.id == id ? pendingGachaBatch : nil }
+        guard EventManager.areRewardsAvailable(.halloween2026, at: date), count == 1 || count == 10 else { return nil }
+        let cost = count * Halloween2026Configuration.candyCostPerDraw
+        let adDay = HalloweenGachaCatalog.localDayKey(at: date, calendar: calendar)
+        if let adClaim {
+            guard count == 10, adClaim.dayKey == adDay,
+                  HalloweenGachaCatalog.localDayKey(at: adClaim.startedAt, calendar: calendar) == adDay,
+                  adClaim.slot.contains(adClaim.startedAt, calendar: calendar),
+                  EventManager.areRewardsAvailable(.halloween2026, at: adClaim.startedAt),
+                  eventAdDayKey != adDay || !usedEventAdSlots.contains(adClaim.slot.rawValue) else { return nil }
+        } else {
+            guard candyCount >= cost else { return nil }
+        }
+        var counts = currentSRCounts(at: date)
+        var progress = gachaDrawProgress
+        var rewards: [HalloweenGachaReward] = []
+        var foods: [String: Int] = [:]
+        var items: [String: Int] = [:]
+        var fishTarget: Int? = nil
+        var owned = inventory.ownedPetIDs
+        var newPets: Set<String> = []
+        for index in 1...count {
+            let (kind, item, rarity, amount) = HalloweenGachaCatalog.roll(counts: counts, random: random)
+            rewards.append(HalloweenGachaReward(id: "\(id)-\(index)", kind: kind, itemID: item,
+                                               rarity: rarity, amount: amount, drawNumber: index))
+            if rarity == "SR" { counts[item] = max(0, counts[item] ?? 0) + 1 }
+            switch kind {
+            case .food: foods[item] = HalloweenGachaCatalog.addingClamped(foods[item] ?? inventory.foods[item] ?? 0, amount)
+            case .item: items[item] = HalloweenGachaCatalog.addingClamped(items[item] ?? inventory.items[item] ?? 0, amount)
+            case .fishingPoints: fishTarget = HalloweenGachaCatalog.addingClamped(fishTarget ?? inventory.fishingPoints, amount)
+            case .character: break
+            }
+            progress += 1
+            if progress == Halloween2026Configuration.lastOneInterval {
+                progress = 0
+                let candidates = HalloweenGachaCatalog.characterIDs.filter { !owned.contains($0) }
+                if !candidates.isEmpty {
+                    let pet = candidates[HalloweenGachaCatalog.weightedIndex(Array(repeating: 1, count: candidates.count), random: random)]
+                    rewards.append(HalloweenGachaReward(id: "\(id)-last-one-\(index)", kind: .character,
+                        itemID: pet, rarity: "LAST ONE", amount: 1, drawNumber: index))
+                    owned.insert(pet)
+                    newPets.insert(pet)
+                }
+            }
+        }
+        let batch = HalloweenGachaBatch(id: id, rewards: rewards, foodTargets: foods, itemTargets: items,
+                                       fishingPointTarget: fishTarget, petIDs: newPets)
+        if adClaim != nil {
+            if eventAdDayKey != adDay { usedEventAdSlots = [] }
+            eventAdDayKey = adDay
+            usedEventAdSlots.insert(adClaim!.slot.rawValue)
+        } else { candyCount -= cost }
+        gachaDrawProgress = progress
+        gachaTotalDraws = HalloweenGachaCatalog.addingClamped(gachaTotalDraws, count)
+        srDayKey = Halloween2026Configuration.tokyoDayKey(at: date)
+        srDailyCounts = counts
+        pendingGachaBatch = batch
+        save()
+        return batch
+    }
+
+    func completeGachaDelivery(id: String) {
+        guard pendingGachaBatch?.id == id else { return }
+        completedGachaBatchIDs.insert(id)
+        pendingGachaBatch = nil
+        save()
+    }
+
     private func load() {
         guard let data = defaults.data(forKey: storageKey),
               let payload = try? JSONDecoder().decode(Payload.self, from: data),
@@ -319,6 +414,10 @@ final class Halloween2026EventStore: ObservableObject {
         srDailyCounts = payload.srDailyCounts.mapValues { max(0, $0) }
         eventAdDayKey = payload.eventAdDayKey
         usedEventAdSlots = payload.usedEventAdSlots
+        completedGachaBatchIDs = payload.completedGachaBatchIDs
+        pendingGachaBatch = payload.pendingGachaBatch.flatMap { completedGachaBatchIDs.contains($0.id) ? nil : $0 }
+        // Canonicalize a stale journal whose completion receipt already exists.
+        if payload.pendingGachaBatch != nil && pendingGachaBatch == nil { save() }
     }
 
     private func save() {
@@ -340,6 +439,8 @@ final class Halloween2026EventStore: ObservableObject {
         payload.srDailyCounts = srDailyCounts
         payload.eventAdDayKey = eventAdDayKey
         payload.usedEventAdSlots = usedEventAdSlots
+        payload.pendingGachaBatch = pendingGachaBatch
+        payload.completedGachaBatchIDs = completedGachaBatchIDs
 
         guard let data = try? JSONEncoder().encode(payload) else { return }
         defaults.set(data, forKey: storageKey)

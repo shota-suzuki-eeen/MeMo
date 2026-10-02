@@ -238,7 +238,8 @@ struct RootView: View {
                         }
                     }
                 } else {
-                    ProgressView()
+                    if let error = viewModel.recoveryError { Text(error).padding() }
+                    else { ProgressView() }
                 }
             }
         }

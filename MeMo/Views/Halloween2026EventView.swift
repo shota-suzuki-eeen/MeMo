@@ -58,7 +58,7 @@ struct Halloween2026EventView: View {
             .memoIPadPresentedPhoneCanvas()
         }
         .fullScreenCover(isPresented: $showExchange) {
-            Halloween2026ExchangeView(state: state, store: store)
+            Halloween2026GachaView(store: store, state: state)
                 .environmentObject(bgmManager)
                 .memoIPadPresentedPhoneCanvas()
         }
@@ -312,10 +312,10 @@ struct Halloween2026EventView: View {
     private var exchangeButton: some View {
         Button {
             bgmManager.playSE(.push)
-            guard EventManager.isActive(.halloween2026) else { return }
+            guard EventManager.areRewardsAvailable(.halloween2026) else { return }
             showExchange = true
         } label: {
-            eventSubButtonLabel(title: "交換所", systemImage: "arrow.left.arrow.right")
+            eventSubButtonLabel(title: "イベントガチャ", systemImage: "gift.fill")
         }
         .buttonStyle(.plain)
     }

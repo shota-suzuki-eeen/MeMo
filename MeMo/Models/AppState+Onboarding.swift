@@ -251,6 +251,7 @@ extension AppState {
             && !$0.id.hasPrefix("street_")
             && !$0.id.hasPrefix("cyberpunk_")
             && !$0.id.hasPrefix("hyakka_")
+            && !HalloweenGachaCatalog.characterIDs.contains($0.id)
             && $0.id != normalizedCurrentPetID
         }
         let fallbackCandidates = PetMaster.all.filter {
@@ -258,6 +259,7 @@ extension AppState {
             && !$0.id.hasPrefix("street_")
             && !$0.id.hasPrefix("cyberpunk_")
             && !$0.id.hasPrefix("hyakka_")
+            && !HalloweenGachaCatalog.characterIDs.contains($0.id)
             && $0.id != normalizedCurrentPetID
         }
 

@@ -13,6 +13,7 @@ import SwiftData
 final class RootViewModel: ObservableObject {
     @Published private(set) var didBoot: Bool = false
     @Published var sharedState: AppState?
+    @Published private(set) var recoveryError: String?
 
     func bootIfNeeded(
         appStates: [AppState],
@@ -21,6 +22,13 @@ final class RootViewModel: ObservableObject {
         bgmManager: BGMManager
     ) async {
         let state = ensureAppState(appStates: appStates, modelContext: modelContext)
+        do {
+            try Halloween2026GachaGranting.recover(state: state, store: .shared, context: modelContext)
+            recoveryError = nil
+        } catch {
+            recoveryError = "報酬の保存を完了できませんでした。アプリを再度開いてください。"
+            return
+        }
         sharedState = state
         state.ensureInitialPetsIfNeeded()
 

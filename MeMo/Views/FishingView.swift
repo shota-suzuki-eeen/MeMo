@@ -196,6 +196,13 @@ final class FishingStore: ObservableObject {
         refresh(now: Date())
     }
 
+    /// Replay-safe event delivery to the existing fishing balance/key.
+    func ensureEventRewardPointBalance(atLeast target: Int) {
+        guard target > pointBalance else { return }
+        pointBalance = max(0, target)
+        persist()
+    }
+
     var pendingCatchCount: Int {
         pendingCounts.values.reduce(0) { $0 + max(0, $1) }
     }
