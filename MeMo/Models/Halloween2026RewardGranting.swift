@@ -14,7 +14,7 @@ enum Halloween2026RewardGranting {
         state: AppState,
         store: Halloween2026EventStore
     ) -> Bool {
-        guard EventManager.isActive(.halloween2026) else { return false }
+        guard EventManager.areRewardsAvailable(.halloween2026) else { return false }
         guard reward.isReached(in: store) else { return false }
         guard !reward.isClaimed(in: store) else { return false }
         guard grant(content: reward.reward, state: state, store: store) else { return false }

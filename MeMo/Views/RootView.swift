@@ -255,7 +255,7 @@ struct RootView: View {
     @ViewBuilder
     private var halloweenEventHomeEntryLayer: some View {
         TimelineView(.periodic(from: Date(), by: 15)) { timeline in
-            if EventManager.isActive(.halloween2026, at: timeline.date) {
+            if EventManager.areRewardsAvailable(.halloween2026, at: timeline.date) {
                 HStack(spacing: HalloweenEntryLayout.buttonSpacing) {
                     Color.clear
                         .frame(
@@ -280,7 +280,7 @@ struct RootView: View {
                         showsNotificationBadge: halloweenEventStore.hasClaimableReward,
                         action: {
                             bgmManager.playSE(.push)
-                            guard EventManager.isActive(.halloween2026) else { return }
+                            guard EventManager.areRewardsAvailable(.halloween2026) else { return }
                             showHalloweenEvent = true
                         }
                     )

@@ -19,6 +19,7 @@ struct EventDefinition: Hashable {
     let title: String
     let startDate: Date
     let endDate: Date
+    let rewardsEndDate: Date
 
     func isActive(at date: Date = Date()) -> Bool {
         date >= startDate && date < endDate
@@ -26,6 +27,14 @@ struct EventDefinition: Hashable {
 
     func hasEnded(at date: Date = Date()) -> Bool {
         date >= endDate
+    }
+
+    func areRewardsAvailable(at date: Date = Date()) -> Bool {
+        date >= startDate && date < rewardsEndDate
+    }
+
+    func canFinishRun(startedAt: Date) -> Bool {
+        isActive(at: startedAt)
     }
 }
 
@@ -63,8 +72,9 @@ enum EventManager {
         id: .halloween2026,
         title: "ハロウィンイベント",
         startDate: tokyoDate(year: 2026, month: 9, day: 3),
-        // 2026/10/31 23:59:59まで有効。11/1 00:00 JSTから完全終了。
-        endDate: tokyoDate(year: 2026, month: 11, day: 1)
+        // New games close on Nov 1; gacha, ads and claims close on Nov 8 (JST).
+        endDate: tokyoDate(year: 2026, month: 11, day: 1),
+        rewardsEndDate: tokyoDate(year: 2026, month: 11, day: 8)
     )
 
     static func definition(for eventID: EventID) -> EventDefinition {
@@ -84,5 +94,17 @@ enum EventManager {
 
     static func remainingTime(_ eventID: EventID, at date: Date = Date()) -> TimeInterval {
         max(0, definition(for: eventID).endDate.timeIntervalSince(date))
+    }
+
+    static func areRewardsAvailable(_ eventID: EventID, at date: Date = Date()) -> Bool {
+        definition(for: eventID).areRewardsAvailable(at: date)
+    }
+
+    static func isGachaAvailable(_ eventID: EventID, at date: Date = Date()) -> Bool {
+        areRewardsAvailable(eventID, at: date)
+    }
+
+    static func rewardsRemainingTime(_ eventID: EventID, at date: Date = Date()) -> TimeInterval {
+        max(0, definition(for: eventID).rewardsEndDate.timeIntervalSince(date))
     }
 }

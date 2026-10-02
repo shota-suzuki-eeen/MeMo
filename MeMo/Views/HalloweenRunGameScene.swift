@@ -301,14 +301,7 @@ final class HalloweenRunGameScene: SKScene {
         self.previousUpdateTime = currentTime
         deltaTime = min(max(0, deltaTime), 0.05)
 
-        eventEndCheckAccumulator += deltaTime
-        if eventEndCheckAccumulator >= Config.eventEndCheckInterval {
-            eventEndCheckAccumulator = 0
-            if EventManager.hasEnded(.halloween2026) {
-                finishGame()
-                return
-            }
-        }
+        // The start gate admits the run; crossing the event end must not end it.
 
         if countdownRemaining > 0 {
             countdownRemaining = max(0, countdownRemaining - deltaTime)

@@ -236,7 +236,7 @@ struct Halloween2026RewardWindow: View {
     private func claim(_ reward: HalloweenDistanceReward) {
         bgmManager.playSE(.push)
 
-        guard EventManager.isActive(.halloween2026) else {
+        guard EventManager.areRewardsAvailable(.halloween2026) else {
             message = "イベントは終了しました。"
             return
         }
