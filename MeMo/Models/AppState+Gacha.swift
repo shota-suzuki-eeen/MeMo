@@ -276,6 +276,19 @@ extension AppState {
         return true
     }
 
+    @discardableResult
+    func gachaConsumeDrawPayment(_ payment: GachaDrawPayment) -> Bool {
+        switch payment {
+        case .normalTickets(let count):
+            guard count == 1 || count == 10 else { return false }
+            return gachaConsumeSpecialItem(id: GachaTicketPolicy.normalTicketID, count: count)
+        case .steps(let cost):
+            guard cost > 0, walletSteps >= cost else { return false }
+            walletSteps -= cost
+            return true
+        }
+    }
+
     func gachaResetPity() {
         gachaResetPity(for: GachaStorageKeys.defaultGachaID)
     }

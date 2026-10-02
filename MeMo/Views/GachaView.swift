@@ -612,6 +612,17 @@ struct GachaView: View {
     @State private var tutorialFreeTenDrawStarted: Bool = false
     @State private var selectedGachaIndex: Int = 0
     @State private var showsEmissionList: Bool = false
+    @State private var showsInventory: Bool = false
+    @State private var showsCompleteConfirmation: Bool = false
+    @State private var queuedDraw: QueuedDraw?
+    @State private var activeAdID: String?
+    @State private var lastDrawPaymentText: String?
+
+    private enum DrawRequest { case paid(DrawMode), freeTen }
+    private struct QueuedDraw {
+        let gachaID: String
+        let request: DrawRequest
+    }
 
     private static let pityThreshold = 100
 
@@ -646,6 +657,7 @@ struct GachaView: View {
     }
 
     private var state: AppState? { states.first }
+    private var controlsAvailable: Bool { phase == .idle && activeAdID == nil && queuedDraw == nil }
 
     /// ガチャ選択を「いつでもガチャ」に固定する必要がある状態。
     /// - チュートリアル中: SR確定無料10回は「いつでもガチャ」限定。
@@ -721,13 +733,19 @@ struct GachaView: View {
     }
 
     private var wcCountText: String { state.map { "\($0.gachaSpecialItemCount(id: GachaCatalog.toiletItemID))" } ?? "0" }
-    private var canSingleDraw: Bool { state.map { !isTutorialMode && phase == .idle && $0.walletSteps >= DrawMode.single.cost } ?? false }
-    private var canTenDraw: Bool { state.map { !isTutorialMode && phase == .idle && $0.walletSteps >= DrawMode.ten.cost } ?? false }
+    private func payment(for mode: DrawMode) -> GachaDrawPayment {
+        GachaTicketPolicy.payment(drawCount: mode.count, normalTicketCount: state?.gachaSpecialItemCount(id: GachaTicketPolicy.normalTicketID) ?? 0, stepCost: mode.cost)
+    }
+    private var canSingleDraw: Bool { state.map { !isTutorialMode && controlsAvailable && payment(for: .single).canAfford(walletSteps: $0.walletSteps) } ?? false }
+    private var canTenDraw: Bool { state.map { !isTutorialMode && controlsAvailable && payment(for: .ten).canAfford(walletSteps: $0.walletSteps) } ?? false }
+    private var showsSpecialTicketButton: Bool {
+        !isTutorialMode && canGoldAppear && !isSelectedGachaComplete && (state?.gachaSpecialItemCount(id: GachaTicketPolicy.specialTicketID) ?? 0) > 0
+    }
 
     private var isFreeTenDrawSlotAvailable: Bool {
         guard let state else { return false }
-        if isTutorialMode { return phase == .idle && tutorialFreeTenDrawStarted == false }
-        return phase == .idle && (state.gachaCanUseInitialIPadFreeTenDraw(isPad: isIPadDevice) || state.gachaCanUseFreeTenDraw(now: Date()))
+        if isTutorialMode { return controlsAvailable && tutorialFreeTenDrawStarted == false }
+        return controlsAvailable && (state.gachaCanUseInitialIPadFreeTenDraw(isPad: isIPadDevice) || state.gachaCanUseFreeTenDraw(now: Date()))
     }
 
     private var shouldRequireRewardGachaReadyForFreeTenDraw: Bool {
@@ -804,6 +822,19 @@ struct GachaView: View {
         }
         .statusBarHidden()
         .sheet(isPresented: $showsEmissionList) { GachaEmissionListView(gacha: selectedGacha) }
+        .sheet(isPresented: $showsInventory) { GachaInventoryView() }
+        .alert("キャラクターをすべて獲得していますが、ガチャを引いてよろしいですか？", isPresented: $showsCompleteConfirmation) {
+            Button("引く") {
+                guard let queued = queuedDraw else { return }
+                queuedDraw = nil
+                guard selectedGacha.id == queued.gachaID else { return }
+                executeDraw(queued.request)
+            }
+            Button("キャンセル", role: .cancel) { queuedDraw = nil }
+        }
+        .onChange(of: rewardedAdManager.isPresentingAd) { _, presenting in
+            if !presenting { activeAdID = nil }
+        }
         .onAppear {
             bgmManager.switchBackground(to: .gacha)
             tapPromptAnimating = true
@@ -844,7 +875,7 @@ struct GachaView: View {
                 Color.clear.frame(width: 42, height: 42)
             } else {
                 Button {
-                    if phase == .idle { bgmManager.playSE(.push); dismiss() }
+                    if controlsAvailable { bgmManager.playSE(.push); dismiss() }
                 } label: {
                     Image(systemName: "chevron.backward")
                         .font(.system(size: 18, weight: .bold))
@@ -853,8 +884,8 @@ struct GachaView: View {
                         .background(Color.black.opacity(0.42), in: Circle())
                 }
                 .buttonStyle(.plain)
-                .disabled(phase != .idle)
-                .opacity(phase == .idle ? 1 : 0.45)
+                .disabled(!controlsAvailable)
+                .opacity(controlsAvailable ? 1 : 0.45)
             }
 
             Spacer()
@@ -899,22 +930,10 @@ struct GachaView: View {
                     .padding(.top, max(18, machineWidth * 0.30))
                 }
 
-                Button {
-                    guard phase == .idle else { return }
-                    bgmManager.playSE(.push)
-                    showsEmissionList = true
-                } label: {
-                    Text("排出リスト")
-                        .font(.system(size: 12, weight: .black))
-                        .foregroundStyle(.white)
-                        .padding(.horizontal, 12)
-                        .padding(.vertical, 8)
-                        .background(Color.black.opacity(0.54), in: Capsule())
-                        .overlay(Capsule().stroke(Color.white.opacity(0.42), lineWidth: 1))
+                VStack(alignment: .trailing, spacing: 8) {
+                    machineMenuButton("排出リスト") { showsEmissionList = true }
+                    machineMenuButton("所持アイテム") { showsInventory = true }
                 }
-                .buttonStyle(.plain)
-                .disabled(phase != .idle)
-                .opacity(phase == .idle ? 1 : 0.5)
                 .padding(.trailing, 8)
                 .padding(.top, 8)
             }
@@ -932,6 +951,19 @@ struct GachaView: View {
         .padding(.bottom, 8)
     }
 
+    private func machineMenuButton(_ title: String, action: @escaping () -> Void) -> some View {
+        Button {
+            guard controlsAvailable else { return }
+            bgmManager.playSE(.push)
+            action()
+        } label: {
+            Text(title).font(.system(size: 12, weight: .black)).foregroundStyle(.white)
+                .padding(.horizontal, 12).padding(.vertical, 8)
+                .background(Color.black.opacity(0.54), in: Capsule())
+                .overlay(Capsule().stroke(Color.white.opacity(0.42), lineWidth: 1))
+        }.buttonStyle(.plain).disabled(!controlsAvailable).opacity(controlsAvailable ? 1 : 0.5)
+    }
+
     private func gachaArrowButton(systemName: String, isEnabled: Bool, action: @escaping () -> Void) -> some View {
         Button(action: action) {
             Image(systemName: systemName)
@@ -942,12 +974,12 @@ struct GachaView: View {
                 .overlay(Capsule().stroke(Color.white.opacity(0.28), lineWidth: 1))
         }
         .buttonStyle(.plain)
-        .disabled(!isEnabled || phase != .idle)
-        .opacity(isEnabled && phase == .idle ? 1 : 0.28)
+        .disabled(!isEnabled || !controlsAvailable)
+        .opacity(isEnabled && controlsAvailable ? 1 : 0.28)
     }
 
     private func selectGacha(offset: Int) {
-        guard phase == .idle else { return }
+        guard controlsAvailable else { return }
         let nextIndex = selectedGachaIndex + offset
         guard availableGachas.indices.contains(nextIndex) else { return }
         bgmManager.playSE(.push)
@@ -1003,17 +1035,12 @@ struct GachaView: View {
     }
 
     private var actionButtons: some View {
-        let buttonsOpacity: Double = phase == .idle ? 1.0 : 0.5
-        let freeTenDrawAction: () -> Void = {
-            if isTutorialMode { beginTutorialFreeTenDraw() }
-            else if isInitialIPadFreeTenDrawAvailable { beginInitialIPadFreeTenDraw() }
-            else { performRewardedAdThenFreeTenDraw() }
-        }
+        let buttonsOpacity: Double = controlsAvailable ? 1.0 : 0.5
 
         return VStack(spacing: 12) {
             HStack(spacing: 14) {
-                drawButton(title: "1回 / 500歩", accent: .white, isEnabled: canSingleDraw) { startPaidDraw(mode: .single) }
-                drawButton(title: "10回 / 5,000歩", accent: Color(red: 1.0, green: 0.86, blue: 0.24), isEnabled: canTenDraw) { startPaidDraw(mode: .ten) }
+                drawButton(title: "1回 / \(payment(for: .single).description)", accent: .white, isEnabled: canSingleDraw) { requestDraw(.paid(.single)) }
+                drawButton(title: "10回 / \(payment(for: .ten).description)", accent: Color(red: 1.0, green: 0.86, blue: 0.24), isEnabled: canTenDraw) { requestDraw(.paid(.ten)) }
             }
             drawButton(
                 title: freeTenDrawButtonTitle,
@@ -1022,8 +1049,11 @@ struct GachaView: View {
                 systemImageName: freeTenDrawButtonSystemImageName,
                 showsLoadingIndicator: shouldShowFreeTenDrawLoadingIndicator,
                 fillsAccent: shouldRequireRewardGachaReadyForFreeTenDraw,
-                action: freeTenDrawAction
+                action: { requestDraw(.freeTen) }
             )
+            if showsSpecialTicketButton {
+                drawButton(title: "SR（キャラクター）確定ガチャを引く\nチケット1枚", accent: Color(red: 1.0, green: 0.86, blue: 0.24), isEnabled: controlsAvailable, lineLimit: 2) { startSpecialTicketDraw() }
+            }
         }
         .opacity(buttonsOpacity)
     }
@@ -1035,6 +1065,7 @@ struct GachaView: View {
         systemImageName: String? = nil,
         showsLoadingIndicator: Bool = false,
         fillsAccent: Bool = false,
+        lineLimit: Int = 1,
         action: @escaping () -> Void
     ) -> some View {
         Button(action: action) {
@@ -1054,7 +1085,7 @@ struct GachaView: View {
                     .font(.system(size: 20, weight: .black))
                     .foregroundStyle(accent)
                     .multilineTextAlignment(.center)
-                    .lineLimit(1)
+                    .lineLimit(lineLimit)
                     .minimumScaleFactor(0.68)
                     .allowsTightening(true)
             }
@@ -1080,13 +1111,39 @@ struct GachaView: View {
 
     private func startPaidDraw(mode: DrawMode) {
         guard let state else { return }
-        guard phase == .idle, isTutorialMode == false else { return }
-        guard state.walletSteps >= mode.cost else { showToast("歩数が足りません"); return }
+        guard controlsAvailable, isTutorialMode == false else { return }
         if isAlwaysGachaOnlyMode { selectedGachaIndex = 0 }
-        bgmManager.playSE(.gacha)
         state.gachaResetIfNeeded(now: Date())
-        state.walletSteps -= mode.cost
-        beginDraw(mode: mode, isFreeAd: false, freeSlot: nil)
+        let payment = payment(for: mode)
+        guard state.gachaConsumeDrawPayment(payment) else { showToast("歩数またはチケットが足りません"); return }
+        bgmManager.playSE(.gacha)
+        beginDraw(mode: mode, isFreeAd: false, freeSlot: nil, paymentText: payment.description)
+    }
+
+    private func requestDraw(_ request: DrawRequest) {
+        guard controlsAvailable else { return }
+        if !isTutorialMode && isSelectedGachaComplete {
+            queuedDraw = QueuedDraw(gachaID: selectedGacha.id, request: request)
+            showsCompleteConfirmation = true
+        } else { executeDraw(request) }
+    }
+
+    private func executeDraw(_ request: DrawRequest) {
+        switch request {
+        case .paid(let mode): startPaidDraw(mode: mode)
+        case .freeTen:
+            if isTutorialMode { beginTutorialFreeTenDraw() }
+            else if isInitialIPadFreeTenDrawAvailable { beginInitialIPadFreeTenDraw() }
+            else { performRewardedAdThenFreeTenDraw() }
+        }
+    }
+
+    private func startSpecialTicketDraw() {
+        guard controlsAvailable, showsSpecialTicketButton, let state else { return }
+        guard let reward = GachaCatalog.makeReward(for: .gold, gacha: selectedGacha, state: state),
+              case .character(let petID) = reward.kind, !state.ownedPetIDs().contains(petID),
+              state.gachaConsumeSpecialItem(id: GachaTicketPolicy.specialTicketID) else { return }
+        beginDraw(mode: .single, isFreeAd: false, freeSlot: nil, paymentText: "スペシャルチケット1枚", guaranteedReward: reward)
     }
 
     private func performRewardedAdThenFreeTenDraw() {
@@ -1100,10 +1157,19 @@ struct GachaView: View {
             showToast(adMobManager.rewardedUnavailableMessage)
             return
         }
-
+        let id = UUID().uuidString
+        let gachaID = selectedGacha.id
+        activeAdID = id
         rewardedAdManager.show(
-            onReward: { beginFreeTenDraw() },
+            onReward: {
+                guard activeAdID == id else { return }
+                activeAdID = nil
+                guard selectedGacha.id == gachaID else { return }
+                beginFreeTenDraw()
+            },
             onUnavailable: {
+                guard activeAdID == id else { return }
+                activeAdID = nil
                 AdMobManager.shared.prepareRewardGacha()
                 showToast(adMobManager.rewardedUnavailableMessage)
             }
@@ -1131,21 +1197,27 @@ struct GachaView: View {
         beginDraw(mode: .ten, isFreeAd: true, freeSlot: nil)
     }
 
-    private func beginDraw(mode: DrawMode, isFreeAd: Bool, freeSlot: GachaFreeAdSlot?, usesInitialIPadGuaranteedSR: Bool = false) {
+    private func beginDraw(mode: DrawMode, isFreeAd: Bool, freeSlot: GachaFreeAdSlot?, usesInitialIPadGuaranteedSR: Bool = false, paymentText: String? = nil, guaranteedReward: GachaReward? = nil) {
         guard let state else { return }
         rollTask?.cancel(); rollTask = nil
         openingTask?.cancel(); openingTask = nil
         drawMode = mode
         lastDrawWasFreeAd = isFreeAd
         lastFreeAdSlot = freeSlot
+        lastDrawPaymentText = paymentText
         phase = .rolling
-        if isTutorialMode && isFreeAd {
+        if let guaranteedReward {
+            applyReward(guaranteedReward, state: state)
+            rewards = [guaranteedReward]
+        } else if isTutorialMode && isFreeAd {
             rewards = makeTutorialRewards(state: state)
         } else if usesInitialIPadGuaranteedSR {
             rewards = makeInitialIPadFreeTenDrawRewards(state: state)
         } else {
             rewards = makeRewards(count: mode.count, state: state)
         }
+        // Commit grants before the reveal animation so a close/restart cannot lose ticket rewards.
+        persistState()
         revealOverlayReward = nil
         machineAnimationStart = Date()
         tapPromptAnimating = true
@@ -1332,6 +1404,7 @@ struct GachaView: View {
                 if isTutorialMode { Text("チュートリアル限定 / 無料").font(.system(size: 13, weight: .semibold)).foregroundStyle(.white.opacity(0.86)) }
                 else if let slot = lastFreeAdSlot, lastDrawWasFreeAd { Text("無料10回（\(slot.windowText)）").font(.system(size: 13, weight: .semibold)).foregroundStyle(.white.opacity(0.86)) }
                 else if lastDrawWasFreeAd && isIPadDevice { Text("iPad初回特典 / 無料").font(.system(size: 13, weight: .semibold)).foregroundStyle(.white.opacity(0.86)) }
+                else if let lastDrawPaymentText { Text(lastDrawPaymentText).font(.system(size: 13, weight: .semibold)).foregroundStyle(.white.opacity(0.86)) }
             }
         }
         .frame(maxWidth: .infinity, minHeight: 0, alignment: .center)
@@ -1473,6 +1546,7 @@ struct GachaView: View {
         rewards = []
         lastFreeAdSlot = nil
         lastDrawWasFreeAd = false
+        lastDrawPaymentText = nil
         if isTutorialMode {
             onTutorialFinished?()
         } else {
@@ -1621,6 +1695,44 @@ fileprivate struct ToastView: View {
     let message: String
     var body: some View {
         Text(message).font(.system(size: 14, weight: .bold)).foregroundStyle(.white).multilineTextAlignment(.center).padding(.horizontal, 18).padding(.vertical, 12).background(Color.black.opacity(0.76), in: Capsule()).padding(.horizontal, 20)
+    }
+}
+
+private struct GachaInventoryView: View {
+    @Environment(\.dismiss) private var dismiss
+    @Query private var states: [AppState]
+
+    var body: some View {
+        NavigationStack {
+            ScrollView {
+                VStack(spacing: 18) {
+                    inventoryRow(id: GachaTicketPolicy.normalTicketID, title: "通常ガチャチケット", detail: "1枚で1回、10枚で10回。解放済みの歩数ガチャで優先して使います。")
+                    inventoryRow(id: GachaTicketPolicy.specialTicketID, title: "スペシャルチケット", detail: "1枚で選択中のガチャの未所持SRキャラクターを1体獲得できます。")
+                    Text("イベントガチャには使えません").font(.subheadline).foregroundStyle(.white)
+                }.padding(20).frame(maxWidth: 560).frame(maxWidth: .infinity)
+            }
+            .background {
+                Image("gacha_background").resizable().scaledToFill().ignoresSafeArea()
+                    .overlay(.black.opacity(0.3)).clipped()
+            }
+            .navigationTitle("所持アイテム").navigationBarTitleDisplayMode(.inline)
+            .toolbar { ToolbarItem(placement: .topBarTrailing) { Button("閉じる") { dismiss() } } }
+        }
+    }
+
+    private func inventoryRow(id: String, title: String, detail: String) -> some View {
+        VStack(alignment: .leading, spacing: 12) {
+            HStack(spacing: 16) {
+                Image(id).resizable().scaledToFit().frame(width: 70, height: 70)
+                VStack(alignment: .leading, spacing: 6) {
+                    Text(title).font(.headline)
+                    Text("\(states.first?.gachaSpecialItemCount(id: id) ?? 0)枚").font(.title2.bold()).monospacedDigit()
+                }
+                Spacer()
+            }
+            Text(detail).font(.subheadline)
+        }.padding(18).frame(maxWidth: .infinity, alignment: .leading)
+            .background(.regularMaterial, in: RoundedRectangle(cornerRadius: 22))
     }
 }
 
