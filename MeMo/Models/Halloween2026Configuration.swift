@@ -51,8 +51,8 @@ enum Halloween2026Configuration {
     }
 
     static func scrollSpeed(forLevel level: Int, sceneHeight: Double, playerY: Double,
-                            collisionHalfHeight: Double) -> Double {
-        let visibleTravel = max(1, sceneHeight - gameplayHeaderClearance - playerY - collisionHalfHeight)
+                            collisionHalfHeight: Double, headerClearance: Double = gameplayHeaderClearance) -> Double {
+        let visibleTravel = max(1, sceneHeight - headerClearance - playerY - collisionHalfHeight)
         return min(scrollSpeeds[min(4, max(0, level - 1))], visibleTravel / minimumObstacleReactionTime)
     }
 

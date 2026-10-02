@@ -19,7 +19,11 @@ struct Halloween2026RewardWindow: View {
     @State private var selectedTrack: HalloweenRewardTrack = .highScore
     @State private var message: String?
 
+    // Use a resolved label color so material vibrancy cannot wash out reward details.
+    private var detailColor: Color { Color(uiColor: .label).opacity(0.72) }
+
     var body: some View {
+        GeometryReader { proxy in
         ZStack {
             Color.black.opacity(0.52)
                 .ignoresSafeArea()
@@ -35,14 +39,14 @@ struct Halloween2026RewardWindow: View {
                 if let message {
                     Text(message)
                         .font(.system(size: 13, weight: .bold, design: .rounded))
-                        .foregroundStyle(.secondary)
+                        .foregroundStyle(detailColor)
                         .multilineTextAlignment(.center)
                 }
             }
             .padding(.horizontal, 18)
             .padding(.vertical, 20)
             .frame(maxWidth: 360)
-            .frame(maxHeight: 650)
+            .frame(maxHeight: min(650, max(250, proxy.size.height - 28)))
             .background(.regularMaterial, in: RoundedRectangle(cornerRadius: 30, style: .continuous))
             .overlay {
                 RoundedRectangle(cornerRadius: 30, style: .continuous)
@@ -52,6 +56,7 @@ struct Halloween2026RewardWindow: View {
             .padding(.horizontal, 18)
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
+        }
     }
 
     private var header: some View {
@@ -68,10 +73,11 @@ struct Halloween2026RewardWindow: View {
                 Image(systemName: "xmark")
                     .font(.system(size: 16, weight: .black))
                     .foregroundStyle(.primary)
-                    .frame(width: 38, height: 38)
+                    .frame(width: 44, height: 44)
                     .background(Color.secondary.opacity(0.14), in: Circle())
             }
             .buttonStyle(.plain)
+            .accessibilityLabel("報酬を閉じる")
         }
     }
 
@@ -114,7 +120,7 @@ struct Halloween2026RewardWindow: View {
                     VStack(alignment: .leading, spacing: 3) {
                         Text(next.isReached(in: store) ? "受け取り可能！" : "次の報酬")
                             .font(.system(size: 12, weight: .black, design: .rounded))
-                            .foregroundStyle(next.isReached(in: store) ? Color.orange : Color.secondary)
+                            .foregroundStyle(next.isReached(in: store) ? Color.orange : detailColor)
 
                         Text(next.reward.displayName)
                             .font(.system(size: 17, weight: .black, design: .rounded))
@@ -135,7 +141,7 @@ struct Halloween2026RewardWindow: View {
                     Text(remaining == 0 ? "達成！" : "あと \(remaining.formatted())m")
                 }
                 .font(.system(size: 12, weight: .bold, design: .rounded))
-                .foregroundStyle(.secondary)
+                .foregroundStyle(detailColor)
                 .monospacedDigit()
             }
             .padding(14)
@@ -184,7 +190,7 @@ struct Halloween2026RewardWindow: View {
 
                 Text(reward.reward.displayName)
                     .font(.system(size: 13, weight: .bold, design: .rounded))
-                    .foregroundStyle(.secondary)
+                    .foregroundStyle(detailColor)
             }
 
             Spacer(minLength: 4)
@@ -201,14 +207,14 @@ struct Halloween2026RewardWindow: View {
                         .font(.system(size: 12, weight: .black, design: .rounded))
                         .foregroundStyle(.white)
                         .padding(.horizontal, 12)
-                        .frame(minHeight: 36)
+                        .frame(minHeight: 44)
                         .background(Color.orange, in: Capsule())
                 }
                 .buttonStyle(.plain)
             } else {
                 Text("未達成")
                     .font(.system(size: 11, weight: .bold, design: .rounded))
-                    .foregroundStyle(.secondary)
+                    .foregroundStyle(detailColor)
             }
         }
         .padding(.horizontal, 12)

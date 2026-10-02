@@ -18,7 +18,7 @@ struct Halloween2026EventView: View {
 
     @State private var showRewardWindow = false
     @State private var showRunGame = false
-    @State private var showExchange = false
+    @State private var showGacha = false
 
     init(
         state: AppState,
@@ -41,7 +41,6 @@ struct Halloween2026EventView: View {
                 eventTopContent
             }
         }
-        .ignoresSafeArea()
         .fullScreenCover(
             isPresented: $showRunGame,
             onDismiss: {
@@ -50,6 +49,7 @@ struct Halloween2026EventView: View {
         ) {
             HalloweenRunGameView(
                 store: store,
+                playerAssetName: PetMaster.assetName(for: state.normalizedCurrentPetID),
                 onClose: {
                     showRunGame = false
                 }
@@ -57,11 +57,12 @@ struct Halloween2026EventView: View {
             .environmentObject(bgmManager)
             .memoIPadPresentedPhoneCanvas()
         }
-        .fullScreenCover(isPresented: $showExchange) {
+        .fullScreenCover(isPresented: $showGacha) {
             Halloween2026GachaView(store: store, state: state)
                 .environmentObject(bgmManager)
                 .memoIPadPresentedPhoneCanvas()
         }
+        .statusBarHidden()
         .onAppear {
             if !showRunGame { store.recoverInterruptedSession() }
             bgmManager.switchBackground(to: .fishing)
@@ -81,12 +82,13 @@ struct Halloween2026EventView: View {
                 background
 
                 if EventManager.areRewardsAvailable(.halloween2026, at: timeline.date) {
-                    activeContent
+                    activeContent(at: timeline.date)
                 } else {
                     endedContent
                 }
 
                 if showRewardWindow {
+                    HalloweenEventBackground(assetName: "halloween_shop")
                     Halloween2026RewardWindow(
                         state: state,
                         store: store,
@@ -104,68 +106,36 @@ struct Halloween2026EventView: View {
     }
 
     private var background: some View {
-        ZStack {
-            LinearGradient(
-                colors: [
-                    Color(red: 0.10, green: 0.05, blue: 0.20),
-                    Color(red: 0.26, green: 0.08, blue: 0.30),
-                    Color(red: 0.08, green: 0.04, blue: 0.16),
-                ],
-                startPoint: .topLeading,
-                endPoint: .bottomTrailing
-            )
-
-            Circle()
-                .fill(Color.orange.opacity(0.18))
-                .frame(width: 260, height: 260)
-                .blur(radius: 8)
-                .offset(x: 150, y: -310)
-
-            Circle()
-                .fill(Color.purple.opacity(0.20))
-                .frame(width: 320, height: 320)
-                .blur(radius: 20)
-                .offset(x: -170, y: 310)
-        }
-        .ignoresSafeArea()
+        HalloweenEventBackground(assetName: "halloween_main")
     }
 
-    private var activeContent: some View {
-        VStack(spacing: 0) {
-            topBar
-                .padding(.horizontal, 18)
-                .padding(.top, 54)
-
-            scoreHeader
-                .padding(.horizontal, 18)
-                .padding(.top, 22)
-
-            candyBalance
-                .padding(.top, 14)
-
-            Text(store.endlessUnlocked ? "ENDLESS 解放済み" : "STAGE \(store.currentStageNumber) / 25 · \(store.nextRunMode == .bonus ? "BONUS" : "Lv\(Halloween2026Configuration.level(forStage: store.currentStageNumber))")")
-                .font(.system(size: 19, weight: .black, design: .rounded))
-                .foregroundStyle(.white)
-                .padding(.top, 18)
-
-            Spacer(minLength: 28)
-
-            startButton
-                .padding(.horizontal, 30)
-
-            HStack(spacing: 14) {
-                rewardButton
-                exchangeButton
-            }
-            .padding(.horizontal, 24)
-            .padding(.top, 22)
-
-            Text("2026/10/31 23:59まで")
-                .font(.system(size: 13, weight: .bold, design: .rounded))
-                .foregroundStyle(.white.opacity(0.70))
-                .padding(.top, 18)
-
-            Spacer(minLength: 36)
+    private func activeContent(at date: Date) -> some View {
+        ScrollView(showsIndicators: false) {
+            VStack(spacing: 18) {
+                topBar
+                VStack(spacing: 10) {
+                    Text(store.endlessUnlocked ? "全25面クリア · ENDLESS 解放済み" : "STAGE \(store.currentStageNumber) / 25\(store.nextRunMode == .bonus ? " · BONUS" : "")")
+                        .font(.system(size: 20, weight: .black, design: .rounded))
+                        .multilineTextAlignment(.center)
+                    let level = store.endlessUnlocked ? 1 : Halloween2026Configuration.level(forStage: store.currentStageNumber)
+                    Text("現在 Lv\(level)").font(.headline)
+                    HalloweenLevelPumpkins(level: level)
+                    if store.endlessUnlocked { Text("毎回Lv1からスタート").font(.caption) }
+                }.foregroundStyle(.white).padding(18).frame(maxWidth: .infinity)
+                    .background(.black.opacity(0.42), in: RoundedRectangle(cornerRadius: 24))
+                scoreHeader
+                candyBalance
+                startButton
+                if !EventManager.isActive(.halloween2026, at: date) {
+                    Text("ミニゲームは終了しました。\nガチャ・未受取報酬は11/7まで利用できます。")
+                        .font(.subheadline.bold()).foregroundStyle(.white).multilineTextAlignment(.center)
+                }
+                HStack(spacing: 14) { rewardButton; gachaButton }
+                Text("ゲーム：10/31まで\nガチャ・報酬受取：11/7まで（日本時間）")
+                    .font(.system(size: 13, weight: .bold, design: .rounded))
+                    .foregroundStyle(.white.opacity(0.9)).multilineTextAlignment(.center)
+            }.padding(.horizontal, 20).padding(.vertical, 12)
+                .frame(maxWidth: 520).frame(maxWidth: .infinity)
         }
     }
 
@@ -259,10 +229,10 @@ struct Halloween2026EventView: View {
         } label: {
             VStack(spacing: 8) {
                 Image(systemName: "figure.run")
-                    .font(.system(size: 42, weight: .black))
+                    .font(.system(size: 28, weight: .black))
 
                 Text(store.endlessUnlocked ? "ENDLESS" : (store.nextRunMode == .bonus ? "BONUS" : "START"))
-                    .font(.system(size: 34, weight: .black, design: .rounded))
+                    .font(.system(size: 28, weight: .black, design: .rounded))
                     .tracking(1.5)
 
                 Text(store.nextRunMode == .bonus ? "20秒間、キャンディを集めよう！" : (store.endlessUnlocked ? "左右タップで記録に挑戦！" : "30秒間、障害物をよけよう！"))
@@ -270,7 +240,7 @@ struct Halloween2026EventView: View {
                     .opacity(0.86)
             }
             .foregroundStyle(.white)
-            .frame(maxWidth: .infinity, minHeight: 174)
+            .frame(maxWidth: .infinity, minHeight: 126)
             .background(
                 LinearGradient(
                     colors: [Color.orange, Color(red: 0.90, green: 0.28, blue: 0.20)],
@@ -309,13 +279,13 @@ struct Halloween2026EventView: View {
         .accessibilityLabel(store.hasClaimableReward ? "報酬、受け取り可能な報酬があります" : "報酬")
     }
 
-    private var exchangeButton: some View {
+    private var gachaButton: some View {
         Button {
             bgmManager.playSE(.push)
             guard EventManager.areRewardsAvailable(.halloween2026) else { return }
-            showExchange = true
+            showGacha = true
         } label: {
-            eventSubButtonLabel(title: "イベントガチャ", systemImage: "gift.fill")
+            eventSubButtonLabel(title: "イベントガチャ", systemImage: "sparkles")
         }
         .buttonStyle(.plain)
     }
@@ -329,8 +299,8 @@ struct Halloween2026EventView: View {
                 .font(.system(size: 16, weight: .black, design: .rounded))
         }
         .foregroundStyle(.white)
-        .frame(maxWidth: .infinity, minHeight: 92)
-        .background(Color.white.opacity(0.12), in: RoundedRectangle(cornerRadius: 22, style: .continuous))
+        .frame(maxWidth: .infinity, minHeight: 82)
+        .background(Color.black.opacity(0.42), in: RoundedRectangle(cornerRadius: 22, style: .continuous))
         .overlay {
             RoundedRectangle(cornerRadius: 22, style: .continuous)
                 .stroke(Color.white.opacity(0.18), lineWidth: 1)
@@ -347,7 +317,7 @@ struct Halloween2026EventView: View {
                 .font(.system(size: 25, weight: .black, design: .rounded))
                 .foregroundStyle(.white)
 
-            Text("ゲーム・報酬受取・交換所は\n2026/10/31で終了しました。")
+            Text("ミニゲームは10/31、ガチャ・報酬受取は\n11/7で終了しました。\n所持キャンディは保存されています。")
                 .font(.system(size: 15, weight: .semibold, design: .rounded))
                 .foregroundStyle(.white.opacity(0.76))
                 .multilineTextAlignment(.center)

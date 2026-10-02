@@ -16,6 +16,7 @@ struct HalloweenRunGameView: View {
     @EnvironmentObject private var bgmManager: BGMManager
 
     @ObservedObject var store: Halloween2026EventStore
+    let playerAssetName: String
     let onClose: () -> Void
 
     @State private var scene: HalloweenRunGameScene
@@ -29,14 +30,17 @@ struct HalloweenRunGameView: View {
 
     init(
         store: Halloween2026EventStore,
+        playerAssetName: String,
         onClose: @escaping () -> Void
     ) {
         self.store = store
+        self.playerAssetName = playerAssetName
         self.onClose = onClose
 
         _scene = State(
             initialValue: HalloweenRunGameScene(size: UIScreen.main.bounds.size,
-                mode: store.nextRunMode, stageNumber: store.endlessUnlocked ? nil : store.currentStageNumber)
+                mode: store.nextRunMode, stageNumber: store.endlessUnlocked ? nil : store.currentStageNumber,
+                playerAssetName: playerAssetName)
         )
     }
 
@@ -48,8 +52,16 @@ struct HalloweenRunGameView: View {
 
             closeButton
                 .padding(.leading, 16)
-                .padding(.top, 52)
+                .padding(.top, MemoDevice.isIPad ? 32 : 8)
                 .zIndex(10_000)
+
+            if result == nil {
+                VStack { Spacer(); HStack {
+                    laneButton("左へ移動", symbol: "arrow.left", direction: -1)
+                    Spacer()
+                    laneButton("右へ移動", symbol: "arrow.right", direction: 1)
+                }.padding(.horizontal, 24).padding(.bottom, MemoDevice.isIPad ? 28 : 8) }
+            }
 
             if let result {
                 resultOverlay(result)
@@ -62,7 +74,7 @@ struct HalloweenRunGameView: View {
             }
         }
         .background(Color.black)
-        .ignoresSafeArea()
+        .statusBarHidden()
         .onAppear {
             if sessionID == nil { startNewRun() }
             bgmManager.switchBackground(to: .fishing)
@@ -92,13 +104,23 @@ struct HalloweenRunGameView: View {
         .accessibilityLabel("イベント画面へ戻る")
     }
 
+    private func laneButton(_ label: String, symbol: String, direction: Int) -> some View {
+        Button { scene.requestLaneMove(by: direction) } label: {
+            Image(systemName: symbol).font(.title3.bold()).foregroundStyle(.white)
+                .frame(width: 64, height: 48).background(.black.opacity(0.42), in: Capsule())
+        }.buttonStyle(.plain).accessibilityLabel(label)
+    }
+
     // MARK: - Result
 
     private func resultOverlay(_ result: HalloweenRunResult) -> some View {
+        GeometryReader { proxy in
         ZStack {
+            HalloweenEventBackground(assetName: "halloween_shop")
             Color.black.opacity(0.62)
                 .ignoresSafeArea()
 
+            ScrollView(showsIndicators: false) {
             VStack(spacing: 18) {
                 Text(result.clearedStage ? "CLEAR!" : (wasNewHighScore ? "NEW RECORD!" : "GAME OVER"))
                     .font(.system(size: 25, weight: .black, design: .rounded))
@@ -113,7 +135,7 @@ struct HalloweenRunGameView: View {
                         .font(.system(size: 12, weight: .bold, design: .rounded))
                         .foregroundStyle(.secondary)
 
-                    Text(result.mode == .endless ? "\(result.distance.formatted())m" : (result.clearedStage ? "クリア" : "もう一度挑戦！"))
+                    Text(result.mode == .bonus && result.clearedStage ? "\(result.candyCount)個 GET!" : (result.mode == .endless ? "\(result.distance.formatted())m" : (result.clearedStage ? "クリア" : "もう一度挑戦！")))
                         .font(.system(size: 42, weight: .black, design: .rounded))
                         .monospacedDigit()
 
@@ -187,8 +209,11 @@ struct HalloweenRunGameView: View {
                 y: 16
             )
             .padding(.horizontal, 24)
+            .frame(maxWidth: .infinity, minHeight: proxy.size.height)
+            }
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
+        }
     }
 
     private func resultStat(title: String, value: String) -> some View {
@@ -207,6 +232,7 @@ struct HalloweenRunGameView: View {
     // MARK: - Scene
 
     private func configureScene(_ scene: HalloweenRunGameScene, session: HalloweenRunSession) {
+        scene.onCandyCollected = { bgmManager.playSE(.touch, volume: 0.35) }
         scene.onCheckpoint = { progress in
             guard result == nil, sessionID == session.id, session.mode == .endless else { return }
             store.checkpointSession(id: session.id, distance: progress.distance, candy: progress.candyCount)
@@ -251,7 +277,8 @@ struct HalloweenRunGameView: View {
         let newScene = HalloweenRunGameScene(
             size: UIScreen.main.bounds.size,
             mode: session.mode,
-            stageNumber: session.stageNumber
+            stageNumber: session.stageNumber,
+            playerAssetName: playerAssetName
         )
         configureScene(newScene, session: session)
 
@@ -279,6 +306,13 @@ struct HalloweenRunGameView: View {
 
 // MARK: - Direct SKView host
 
+private final class HalloweenSafeAreaSKView: SKView {
+    override func layoutSubviews() {
+        super.layoutSubviews()
+        (scene as? HalloweenRunGameScene)?.updateSafeArea(safeAreaInsets)
+    }
+}
+
 private struct HalloweenRunSKView: UIViewRepresentable {
     let scene: HalloweenRunGameScene
 
@@ -291,7 +325,7 @@ private struct HalloweenRunSKView: UIViewRepresentable {
     }
 
     func makeUIView(context: Context) -> SKView {
-        let skView = SKView(frame: .zero)
+        let skView = HalloweenSafeAreaSKView(frame: .zero)
 
         skView.backgroundColor = scene.backgroundColor
         skView.preferredFramesPerSecond = 60
