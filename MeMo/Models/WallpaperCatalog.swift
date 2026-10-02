@@ -16,6 +16,7 @@ enum WallpaperCatalog {
 
     static let selectedHomeWallpaperAssetNameKey = "selectedHomeWallpaperAssetName"
     static let focusUnlockedRewardAssetNamesKey = "memo.work.focus.unlockedRewardAssetNames"
+    static let eventUnlockedAssetNamesKey = "memo.events.unlockedWallpaperAssetNames"
 
     static let all: [WallpaperItem] = [
         .init(id: "wallpaper_home", name: "ホーム", assetName: "Home_background"),
@@ -24,7 +25,8 @@ enum WallpaperCatalog {
         .init(id: "wallpaper_work_reward_15h", name: "和室", assetName: "japanese_background"),
         .init(id: "wallpaper_work_reward_20h", name: "オフィス", assetName: "office_background"),
         .init(id: "wallpaper_work_reward_25h", name: "お風呂場", assetName: "bath_background"),
-        .init(id: "wallpaper_work_reward_30h", name: "ビーチ", assetName: "beach_background")
+        .init(id: "wallpaper_work_reward_30h", name: "ビーチ", assetName: "beach_background"),
+        .init(id: "wallpaper_halloween2026", name: "ハロウィン", assetName: "halloween_main")
     ]
 
     static let defaultWallpaper: WallpaperItem = all[0]
@@ -39,8 +41,16 @@ enum WallpaperCatalog {
 
     static func ownedWallpapers(defaults: UserDefaults = .standard) -> [WallpaperItem] {
         let unlockedAssets = Set(defaults.stringArray(forKey: focusUnlockedRewardAssetNamesKey) ?? [])
-        let ownedAssetNames = Set([defaultWallpaper.assetName]).union(unlockedAssets)
+        let eventAssets = Set(defaults.stringArray(forKey: eventUnlockedAssetNamesKey) ?? [])
+        let ownedAssetNames = Set([defaultWallpaper.assetName]).union(unlockedAssets).union(eventAssets)
         let wallpapers = all.filter { ownedAssetNames.contains($0.assetName) }
         return wallpapers.isEmpty ? [defaultWallpaper] : wallpapers
+    }
+
+    /// Add ownership only; the user's selected wallpaper is never changed.
+    static func grantHalloween2026Wallpaper(defaults: UserDefaults = .standard) {
+        var assets = Set(defaults.stringArray(forKey: eventUnlockedAssetNamesKey) ?? [])
+        guard assets.insert("halloween_main").inserted else { return }
+        defaults.set(assets.sorted(), forKey: eventUnlockedAssetNamesKey)
     }
 }
