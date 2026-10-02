@@ -159,6 +159,69 @@ struct HalloweenEventStoreTests {
         check(newState.gachaDrawProgress == 1 && newState.gachaTotalDraws == 151, "gacha counters independent")
         check(newState.srDailyCounts["gachaTicket_nomal"] == 8 && newState.usedEventAdSlots == ["morning"] && newState.wallpaperGranted, "new state round trip")
         assertions += HalloweenRunMechanicsTests.run()
+        var interruption = HalloweenRunInterruption()
+        check(interruption.canSimulate, "fresh run has no resume gate")
+        interruption.setActive(false)
+        for _ in 0..<100 { interruption.advanceCountdown(by: 99) }
+        check(interruption.isSuspended && interruption.resumeRemaining == 3 && !interruption.canSimulate, "background never advances countdown")
+        interruption.setActive(true)
+        interruption.advanceCountdown(by: 1)
+        interruption.setActive(true)
+        check(interruption.resumeRemaining == 2, "duplicate active notification cannot reset/bypass countdown")
+        interruption.advanceCountdown(by: 1.999)
+        check(!interruption.canSimulate, "resume waits full3s")
+        interruption.advanceCountdown(by: 0.0011)
+        check(interruption.canSimulate, "resume after3s")
+        interruption.setActive(false)
+        interruption.setActive(true)
+        interruption.advanceCountdown(by: 2)
+        interruption.setActive(false)
+        interruption.setActive(true)
+        check(interruption.resumeRemaining == 3, "another interruption restarts full countdown")
+        interruption.advanceCountdown(by: -.infinity)
+        check(interruption.resumeRemaining == 3, "invalid countdown step ignored")
+
+        let recoveryDefaults = defaults(["completedStageCount":25, "bestDistance":567, "totalDistance":1234,
+            "candyCount":89, "claimedRewardIDs":["hs_0250"], "exchangedCounts":["exchange_steps_500":2]])
+        var recovery = Halloween2026EventStore(defaults: recoveryDefaults)
+        let killed = recovery.beginSession(mode: .endless, at: playDate)!
+        recovery.checkpointSession(id: killed.id, distance: 321, candy: 42)
+        recovery.checkpointSession(id: killed.id, distance: 300, candy: 40)
+        recovery = Halloween2026EventStore(defaults: recoveryDefaults)
+        recovery.recoverInterruptedSession()
+        check(recovery.activeSession == nil && recovery.totalDistance == 1555 && recovery.candyCount == 131 && recovery.bestDistance == 567, "killed endless commits greatest checkpoint once")
+        recovery.recoverInterruptedSession()
+        recovery = Halloween2026EventStore(defaults: recoveryDefaults)
+        recovery.recoverInterruptedSession()
+        check(recovery.totalDistance == 1555 && recovery.candyCount == 131 && recovery.finalizedSessionIDs.contains(killed.id), "repeated recovery and cold load idempotent")
+        let nextRun = recovery.beginSession(mode: .endless, at: playDate)!
+        recovery.checkpointSession(id: killed.id, distance: 999, candy: 999)
+        check(!recovery.finalizeSession(id: killed.id, distance:999, candy:999) && recovery.activeSession?.id == nextRun.id, "stale completion/checkpoint cannot affect new run")
+        recovery.finalizeSession(id: nextRun.id, distance: 10, candy: 1)
+        check(recovery.totalDistance == 1565 && recovery.candyCount == 132, "close snapshot greater than checkpoint commits once")
+        check(recovery.claimedRewardIDs == ["hs_0250"] && recovery.exchangeCount(for:"exchange_steps_500") == 2, "recovery preserves legacy receipts")
+        for completed in [0,4] {
+            let stageDefaults = defaults(["completedStageCount":completed,"candyCount":89])
+            var stageRecovery = Halloween2026EventStore(defaults: stageDefaults)
+            let session = stageRecovery.beginSession(mode: stageRecovery.nextRunMode, at: playDate)!
+            stageRecovery.checkpointSession(id:session.id,distance:20,candy:7)
+            stageRecovery = Halloween2026EventStore(defaults:stageDefaults)
+            stageRecovery.recoverInterruptedSession()
+            check(stageRecovery.activeSession == nil && stageRecovery.candyCount == 89 && stageRecovery.completedStageCount == completed, "killed stage/bonus loses provisional reward only")
+            check(!stageRecovery.finalizeSession(id:session.id,distance:20,candy:7,clearedStage:true), "old stage completion rejected after recovery")
+        }
+        let claimsDefaults = defaults(["bestDistance":2000,"totalDistance":40000,"candyCount":89])
+        var claims = Halloween2026EventStore(defaults:claimsDefaults)
+        for reward in Halloween2026RewardCatalog.allRewards {
+            guard case .candy = reward.reward else { continue }
+            check(claims.claimCandyReward(reward,at:end), "distance candy available during grace")
+            check(!claims.claimCandyReward(reward,at:end), "same goal repeated callback rejected")
+            claims = Halloween2026EventStore(defaults:claimsDefaults)
+            check(!claims.claimCandyReward(reward,at:end), "receipt and candy survive cold load together")
+        }
+        check(claims.candyCount == 349 && claims.claimedRewardIDs.count == 6, "all distinct candy targets independent")
+        let endedClaims = Halloween2026EventStore(defaults:defaults(["bestDistance":5000]))
+        check(!endedClaims.claimCandyReward(Halloween2026RewardCatalog.highScoreRewards[0],at:rewardEnd), "complete close disallows claims")
         print("PASS: \(assertions) Halloween persistence, session, boundary and tuning assertions")
     }
 }

@@ -17,6 +17,7 @@ enum Halloween2026RewardGranting {
         guard EventManager.areRewardsAvailable(.halloween2026) else { return false }
         guard reward.isReached(in: store) else { return false }
         guard !reward.isClaimed(in: store) else { return false }
+        if case .candy = reward.reward { return store.claimCandyReward(reward) }
         guard grant(content: reward.reward, state: state, store: store) else { return false }
 
         store.markRewardClaimed(id: reward.id)

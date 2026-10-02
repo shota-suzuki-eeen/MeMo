@@ -63,6 +63,7 @@ struct Halloween2026EventView: View {
                 .memoIPadPresentedPhoneCanvas()
         }
         .onAppear {
+            if !showRunGame { store.recoverInterruptedSession() }
             bgmManager.switchBackground(to: .fishing)
         }
         .onDisappear {

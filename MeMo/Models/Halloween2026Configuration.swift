@@ -27,6 +27,7 @@ enum Halloween2026Configuration {
     static let levelSafetyDuration: TimeInterval = 2
     static let speedTransitionDuration: TimeInterval = 0.6
     static let resumeCountdownDuration: TimeInterval = 3
+    static let runCheckpointInterval: TimeInterval = 1
     static let minimumObstacleReactionTime: TimeInterval = 1
     static let laneMoveDuration: TimeInterval = 0.14
     static let laneDecisionMargin: TimeInterval = 0.2

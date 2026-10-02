@@ -10,7 +10,11 @@ import Foundation
 import Combine
 
 final class Halloween2026EventStore: ObservableObject {
-    static let shared = Halloween2026EventStore()
+    static let shared: Halloween2026EventStore = {
+        let store = Halloween2026EventStore()
+        store.recoverInterruptedSession()
+        return store
+    }()
 
     private struct Payload: Codable {
         var eventID: EventID = .halloween2026
@@ -195,6 +199,28 @@ final class Halloween2026EventStore: ObservableObject {
         guard let session = activeSession, session.id == id, session.mode != .endless else { return }
         activeSession = nil
         save()
+    }
+
+    /// Called when returning to the event after a terminated run, never to resume its Scene.
+    func recoverInterruptedSession() {
+        guard let session = activeSession else { return }
+        if session.mode == .endless {
+            finalizeSession(id: session.id, distance: session.distance, candy: session.candyCount)
+        } else {
+            discardStageSession(id: session.id)
+        }
+    }
+
+    /// Candy and its receipt belong to the same payload and are committed in one write.
+    @discardableResult
+    func claimCandyReward(_ reward: HalloweenDistanceReward, at date: Date = Date()) -> Bool {
+        guard EventManager.areRewardsAvailable(.halloween2026, at: date),
+              reward.isReached(in: self), !reward.isClaimed(in: self),
+              case let .candy(count) = reward.reward, count > 0 else { return false }
+        candyCount = candyCount.addingClamped(count)
+        claimedRewardIDs.insert(reward.id)
+        save()
+        return true
     }
 
     func addCandy(_ amount: Int) {
