@@ -35,6 +35,7 @@ struct HomeView: View {
 
     let state: AppState
     @ObservedObject var hk: HealthKitManager
+    let onHalloweenEventRequested: () -> Void
 
     @State private var todaySteps: Int = 0
     @State private var displayedTodaySteps: Int = 0
@@ -993,6 +994,7 @@ struct HomeView: View {
             toiletPoopsLayer
             toiletBubbleLayer
             topStepMeterOverlay
+            HalloweenHomeEntryLayer(onOpen: onHalloweenEventRequested)
         }
     }
 
