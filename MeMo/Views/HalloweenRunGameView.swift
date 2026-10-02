@@ -68,15 +68,18 @@ struct HalloweenRunGameView: View {
             bgmManager.switchBackground(to: .fishing)
         }
         .onDisappear {
+            finishUnfinishedSession()
             disconnectScene(scene)
-            if let sessionID { store.discardStageSession(id: sessionID) }
-            sessionID = nil
+        }
+        .onReceive(NotificationCenter.default.publisher(for: UIApplication.willTerminateNotification)) { _ in
+            finishUnfinishedSession()
         }
     }
 
     private var closeButton: some View {
         Button {
             bgmManager.playSE(.push)
+            finishUnfinishedSession()
             onClose()
         } label: {
             Image(systemName: "xmark")
@@ -204,6 +207,10 @@ struct HalloweenRunGameView: View {
     // MARK: - Scene
 
     private func configureScene(_ scene: HalloweenRunGameScene, session: HalloweenRunSession) {
+        scene.onCheckpoint = { progress in
+            guard result == nil, sessionID == session.id, session.mode == .endless else { return }
+            store.checkpointSession(id: session.id, distance: progress.distance, candy: progress.candyCount)
+        }
         scene.onGameOver = { runResult in
             guard result == nil, sessionID == session.id else { return }
 
@@ -231,10 +238,7 @@ struct HalloweenRunGameView: View {
     private func startNewRun() {
         guard EventManager.isActive(.halloween2026) else { return }
 
-        // A killed stage is restarted without provisional candy or progress.
-        if let unfinished = store.activeSession, unfinished.mode != .endless {
-            store.discardStageSession(id: unfinished.id)
-        }
+        store.recoverInterruptedSession()
         guard let session = store.beginSession(mode: store.nextRunMode) else { return }
 
         disconnectScene(scene)
@@ -259,6 +263,17 @@ struct HalloweenRunGameView: View {
 
     private func disconnectScene(_ scene: HalloweenRunGameScene) {
         scene.shutdown()
+    }
+
+    private func finishUnfinishedSession() {
+        guard let id = sessionID else { return }
+        let progress = scene.currentRunProgress
+        if progress.mode == .endless {
+            store.finalizeSession(id: id, distance: progress.distance, candy: progress.candyCount)
+        } else {
+            store.discardStageSession(id: id)
+        }
+        sessionID = nil
     }
 }
 

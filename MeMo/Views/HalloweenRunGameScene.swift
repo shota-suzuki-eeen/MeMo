@@ -30,8 +30,9 @@ final class HalloweenRunGameScene: SKScene {
 
     }
 
-    /// SwiftUI側へ渡すのはプレイ終了時だけ。
+    /// Results and throttled endless checkpoints are delivered outside the frame update.
     var onGameOver: ((HalloweenRunResult) -> Void)?
+    var onCheckpoint: ((HalloweenRunResult) -> Void)?
     let runMode: HalloweenRunMode
     private var stageAttempt: HalloweenStageAttempt?
     private var stageLevel: Int {
@@ -87,6 +88,15 @@ final class HalloweenRunGameScene: SKScene {
 
     private var isGameOver = false
     private var hasShutDown = false
+    private var interruption = HalloweenRunInterruption()
+    private var checkpointAccumulator: TimeInterval = 0
+    private var lifecycleObservers: [NSObjectProtocol] = []
+
+    var currentRunProgress: HalloweenRunResult {
+        HalloweenRunResult(distance: max(0, Int(distanceMeters.rounded(.down))),
+            candyCount: candyCount, mode: runMode, stageNumber: stageAttempt?.number,
+            clearedStage: stageAttempt?.isCleared ?? false)
+    }
 
     // 生成器をタップごとに作らず使い回す。
     private let moveHaptic = UIImpactFeedbackGenerator(style: .light)
@@ -139,6 +149,52 @@ final class HalloweenRunGameScene: SKScene {
         moveHaptic.prepare()
         candyHaptic.prepare()
         gameOverHaptic.prepare()
+        observeApplicationLifecycle()
+        setAppActive(UIApplication.shared.applicationState == .active)
+    }
+
+    deinit { lifecycleObservers.forEach(NotificationCenter.default.removeObserver) }
+
+    private func observeApplicationLifecycle() {
+        guard lifecycleObservers.isEmpty else { return }
+        for name in [UIApplication.willResignActiveNotification, UIApplication.didEnterBackgroundNotification] {
+            lifecycleObservers.append(NotificationCenter.default.addObserver(forName: name, object: nil, queue: .main) { [weak self] _ in
+                self?.setAppActive(false)
+            })
+        }
+        lifecycleObservers.append(NotificationCenter.default.addObserver(forName: UIApplication.didBecomeActiveNotification, object: nil, queue: .main) { [weak self] _ in
+            self?.setAppActive(true)
+        })
+    }
+
+    func setAppActive(_ active: Bool) {
+        guard !isGameOver, !hasShutDown else { return }
+        interruption.setActive(active)
+        previousUpdateTime = nil
+        if !active {
+            countdownRemaining = 0
+            onCheckpoint?(currentRunProgress)
+        }
+        setGameplayActionsPaused(!interruption.canSimulate)
+        if !interruption.canSimulate { updateResumeHUD() }
+    }
+
+    private func setGameplayActionsPaused(_ paused: Bool) {
+        for node in [playerNode, movingLayer, roadMarkLayer, hudLayer] { node.isPaused = paused }
+    }
+
+    private func updateResumeHUD() {
+        countdownLabel.isHidden = interruption.isSuspended
+        countdownLabel.text = "\(max(1, Int(ceil(interruption.resumeRemaining))))"
+        readyLabel.text = interruption.isSuspended ? "PAUSED" : "再開まで"
+        readyLabel.isHidden = false
+    }
+
+    private func queueCheckpoint() {
+        guard runMode == .endless else { return }
+        let progress = currentRunProgress
+        let callback = onCheckpoint
+        DispatchQueue.main.async { callback?(progress) }
     }
 
     override func didChangeSize(_ oldSize: CGSize) {
@@ -303,6 +359,7 @@ final class HalloweenRunGameScene: SKScene {
 
     override func update(_ currentTime: TimeInterval) {
         guard !isGameOver, !hasShutDown else { return }
+        guard !interruption.isSuspended else { previousUpdateTime = nil; return }
 
         guard let previousUpdateTime else {
             self.previousUpdateTime = currentTime
@@ -312,6 +369,17 @@ final class HalloweenRunGameScene: SKScene {
         var deltaTime = currentTime - previousUpdateTime
         self.previousUpdateTime = currentTime
         deltaTime = min(max(0, deltaTime), Halloween2026Configuration.maximumFrameStep)
+        if !interruption.canSimulate {
+            interruption.advanceCountdown(by: deltaTime)
+            updateResumeHUD()
+            if interruption.canSimulate {
+                countdownLabel.isHidden = true
+                readyLabel.isHidden = true
+                readyLabel.text = "READY"
+                setGameplayActionsPaused(false)
+            }
+            return
+        }
         if let attempt = stageAttempt { deltaTime = min(deltaTime, attempt.remaining) }
 
         // The start gate admits the run; crossing the event end must not end it.
@@ -337,6 +405,13 @@ final class HalloweenRunGameScene: SKScene {
         guard !isGameOver else { return }
 
         updateDistance(deltaTime: deltaTime)
+        if runMode == .endless {
+            checkpointAccumulator += deltaTime
+            if checkpointAccumulator >= Halloween2026Configuration.runCheckpointInterval {
+                checkpointAccumulator = 0
+                queueCheckpoint()
+            }
+        }
         if runMode == .endless {
             let previousLevel = runDifficulty.level
             let resumed = runDifficulty.advance(distance: Int(distanceMeters),
@@ -600,6 +675,7 @@ final class HalloweenRunGameScene: SKScene {
             candyCount += 1
         }
         candyLabel.text = "CANDY  \(candyCount)"
+        queueCheckpoint()
 
         candyHaptic.impactOccurred(intensity: 0.64)
     }
@@ -620,7 +696,7 @@ final class HalloweenRunGameScene: SKScene {
     // MARK: - Input
 
     override func touchesEnded(_ touches: Set<UITouch>, with event: UIEvent?) {
-        guard !isGameOver, !hasShutDown, countdownRemaining <= 0 else {
+        guard !isGameOver, !hasShutDown, countdownRemaining <= 0, interruption.canSimulate else {
             return
         }
         guard let touch = touches.first else { return }
@@ -686,6 +762,9 @@ final class HalloweenRunGameScene: SKScene {
         hasShutDown = true
         isGameOver = true
         onGameOver = nil
+        onCheckpoint = nil
+        lifecycleObservers.forEach(NotificationCenter.default.removeObserver)
+        lifecycleObservers.removeAll()
         previousUpdateTime = nil
 
         playerNode.removeAllActions()
