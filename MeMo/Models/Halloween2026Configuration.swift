@@ -28,6 +28,10 @@ enum Halloween2026Configuration {
     static let speedTransitionDuration: TimeInterval = 0.6
     static let resumeCountdownDuration: TimeInterval = 3
     static let minimumObstacleReactionTime: TimeInterval = 1
+    static let laneMoveDuration: TimeInterval = 0.14
+    static let laneDecisionMargin: TimeInterval = 0.2
+    static let maximumFrameStep: TimeInterval = 0.05
+    static let gameplayHeaderClearance: Double = 130
     static let levelPushDuration: TimeInterval = 0.35
     static let levelReadDuration: TimeInterval = 0.9
     static let levelExitDuration: TimeInterval = 0.25
@@ -43,6 +47,17 @@ enum Halloween2026Configuration {
 
     static func level(forDistance distance: Int) -> Int {
         levelDistances.filter { max(0, distance) >= $0 }.count
+    }
+
+    static func scrollSpeed(forLevel level: Int, sceneHeight: Double, playerY: Double,
+                            collisionHalfHeight: Double) -> Double {
+        let visibleTravel = max(1, sceneHeight - gameplayHeaderClearance - playerY - collisionHalfHeight)
+        return min(scrollSpeeds[min(4, max(0, level - 1))], visibleTravel / minimumObstacleReactionTime)
+    }
+
+    static func candyObstacleSeparation(scrollSpeed: Double) -> Double {
+        // Obstacle/player band55 + candy/player band43, then time for two moves and a decision.
+        98 + max(0, scrollSpeed) * (2 * laneMoveDuration + laneDecisionMargin)
     }
 
     static func tokyoDayKey(at date: Date) -> String {
