@@ -17,21 +17,6 @@ final class HalloweenRunGameScene: SKScene {
     private enum Config {
         static let preferredFramesPerSecond = 60
 
-        static let laneMoveDuration: TimeInterval = 0.14
-
-        static let baseScrollSpeed: CGFloat = 260
-        static let maxScrollSpeed: CGFloat = 520
-        static let maxDifficultyReachTime: TimeInterval = 180
-
-        static let baseObstacleSpawnInterval: TimeInterval = 1.45
-        static let minimumObstacleSpawnInterval: TimeInterval = 0.90
-        static let doubleObstacleStartTime: TimeInterval = 30
-        static let maximumDoubleObstacleChance: Double = 0.58
-
-        static let candySpawnInterval: TimeInterval = 1.60
-        static let candySpawnChance: Double = 0.78
-        static let candyTrailChance: Double = 0.24
-
         static let playerYRatio: CGFloat = 0.18
         static let laneXRatio: [CGFloat] = [0.24, 0.50, 0.76]
         static let obstacleHeight: CGFloat = 72
@@ -42,10 +27,6 @@ final class HalloweenRunGameScene: SKScene {
         static let playerCollisionHalfHeight: CGFloat = 25
         static let obstacleCollisionHalfHeight: CGFloat = 30
         static let candyCollisionHalfSize: CGFloat = 18
-
-        // 0秒時点で約8m/s、3分時点で約16m/s。
-        static let baseMetersPerSecond: Double = 8
-        static let maxMetersPerSecond: Double = 16
 
     }
 
@@ -72,13 +53,19 @@ final class HalloweenRunGameScene: SKScene {
 
     private var lanePositions: [CGFloat] = []
     private var playerLane = 1
-    private var preferredSafeLane = 1
+    private var obstaclePlanner = HalloweenObstaclePlanner()
+    private var randomGenerator = SystemRandomNumberGenerator()
+    private var runDifficulty = HalloweenRunDifficulty()
+    private var currentLevel: Int { runMode == .endless ? runDifficulty.level : stageLevel }
 
     // MARK: - HUD
 
     private let distanceTitleLabel = SKLabelNode(fontNamed: "AvenirNext-Bold")
     private let distanceLabel = SKLabelNode(fontNamed: "AvenirNext-Heavy")
     private let candyLabel = SKLabelNode(fontNamed: "AvenirNext-Heavy")
+    private let levelLabel = SKLabelNode(fontNamed: "AvenirNext-Bold")
+    private let oldLevelAnnouncement = SKLabelNode(fontNamed: "AvenirNext-Heavy")
+    private let newLevelAnnouncement = SKLabelNode(fontNamed: "AvenirNext-Heavy")
     private let countdownLabel = SKLabelNode(fontNamed: "AvenirNext-Heavy")
     private let readyLabel = SKLabelNode(fontNamed: "AvenirNext-Bold")
     private let leftHintLabel = SKLabelNode(fontNamed: "AvenirNext-Bold")
@@ -130,6 +117,19 @@ final class HalloweenRunGameScene: SKScene {
         setupRoad()
         setupPlayer()
         setupHUD()
+        levelLabel.fontSize = 15
+        levelLabel.fontColor = .orange
+        levelLabel.horizontalAlignmentMode = .left
+        levelLabel.isHidden = runMode == .bonus
+        hudLayer.addChild(levelLabel)
+        levelLabel.text = "Lv\(currentLevel)"
+        for announcement in [oldLevelAnnouncement, newLevelAnnouncement] {
+            announcement.fontSize = 26
+            announcement.fontColor = .orange
+            announcement.isHidden = true
+            hudLayer.addChild(announcement)
+        }
+        updateHUDPositions()
         if let attempt = stageAttempt {
             distanceTitleLabel.text = attempt.mode == .bonus ? "BONUS \(attempt.number)" : "STAGE \(attempt.number) · Lv\(stageLevel)"
             distanceLabel.text = "\(Int(attempt.duration))秒"
@@ -202,7 +202,7 @@ final class HalloweenRunGameScene: SKScene {
         playerNode.removeAllChildren()
 
         playerLane = 1
-        preferredSafeLane = 1
+        obstaclePlanner = HalloweenObstaclePlanner()
 
         playerNode.position = CGPoint(
             x: lanePositions[playerLane],
@@ -284,6 +284,9 @@ final class HalloweenRunGameScene: SKScene {
 
     private func updateHUDPositions() {
         let topY = size.height - 68
+        levelLabel.position = CGPoint(x: 22, y: size.height - 132)
+        oldLevelAnnouncement.position = CGPoint(x: size.width / 2, y: size.height * 0.62)
+        newLevelAnnouncement.position = oldLevelAnnouncement.position
 
         distanceTitleLabel.position = CGPoint(x: size.width * 0.5, y: topY + 10)
         distanceLabel.position = CGPoint(x: size.width * 0.5, y: topY - 14)
@@ -308,7 +311,7 @@ final class HalloweenRunGameScene: SKScene {
 
         var deltaTime = currentTime - previousUpdateTime
         self.previousUpdateTime = currentTime
-        deltaTime = min(max(0, deltaTime), 0.05)
+        deltaTime = min(max(0, deltaTime), Halloween2026Configuration.maximumFrameStep)
         if let attempt = stageAttempt { deltaTime = min(deltaTime, attempt.remaining) }
 
         // The start gate admits the run; crossing the event end must not end it.
@@ -326,19 +329,32 @@ final class HalloweenRunGameScene: SKScene {
 
         elapsedTime += deltaTime
 
-        let difficulty = difficultyProgress
-        let scrollSpeed = currentScrollSpeed(difficulty: difficulty)
+        let scrollSpeed = currentScrollSpeed
 
         updateRoadMarks(deltaTime: deltaTime, speed: scrollSpeed)
         updateMovingNodesAndCollisions(deltaTime: deltaTime, speed: scrollSpeed)
 
         guard !isGameOver else { return }
 
-        updateDistance(deltaTime: deltaTime, difficulty: difficulty)
-        if runMode != .bonus, elapsedTime >= Halloween2026Configuration.startSafetyDuration {
-            updateObstacleSpawning(deltaTime: deltaTime, difficulty: difficulty)
+        updateDistance(deltaTime: deltaTime)
+        if runMode == .endless {
+            let previousLevel = runDifficulty.level
+            let resumed = runDifficulty.advance(distance: Int(distanceMeters),
+                objectsAreEmpty: movingLayer.children.isEmpty, seconds: deltaTime)
+            if runDifficulty.level != previousLevel { announceLevel(from: previousLevel) }
+            if case let .draining(target) = runDifficulty.phase {
+                levelLabel.text = "Lv\(currentLevel) → Lv\(target)"
+            } else { levelLabel.text = "Lv\(currentLevel)" }
+            if resumed {
+                obstacleSpawnAccumulator = 0
+                candySpawnAccumulator = 0
+                return
+            }
         }
-        if runMode != .stage { updateCandySpawning(deltaTime: deltaTime) }
+        let maySpawn = elapsedTime >= Halloween2026Configuration.startSafetyDuration
+            && (runMode != .endless || runDifficulty.canSpawn)
+        if runMode != .bonus, maySpawn { updateObstacleSpawning(deltaTime: deltaTime) }
+        if runMode == .bonus || (runMode == .endless && maySpawn) { updateCandySpawning(deltaTime: deltaTime) }
         if stageAttempt != nil {
             stageAttempt?.advance(by: deltaTime)
             distanceLabel.text = "\(Int(ceil(stageAttempt!.remaining)))秒"
@@ -346,27 +362,23 @@ final class HalloweenRunGameScene: SKScene {
         }
     }
 
-    private var difficultyProgress: Double {
-        min(1, max(0, elapsedTime / Config.maxDifficultyReachTime))
+    private func scrollSpeed(for level: Int) -> Double {
+        Halloween2026Configuration.scrollSpeed(forLevel: level, sceneHeight: Double(size.height),
+            playerY: Double(playerNode.position.y), collisionHalfHeight: 55)
     }
 
-    private func currentScrollSpeed(difficulty: Double) -> CGFloat {
-        if runMode != .endless {
-            return CGFloat(Halloween2026Configuration.scrollSpeeds[runMode == .bonus ? 0 : stageLevel - 1])
-        }
-        return Config.baseScrollSpeed
-            + (Config.maxScrollSpeed - Config.baseScrollSpeed) * CGFloat(difficulty)
+    private var currentScrollSpeed: CGFloat {
+        let level = runMode == .bonus ? 1 : currentLevel
+        let previous = runMode == .endless ? runDifficulty.previousSpeedLevel : level
+        let fraction = runMode == .endless ? runDifficulty.speedFraction : 1
+        return CGFloat(scrollSpeed(for: previous) + (scrollSpeed(for: level) - scrollSpeed(for: previous)) * fraction)
     }
 
-    private func currentObstacleSpawnInterval(difficulty: Double) -> TimeInterval {
-        if runMode == .stage { return Halloween2026Configuration.obstacleIntervals[stageLevel - 1] }
-        return Config.baseObstacleSpawnInterval
-            - (Config.baseObstacleSpawnInterval - Config.minimumObstacleSpawnInterval) * difficulty
-    }
-
-    private func updateDistance(deltaTime: TimeInterval, difficulty: Double) {
-        let metersPerSecond = Config.baseMetersPerSecond
-            + (Config.maxMetersPerSecond - Config.baseMetersPerSecond) * difficulty
+    private func updateDistance(deltaTime: TimeInterval) {
+        let previous = runMode == .endless ? runDifficulty.previousSpeedLevel : currentLevel
+        let fraction = runMode == .endless ? runDifficulty.speedFraction : 1
+        let speeds = Halloween2026Configuration.distanceSpeeds
+        let metersPerSecond = speeds[previous - 1] + (speeds[currentLevel - 1] - speeds[previous - 1]) * fraction
 
         distanceMeters += metersPerSecond * deltaTime
 
@@ -375,6 +387,32 @@ final class HalloweenRunGameScene: SKScene {
 
         lastDisplayedDistance = integerDistance
         if runMode == .endless { distanceLabel.text = "\(integerDistance)m" }
+    }
+
+    private func announceLevel(from previous: Int) {
+        let center = CGPoint(x: size.width / 2, y: size.height * 0.62)
+        oldLevelAnnouncement.removeAllActions()
+        newLevelAnnouncement.removeAllActions()
+        oldLevelAnnouncement.text = "LEVEL \(previous)"
+        oldLevelAnnouncement.position = center
+        oldLevelAnnouncement.alpha = 1
+        oldLevelAnnouncement.isHidden = false
+        newLevelAnnouncement.text = "LEVEL \(currentLevel)"
+        newLevelAnnouncement.position = CGPoint(x: center.x, y: center.y + 38)
+        newLevelAnnouncement.alpha = 1
+        newLevelAnnouncement.isHidden = false
+        oldLevelAnnouncement.run(.sequence([
+            .group([.moveBy(x: 0, y: -38, duration: Halloween2026Configuration.levelPushDuration),
+                    .fadeOut(withDuration: Halloween2026Configuration.levelPushDuration)]),
+            .hide()
+        ]))
+        newLevelAnnouncement.run(.sequence([
+            .move(to: center, duration: Halloween2026Configuration.levelPushDuration),
+            .wait(forDuration: Halloween2026Configuration.levelReadDuration),
+            .group([.moveBy(x: 0, y: -20, duration: Halloween2026Configuration.levelExitDuration),
+                    .fadeOut(withDuration: Halloween2026Configuration.levelExitDuration)]),
+            .hide()
+        ]))
     }
 
     private func updateCountdownHUD(force: Bool = false) {
@@ -396,71 +434,26 @@ final class HalloweenRunGameScene: SKScene {
 
     // MARK: - Obstacles
 
-    private func updateObstacleSpawning(deltaTime: TimeInterval, difficulty: Double) {
+    private func updateObstacleSpawning(deltaTime: TimeInterval) {
         obstacleSpawnAccumulator += deltaTime
-        let interval = currentObstacleSpawnInterval(difficulty: difficulty)
+        let interval = Halloween2026Configuration.obstacleIntervals[currentLevel - 1]
 
         guard obstacleSpawnAccumulator >= interval else { return }
         obstacleSpawnAccumulator -= interval
-        spawnObstacleRow(difficulty: difficulty)
+        spawnObstacleRow()
     }
 
-    private func spawnObstacleRow(difficulty: Double) {
+    private func spawnObstacleRow() {
         let spawnY = size.height + 76
-
-        let doubleChance: Double
-        if runMode == .stage {
-            doubleChance = Halloween2026Configuration.doubleObstacleProbabilities[stageLevel - 1]
-        } else if elapsedTime < Config.doubleObstacleStartTime {
-            doubleChance = 0
-        } else {
-            let denominator = max(
-                1,
-                Config.maxDifficultyReachTime - Config.doubleObstacleStartTime
-            )
-            let afterStart = min(
-                1,
-                max(
-                    0,
-                    (elapsedTime - Config.doubleObstacleStartTime) / denominator
-                )
-            )
-            doubleChance = 0.12
-                + ((Config.maximumDoubleObstacleChance - 0.12) * afterStart)
-        }
-
-        if Double.random(in: 0...1) < doubleChance {
-            let candidates = [
-                preferredSafeLane - 1,
-                preferredSafeLane,
-                preferredSafeLane + 1,
-            ]
-            .filter { (0...2).contains($0) }
-
-            let nextSafeLane = candidates.randomElement() ?? preferredSafeLane
-            preferredSafeLane = nextSafeLane
-
-            for lane in 0...2 where lane != nextSafeLane {
-                spawnObstacle(lane: lane, y: spawnY)
-            }
-        } else {
-            let blockedCandidates = (0...2).filter { $0 != preferredSafeLane }
-            let blockedLane = blockedCandidates.randomElement() ?? 0
-
-            spawnObstacle(lane: blockedLane, y: spawnY)
-
-            if difficulty > 0.20, Double.random(in: 0...1) < 0.30 {
-                let candidates = [
-                    preferredSafeLane - 1,
-                    preferredSafeLane + 1,
-                ]
-                .filter { (0...2).contains($0) && $0 != blockedLane }
-
-                if let next = candidates.randomElement() {
-                    preferredSafeLane = next
-                }
-            }
-        }
+        let separation = Halloween2026Configuration.candyObstacleSeparation(scrollSpeed: Double(currentScrollSpeed))
+        let candyLanes = Set(movingLayer.children.compactMap { node -> Int? in
+            guard node.name == "candy", abs(Double(node.position.y - spawnY)) < separation else { return nil }
+            return node.userData?["lane"] as? Int
+        })
+        let blocked = obstaclePlanner.nextRow(level: currentLevel, scrollSpeed: Double(currentScrollSpeed),
+            collisionBandHeight: Double(2 * (Config.obstacleCollisionHalfHeight + Config.playerCollisionHalfHeight)),
+            candyLanes: candyLanes, using: &randomGenerator)
+        for lane in blocked { spawnObstacle(lane: lane, y: spawnY) }
     }
 
     private func spawnObstacle(lane: Int, y: CGFloat) {
@@ -502,35 +495,26 @@ final class HalloweenRunGameScene: SKScene {
             return
         }
 
-        guard candySpawnAccumulator >= Config.candySpawnInterval else { return }
-        candySpawnAccumulator -= Config.candySpawnInterval
-
-        guard Double.random(in: 0...1) < Config.candySpawnChance else { return }
+        let interval = Halloween2026Configuration.candyIntervals[currentLevel - 1]
+        guard candySpawnAccumulator >= interval else { return }
+        candySpawnAccumulator -= interval
+        guard Double.random(in: 0..<1, using: &randomGenerator) < Halloween2026Configuration.candySpawnProbability else { return }
 
         let spawnY = size.height + 52
-        let availableLanes = candyAvailableLanes(aroundY: spawnY)
-        guard let lane = availableLanes.randomElement() else { return }
-
-        if Double.random(in: 0...1) < Config.candyTrailChance {
-            for index in 0..<3 {
-                spawnCandy(lane: lane, y: spawnY + CGFloat(index * 58))
-            }
-        } else {
-            spawnCandy(lane: lane, y: spawnY)
-        }
+        let column = Double.random(in: 0..<1, using: &randomGenerator) < Halloween2026Configuration.candyColumnProbability
+        let positions = (0..<(column ? 3 : 1)).map { spawnY + CGFloat($0 * 58) }
+        let availableLanes = candyAvailableLanes(around: positions)
+        guard let lane = availableLanes.randomElement(using: &randomGenerator) else { return }
+        for y in positions { spawnCandy(lane: lane, y: y) }
     }
 
-    private func candyAvailableLanes(aroundY y: CGFloat) -> [Int] {
+    private func candyAvailableLanes(around positions: [CGFloat]) -> [Int] {
         var blockedLanes = Set<Int>()
-
+        let separation = Halloween2026Configuration.candyObstacleSeparation(scrollSpeed: Double(currentScrollSpeed))
         for node in movingLayer.children where node.name == "obstacle" {
-            guard abs(node.position.y - y) < 120 else { continue }
-
-            if let lane = node.userData?["lane"] as? Int {
-                blockedLanes.insert(lane)
-            }
+            guard positions.contains(where: { abs(Double(node.position.y - $0)) < separation }) else { continue }
+            if let lane = node.userData?["lane"] as? Int { blockedLanes.insert(lane) }
         }
-
         return (0...2).filter { !blockedLanes.contains($0) }
     }
 
@@ -660,7 +644,7 @@ final class HalloweenRunGameScene: SKScene {
 
         let move = SKAction.moveTo(
             x: lanePositions[targetLane],
-            duration: Config.laneMoveDuration
+            duration: Halloween2026Configuration.laneMoveDuration
         )
         move.timingMode = .easeOut
         playerNode.run(move, withKey: "laneMove")

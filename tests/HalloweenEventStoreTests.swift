@@ -158,6 +158,7 @@ struct HalloweenEventStoreTests {
         newState.addCandy(1)
         check(newState.gachaDrawProgress == 1 && newState.gachaTotalDraws == 151, "gacha counters independent")
         check(newState.srDailyCounts["gachaTicket_nomal"] == 8 && newState.usedEventAdSlots == ["morning"] && newState.wallpaperGranted, "new state round trip")
+        assertions += HalloweenRunMechanicsTests.run()
         print("PASS: \(assertions) Halloween persistence, session, boundary and tuning assertions")
     }
 }
