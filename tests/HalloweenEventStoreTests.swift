@@ -24,6 +24,7 @@ struct HalloweenEventStoreTests {
     }
 
     static func main() {
+        HalloweenGachaTests.run()
         defer { for (defaults, name) in testSuites { defaults.removePersistentDomain(forName: name) } }
         let old = defaults([
             "eventID": "halloween2026", "bestDistance": 567, "totalDistance": 1234,

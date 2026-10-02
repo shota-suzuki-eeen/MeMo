@@ -236,9 +236,12 @@ enum PetMaster {
         .init(id: "hyakka_tsubaki", name: "椿"),
         .init(id: "hyakka_ume", name: "梅"),
         .init(id: "hyakka_yuri", name: "百合")
-    ]
+    ] + HalloweenGachaCatalog.characterAssetNames.map {
+        PetMasterItem(id: "halloween_\($0)", name: $0)
+    }
 
     static func assetName(for petID: String) -> String {
+        if HalloweenGachaCatalog.characterIDs.contains(petID) { return String(petID.dropFirst("halloween_".count)) }
         switch petID {
         case "pet_000": return "person"
         case "pet_001": return "dog"
@@ -407,6 +410,8 @@ enum PetMaster {
             return "\(base)_wc"
         case let id where id.hasPrefix("cyberpunk_"):
             return "\(base)_wc"
+        case let id where id.hasPrefix("halloween_"):
+            return "\(base)_wc"
         case let id where id.hasPrefix("hyakka_"):
             return "\(base)_wc"
         default:
@@ -426,6 +431,8 @@ enum PetMaster {
         case let id where id.hasPrefix("street_"):
             return ["\(base)_idle_blink_0001", "\(base)_idle_blink_0002"]
         case let id where id.hasPrefix("cyberpunk_"):
+            return ["\(base)_idle_blink_0001", "\(base)_idle_blink_0002"]
+        case let id where id.hasPrefix("halloween_"):
             return ["\(base)_idle_blink_0001", "\(base)_idle_blink_0002"]
         case let id where id.hasPrefix("hyakka_"):
             return ["\(base)_idle_blink_0001", "\(base)_idle_blink_0002"]

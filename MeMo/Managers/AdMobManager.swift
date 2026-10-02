@@ -945,7 +945,7 @@ final class RewardedAdManager: NSObject, ObservableObject {
     private var pendingReward: (() -> Void)?
     private var pendingUnavailable: (() -> Void)?
     private var didEarnRewardDuringPresentation: Bool = false
-    private var isPresentingAd: Bool = false
+    @Published private(set) var isPresentingAd: Bool = false
     private var lastLoadAt: Date?
 
     #if canImport(GoogleMobileAds)

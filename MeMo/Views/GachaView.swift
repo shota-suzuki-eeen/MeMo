@@ -357,6 +357,7 @@ fileprivate enum GachaCatalog {
             && !streetAnimalsCharacters.contains(where: { $0.id == pet.id })
             && !cyberpunkRacersCharacters.contains(where: { $0.id == pet.id })
             && !hyakkaryouranCharacters.contains(where: { $0.id == pet.id })
+            && !HalloweenGachaCatalog.characterIDs.contains(pet.id)
     }
 
     static func resolvedCharacterName(for pet: PetMasterItem) -> String {
