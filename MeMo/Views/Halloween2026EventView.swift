@@ -142,6 +142,11 @@ struct Halloween2026EventView: View {
             candyBalance
                 .padding(.top, 14)
 
+            Text(store.endlessUnlocked ? "ENDLESS 解放済み" : "STAGE \(store.currentStageNumber) / 25 · \(store.nextRunMode == .bonus ? "BONUS" : "Lv\(Halloween2026Configuration.level(forStage: store.currentStageNumber))")")
+                .font(.system(size: 19, weight: .black, design: .rounded))
+                .foregroundStyle(.white)
+                .padding(.top, 18)
+
             Spacer(minLength: 28)
 
             startButton
@@ -255,11 +260,11 @@ struct Halloween2026EventView: View {
                 Image(systemName: "figure.run")
                     .font(.system(size: 42, weight: .black))
 
-                Text("START")
+                Text(store.endlessUnlocked ? "ENDLESS" : (store.nextRunMode == .bonus ? "BONUS" : "START"))
                     .font(.system(size: 34, weight: .black, design: .rounded))
                     .tracking(1.5)
 
-                Text("左右タップで障害物をよけよう！")
+                Text(store.nextRunMode == .bonus ? "20秒間、キャンディを集めよう！" : (store.endlessUnlocked ? "左右タップで記録に挑戦！" : "30秒間、障害物をよけよう！"))
                     .font(.system(size: 13, weight: .bold, design: .rounded))
                     .opacity(0.86)
             }

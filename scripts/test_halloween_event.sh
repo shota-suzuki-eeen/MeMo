@@ -6,6 +6,8 @@ trap 'rm -rf "$test_directory"' EXIT
 xcrun swiftc -swift-version 5 -module-cache-path "$test_directory/module-cache" \
     "$task_root/MeMo/Models/EventManager.swift" \
     "$task_root/MeMo/Models/Halloween2026Configuration.swift" \
+    "$task_root/MeMo/Models/HalloweenStageAttempt.swift" \
+    "$task_root/MeMo/Models/WallpaperCatalog.swift" \
     "$task_root/MeMo/Models/FoodCatalog.swift" \
     "$task_root/MeMo/Models/Halloween2026EventModels.swift" \
     "$task_root/MeMo/Models/Halloween2026EventStore.swift" \

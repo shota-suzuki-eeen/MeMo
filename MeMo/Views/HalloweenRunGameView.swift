@@ -24,6 +24,8 @@ struct HalloweenRunGameView: View {
     // ゲーム中は変化しない。GAME OVER時だけ更新。
     @State private var result: HalloweenRunResult?
     @State private var wasNewHighScore = false
+    @State private var sessionID: String?
+    @State private var didGrantWallpaper = false
 
     init(
         store: Halloween2026EventStore,
@@ -33,7 +35,8 @@ struct HalloweenRunGameView: View {
         self.onClose = onClose
 
         _scene = State(
-            initialValue: HalloweenRunGameScene(size: UIScreen.main.bounds.size)
+            initialValue: HalloweenRunGameScene(size: UIScreen.main.bounds.size,
+                mode: store.nextRunMode, stageNumber: store.endlessUnlocked ? nil : store.currentStageNumber)
         )
     }
 
@@ -61,11 +64,13 @@ struct HalloweenRunGameView: View {
         .background(Color.black)
         .ignoresSafeArea()
         .onAppear {
-            configureScene(scene)
+            if sessionID == nil { startNewRun() }
             bgmManager.switchBackground(to: .fishing)
         }
         .onDisappear {
             disconnectScene(scene)
+            if let sessionID { store.discardStageSession(id: sessionID) }
+            sessionID = nil
         }
     }
 
@@ -92,7 +97,7 @@ struct HalloweenRunGameView: View {
                 .ignoresSafeArea()
 
             VStack(spacing: 18) {
-                Text(wasNewHighScore ? "NEW RECORD!" : "GAME OVER")
+                Text(result.clearedStage ? "CLEAR!" : (wasNewHighScore ? "NEW RECORD!" : "GAME OVER"))
                     .font(.system(size: 25, weight: .black, design: .rounded))
                     .foregroundStyle(
                         wasNewHighScore
@@ -101,11 +106,11 @@ struct HalloweenRunGameView: View {
                     )
 
                 VStack(spacing: 8) {
-                    Text("今回の記録")
+                    Text(result.mode == .endless ? "今回の記録" : "STAGE \(result.stageNumber ?? 1)")
                         .font(.system(size: 12, weight: .bold, design: .rounded))
                         .foregroundStyle(.secondary)
 
-                    Text("\(result.distance.formatted())m")
+                    Text(result.mode == .endless ? "\(result.distance.formatted())m" : (result.clearedStage ? "クリア" : "もう一度挑戦！"))
                         .font(.system(size: 42, weight: .black, design: .rounded))
                         .monospacedDigit()
 
@@ -120,7 +125,13 @@ struct HalloweenRunGameView: View {
 
                 Divider()
 
-                HStack {
+                if didGrantWallpaper {
+                    Text("エンドレス解放！\nハロウィン壁紙を獲得しました。\n図鑑の壁紙から選択できます。")
+                        .font(.system(size: 14, weight: .bold, design: .rounded))
+                        .multilineTextAlignment(.center)
+                }
+
+                if result.mode == .endless { HStack {
                     resultStat(
                         title: "BEST",
                         value: "\(store.bestDistance.formatted())m"
@@ -130,13 +141,13 @@ struct HalloweenRunGameView: View {
                         title: "TOTAL",
                         value: "\(store.totalDistance.formatted())m"
                     )
-                }
+                } }
 
                 Button {
                     bgmManager.playSE(.push)
                     startNewRun()
                 } label: {
-                    Text("もう一度")
+                    Text(result.clearedStage ? (store.endlessUnlocked ? "エンドレスに挑戦" : "次の面へ") : "もう一度")
                         .font(.system(size: 17, weight: .black, design: .rounded))
                         .foregroundStyle(.white)
                         .frame(maxWidth: .infinity, minHeight: 52)
@@ -192,19 +203,22 @@ struct HalloweenRunGameView: View {
 
     // MARK: - Scene
 
-    private func configureScene(_ scene: HalloweenRunGameScene) {
+    private func configureScene(_ scene: HalloweenRunGameScene, session: HalloweenRunSession) {
         scene.onGameOver = { runResult in
-            guard result == nil else { return }
+            guard result == nil, sessionID == session.id else { return }
 
-            let newRecord = runResult.distance > store.bestDistance
+            let newRecord = runResult.mode == .endless && runResult.distance > store.bestDistance
+            let previouslyGrantedWallpaper = store.wallpaperGranted
 
-            // EventStoreへの保存はGAME OVER時の1回だけ。
-            store.recordRun(
+            guard store.finalizeSession(
+                id: session.id,
                 distance: runResult.distance,
-                candy: runResult.candyCount
-            )
+                candy: runResult.candyCount,
+                clearedStage: runResult.clearedStage
+            ) else { return }
 
             wasNewHighScore = newRecord
+            didGrantWallpaper = !previouslyGrantedWallpaper && store.wallpaperGranted
 
             withAnimation(
                 .spring(response: 0.34, dampingFraction: 0.82)
@@ -217,15 +231,25 @@ struct HalloweenRunGameView: View {
     private func startNewRun() {
         guard EventManager.isActive(.halloween2026) else { return }
 
+        // A killed stage is restarted without provisional candy or progress.
+        if let unfinished = store.activeSession, unfinished.mode != .endless {
+            store.discardStageSession(id: unfinished.id)
+        }
+        guard let session = store.beginSession(mode: store.nextRunMode) else { return }
+
         disconnectScene(scene)
 
         result = nil
         wasNewHighScore = false
+        didGrantWallpaper = false
+        sessionID = session.id
 
         let newScene = HalloweenRunGameScene(
-            size: UIScreen.main.bounds.size
+            size: UIScreen.main.bounds.size,
+            mode: session.mode,
+            stageNumber: session.stageNumber
         )
-        configureScene(newScene)
+        configureScene(newScene, session: session)
 
         scene = newScene
 

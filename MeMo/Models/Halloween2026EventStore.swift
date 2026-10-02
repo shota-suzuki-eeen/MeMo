@@ -98,9 +98,14 @@ final class Halloween2026EventStore: ObservableObject {
     init(defaults: UserDefaults = .standard) {
         self.defaults = defaults
         load()
+        ensureCompletionWallpaper()
     }
 
     var currentStageNumber: Int { min(Halloween2026Configuration.stageCount, completedStageCount + 1) }
+
+    var nextRunMode: HalloweenRunMode {
+        endlessUnlocked ? .endless : (Halloween2026Configuration.isBonusStage(currentStageNumber) ? .bonus : .stage)
+    }
 
     var hasClaimableReward: Bool {
         Halloween2026RewardCatalog.allRewards.contains { reward in
@@ -170,7 +175,19 @@ final class Halloween2026EventStore: ObservableObject {
         finalizedSessionIDs.insert(id)
         activeSession = nil
         save()
+        ensureCompletionWallpaper()
         return true
+    }
+
+    /// Progress is committed first. If termination occurs between the two writes,
+    /// loading the completed progress repairs ownership without another reward.
+    private func ensureCompletionWallpaper() {
+        guard completedStageCount == Halloween2026Configuration.stageCount else { return }
+        WallpaperCatalog.grantHalloween2026Wallpaper(defaults: defaults)
+        if !wallpaperGranted {
+            wallpaperGranted = true
+            save()
+        }
     }
 
     /// Only unfinished stage/bonus attempts are discarded; confirmed rewards stay intact.

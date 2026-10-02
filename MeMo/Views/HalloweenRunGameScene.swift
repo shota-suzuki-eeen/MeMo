@@ -47,12 +47,15 @@ final class HalloweenRunGameScene: SKScene {
         static let baseMetersPerSecond: Double = 8
         static let maxMetersPerSecond: Double = 16
 
-        // Date()を毎フレーム呼ばず、イベント終了だけ1秒ごとに確認。
-        static let eventEndCheckInterval: TimeInterval = 1.0
     }
 
     /// SwiftUI側へ渡すのはプレイ終了時だけ。
     var onGameOver: ((HalloweenRunResult) -> Void)?
+    let runMode: HalloweenRunMode
+    private var stageAttempt: HalloweenStageAttempt?
+    private var stageLevel: Int {
+        Halloween2026Configuration.level(forStage: stageAttempt?.number ?? 1)
+    }
 
     // MARK: - Layers
 
@@ -90,7 +93,6 @@ final class HalloweenRunGameScene: SKScene {
     private var elapsedTime: TimeInterval = 0
     private var obstacleSpawnAccumulator: TimeInterval = 0
     private var candySpawnAccumulator: TimeInterval = 0
-    private var eventEndCheckAccumulator: TimeInterval = 0
 
     private var distanceMeters: Double = 0
     private var candyCount = 0
@@ -104,14 +106,16 @@ final class HalloweenRunGameScene: SKScene {
     private let candyHaptic = UIImpactFeedbackGenerator(style: .soft)
     private let gameOverHaptic = UINotificationFeedbackGenerator()
 
-    override init(size: CGSize) {
+    init(size: CGSize, mode: HalloweenRunMode, stageNumber: Int?) {
+        runMode = mode
+        stageAttempt = mode == .endless ? nil : HalloweenStageAttempt(number: stageNumber ?? 1)
         super.init(size: size)
         scaleMode = .resizeFill
         backgroundColor = UIColor(red: 0.08, green: 0.04, blue: 0.15, alpha: 1)
     }
 
     required init?(coder aDecoder: NSCoder) {
-        super.init(coder: aDecoder)
+        fatalError("Use init(size:mode:stageNumber:)")
     }
 
     override func didMove(to view: SKView) {
@@ -126,6 +130,11 @@ final class HalloweenRunGameScene: SKScene {
         setupRoad()
         setupPlayer()
         setupHUD()
+        if let attempt = stageAttempt {
+            distanceTitleLabel.text = attempt.mode == .bonus ? "BONUS \(attempt.number)" : "STAGE \(attempt.number) · Lv\(stageLevel)"
+            distanceLabel.text = "\(Int(attempt.duration))秒"
+            candyLabel.isHidden = attempt.mode == .stage
+        }
 
         moveHaptic.prepare()
         candyHaptic.prepare()
@@ -300,6 +309,7 @@ final class HalloweenRunGameScene: SKScene {
         var deltaTime = currentTime - previousUpdateTime
         self.previousUpdateTime = currentTime
         deltaTime = min(max(0, deltaTime), 0.05)
+        if let attempt = stageAttempt { deltaTime = min(deltaTime, attempt.remaining) }
 
         // The start gate admits the run; crossing the event end must not end it.
 
@@ -325,8 +335,15 @@ final class HalloweenRunGameScene: SKScene {
         guard !isGameOver else { return }
 
         updateDistance(deltaTime: deltaTime, difficulty: difficulty)
-        updateObstacleSpawning(deltaTime: deltaTime, difficulty: difficulty)
-        updateCandySpawning(deltaTime: deltaTime)
+        if runMode != .bonus, elapsedTime >= Halloween2026Configuration.startSafetyDuration {
+            updateObstacleSpawning(deltaTime: deltaTime, difficulty: difficulty)
+        }
+        if runMode != .stage { updateCandySpawning(deltaTime: deltaTime) }
+        if stageAttempt != nil {
+            stageAttempt?.advance(by: deltaTime)
+            distanceLabel.text = "\(Int(ceil(stageAttempt!.remaining)))秒"
+            if stageAttempt!.isCleared { finishGame(clearedStage: true) }
+        }
     }
 
     private var difficultyProgress: Double {
@@ -334,12 +351,16 @@ final class HalloweenRunGameScene: SKScene {
     }
 
     private func currentScrollSpeed(difficulty: Double) -> CGFloat {
-        Config.baseScrollSpeed
+        if runMode != .endless {
+            return CGFloat(Halloween2026Configuration.scrollSpeeds[runMode == .bonus ? 0 : stageLevel - 1])
+        }
+        return Config.baseScrollSpeed
             + (Config.maxScrollSpeed - Config.baseScrollSpeed) * CGFloat(difficulty)
     }
 
     private func currentObstacleSpawnInterval(difficulty: Double) -> TimeInterval {
-        Config.baseObstacleSpawnInterval
+        if runMode == .stage { return Halloween2026Configuration.obstacleIntervals[stageLevel - 1] }
+        return Config.baseObstacleSpawnInterval
             - (Config.baseObstacleSpawnInterval - Config.minimumObstacleSpawnInterval) * difficulty
     }
 
@@ -353,7 +374,7 @@ final class HalloweenRunGameScene: SKScene {
         guard integerDistance != lastDisplayedDistance else { return }
 
         lastDisplayedDistance = integerDistance
-        distanceLabel.text = "\(integerDistance)m"
+        if runMode == .endless { distanceLabel.text = "\(integerDistance)m" }
     }
 
     private func updateCountdownHUD(force: Bool = false) {
@@ -388,7 +409,9 @@ final class HalloweenRunGameScene: SKScene {
         let spawnY = size.height + 76
 
         let doubleChance: Double
-        if elapsedTime < Config.doubleObstacleStartTime {
+        if runMode == .stage {
+            doubleChance = Halloween2026Configuration.doubleObstacleProbabilities[stageLevel - 1]
+        } else if elapsedTime < Config.doubleObstacleStartTime {
             doubleChance = 0
         } else {
             let denominator = max(
@@ -465,6 +488,19 @@ final class HalloweenRunGameScene: SKScene {
 
     private func updateCandySpawning(deltaTime: TimeInterval) {
         candySpawnAccumulator += deltaTime
+
+        if runMode == .bonus {
+            guard candyCount < Halloween2026Configuration.bonusCandyLimit,
+                  candySpawnAccumulator >= 0.45 else { return }
+            candySpawnAccumulator -= 0.45
+            // Broad waves give time to change lanes; only touched sprites count.
+            let waveLanes = [1, 0, 1, 2]
+            let lane = waveLanes[Int(elapsedTime / 3) % waveLanes.count]
+            for index in 0..<8 {
+                spawnCandy(lane: lane, y: size.height + 52 + CGFloat(index * 44))
+            }
+            return
+        }
 
         guard candySpawnAccumulator >= Config.candySpawnInterval else { return }
         candySpawnAccumulator -= Config.candySpawnInterval
@@ -573,7 +609,12 @@ final class HalloweenRunGameScene: SKScene {
         guard node.parent != nil else { return }
 
         node.removeFromParent()
-        candyCount += 1
+        if runMode == .bonus {
+            stageAttempt?.collectCandy()
+            candyCount = stageAttempt?.collectedCandy ?? 0
+        } else {
+            candyCount += 1
+        }
         candyLabel.text = "CANDY  \(candyCount)"
 
         candyHaptic.impactOccurred(intensity: 0.64)
@@ -629,18 +670,22 @@ final class HalloweenRunGameScene: SKScene {
 
     // MARK: - Finish / cleanup
 
-    private func finishGame() {
+    private func finishGame(clearedStage: Bool = false) {
         guard !isGameOver, !hasShutDown else { return }
 
         isGameOver = true
         previousUpdateTime = nil
         playerNode.removeAllActions()
 
-        gameOverHaptic.notificationOccurred(.error)
+        if !clearedStage { stageAttempt?.collide() }
+        gameOverHaptic.notificationOccurred(clearedStage ? .success : .error)
 
         let result = HalloweenRunResult(
             distance: max(0, Int(distanceMeters.rounded(.down))),
-            candyCount: max(0, candyCount)
+            candyCount: stageAttempt?.confirmedCandy ?? max(0, candyCount),
+            mode: runMode,
+            stageNumber: stageAttempt?.number,
+            clearedStage: stageAttempt?.isCleared ?? false
         )
 
         let callback = onGameOver

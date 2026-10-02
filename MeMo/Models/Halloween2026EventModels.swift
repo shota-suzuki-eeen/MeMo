@@ -214,6 +214,18 @@ enum Halloween2026ExchangeCatalog {
 struct HalloweenRunResult: Equatable {
     let distance: Int
     let candyCount: Int
+    let mode: HalloweenRunMode
+    let stageNumber: Int?
+    let clearedStage: Bool
+
+    init(distance: Int, candyCount: Int, mode: HalloweenRunMode = .endless,
+         stageNumber: Int? = nil, clearedStage: Bool = false) {
+        self.distance = distance
+        self.candyCount = candyCount
+        self.mode = mode
+        self.stageNumber = stageNumber
+        self.clearedStage = clearedStage
+    }
 }
 
 enum HalloweenRunGameState: Equatable {
