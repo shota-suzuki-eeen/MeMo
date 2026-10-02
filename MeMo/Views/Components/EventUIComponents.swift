@@ -87,3 +87,99 @@ struct HalloweenRewardIcon: View {
         .frame(width: size, height: size)
     }
 }
+
+/// Attached to the home scene, so pushed destinations cannot retain this overlay.
+struct HalloweenHomeEntryLayer: View {
+    @ObservedObject private var store = Halloween2026EventStore.shared
+    let onOpen: () -> Void
+
+    private enum HalloweenEntryLayout {
+        static let buttonBackgroundSize: CGFloat = 76
+        static let buttonSpacing: CGFloat = 16
+        static let barHorizontalPadding: CGFloat = 14
+        static let outerHorizontalPadding: CGFloat = 18
+        static let bottomPadding: CGFloat = 170
+    }
+
+    var body: some View {
+        TimelineView(.periodic(from: Date(), by: 15)) { timeline in
+            if EventManager.areRewardsAvailable(.halloween2026, at: timeline.date) {
+                HStack(spacing: HalloweenEntryLayout.buttonSpacing) {
+                    Color.clear
+                        .frame(
+                            width: HalloweenEntryLayout.buttonBackgroundSize,
+                            height: HalloweenEntryLayout.buttonBackgroundSize
+                        )
+                        .allowsHitTesting(false)
+                    Color.clear
+                        .frame(
+                            width: HalloweenEntryLayout.buttonBackgroundSize,
+                            height: HalloweenEntryLayout.buttonBackgroundSize
+                        )
+                        .allowsHitTesting(false)
+                    Color.clear
+                        .frame(
+                            width: HalloweenEntryLayout.buttonBackgroundSize,
+                            height: HalloweenEntryLayout.buttonBackgroundSize
+                        )
+                        .allowsHitTesting(false)
+
+                    HalloweenHomeEntryButton(
+                        showsNotificationBadge: store.hasClaimableReward,
+                        action: onOpen
+                    )
+                }
+                .padding(.horizontal, HalloweenEntryLayout.barHorizontalPadding)
+                .padding(.horizontal, HalloweenEntryLayout.outerHorizontalPadding)
+                .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .bottom)
+                .padding(.bottom, HalloweenEntryLayout.bottomPadding)
+                .zIndex(9_000)
+                .transition(.opacity.combined(with: .scale(scale: 0.92)))
+            }
+        }
+    }
+
+}
+
+private struct HalloweenHomeEntryButton: View {
+    let showsNotificationBadge: Bool
+    let action: () -> Void
+
+    var body: some View {
+        Button(action: action) {
+            ZStack(alignment: .topTrailing) {
+                ZStack {
+                    Image("clay_block")
+                        .resizable()
+                        .scaledToFit()
+                        .frame(width: 76, height: 76)
+
+                    VStack(spacing: 1) {
+                        Image(systemName: "figure.run")
+                            .font(.system(size: 31, weight: .black))
+                            .foregroundStyle(Color.orange)
+
+                        Text("EVENT")
+                            .font(.system(size: 9, weight: .black, design: .rounded))
+                            .foregroundStyle(.primary)
+                    }
+                }
+                .frame(width: 76, height: 76)
+
+                if showsNotificationBadge {
+                    EventNotificationBadge()
+                        .offset(x: 3, y: -3)
+                }
+            }
+            .frame(width: 76, height: 76)
+            .contentShape(RoundedRectangle(cornerRadius: 22, style: .continuous))
+        }
+        .buttonStyle(.plain)
+        .shadow(color: .black.opacity(0.18), radius: 8, x: 0, y: 4)
+        .accessibilityLabel(
+            showsNotificationBadge
+                ? "期間限定イベント、受け取り可能な報酬があります"
+                : "期間限定イベント"
+        )
+    }
+}
