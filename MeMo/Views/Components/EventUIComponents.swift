@@ -98,7 +98,6 @@ struct HalloweenHomeEntryLayer: View {
         static let buttonSpacing: CGFloat = 16
         static let barHorizontalPadding: CGFloat = 14
         static let outerHorizontalPadding: CGFloat = 18
-        static let bottomPadding: CGFloat = 170
     }
 
     var body: some View {
@@ -131,9 +130,6 @@ struct HalloweenHomeEntryLayer: View {
                 }
                 .padding(.horizontal, HalloweenEntryLayout.barHorizontalPadding)
                 .padding(.horizontal, HalloweenEntryLayout.outerHorizontalPadding)
-                .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .bottom)
-                .padding(.bottom, HalloweenEntryLayout.bottomPadding)
-                .zIndex(9_000)
                 .transition(.opacity.combined(with: .scale(scale: 0.92)))
             }
         }

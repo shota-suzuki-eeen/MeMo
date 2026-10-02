@@ -994,7 +994,23 @@ struct HomeView: View {
             toiletPoopsLayer
             toiletBubbleLayer
             topStepMeterOverlay
-            HalloweenHomeEntryLayer(onOpen: onHalloweenEventRequested)
+        }
+        .overlay(alignment: .bottom) {
+            // An overlay does not change the existing home canvas or bottom controls.
+            // Reserve the legacy toilet-ticket row, with one button-spacing gap above it.
+            if !showRightMenuPopup,
+               activeTopInfoPopup == nil,
+               !showSleepModePopup,
+               !showNoFoodPopup,
+               !showFoodSelector {
+                HalloweenHomeEntryLayer(onOpen: onHalloweenEventRequested)
+                    .padding(
+                        .bottom,
+                        Layout.toiletTicketBottomOffset
+                            + Layout.bottomButtonBackgroundSize
+                            + Layout.bottomButtonsSpacing
+                    )
+            }
         }
     }
 
