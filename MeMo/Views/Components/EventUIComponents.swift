@@ -117,23 +117,12 @@ private struct HalloweenHomeEntryButton: View {
     var body: some View {
         Button(action: action) {
             ZStack(alignment: .topTrailing) {
-                ZStack {
-                    Image("clay_block")
-                        .resizable()
-                        .scaledToFit()
-                        .frame(width: size, height: size)
-
-                    VStack(spacing: 1) {
-                        Image(systemName: "figure.run")
-                            .font(.system(size: min(31, size * 0.41), weight: .black))
-                            .foregroundStyle(Color.orange)
-
-                        Text("EVENT")
-                            .font(.system(size: 9, weight: .black, design: .rounded))
-                            .foregroundStyle(.primary)
-                    }
-                }
-                .frame(width: size, height: size)
+                Image("halloween_event_entry")
+                    .renderingMode(.original)
+                    .resizable()
+                    .scaledToFit()
+                    .frame(width: size, height: size)
+                    .accessibilityHidden(true)
 
                 if showsNotificationBadge {
                     EventNotificationBadge()
