@@ -130,6 +130,7 @@ extension AppState {
     private enum HappinessStorageKeys {
         static let point = "memo.happiness.point"
         static let level = "memo.happiness.level"
+        static let reachedCheckpointLevel = "memo.happiness.reachedCheckpointLevel.v1"
         static let lastDecayAt = "memo.happiness.lastDecayAt"
         static let pettingTouchCountToday = "memo.happiness.petting.touchCountToday"
         static let pettingPointsToday = "memo.happiness.petting.pointsToday"
@@ -231,14 +232,49 @@ extension AppState {
         happinessDefaults.set(0, forKey: happinessStorageKey(HappinessStorageKeys.pettingPointsToday))
     }
 
-    var happinessPoint: Int {
-        get {
-            min(
-                AppState.happinessMaxPointsPerLevel - 1,
-                max(0, happinessDefaults.integer(forKey: happinessStorageKey(HappinessStorageKeys.point)))
-            )
+    /// Initialize old data from its current level, then retain the highest five-level
+    /// checkpoint in the existing meter context. Reading never grants a reward.
+    private func reconcileHappinessCheckpoint() -> (level: Int, point: Int, checkpoint: Int) {
+        let levelKey = happinessStorageKey(HappinessStorageKeys.level)
+        let pointKey = happinessStorageKey(HappinessStorageKeys.point)
+        let checkpointKey = happinessStorageKey(HappinessStorageKeys.reachedCheckpointLevel)
+        let storedLevel = happinessDefaults.integer(forKey: levelKey)
+        let storedPoint = happinessDefaults.integer(forKey: pointKey)
+        let level = min(AppState.happinessMaxLevel, max(0, storedLevel))
+        let point = min(AppState.happinessMaxPointsPerLevel - 1, max(0, storedPoint))
+        let storedCheckpoint = happinessDefaults.integer(forKey: checkpointKey)
+        let safeCheckpoint = min(AppState.happinessMaxLevel, max(0, storedCheckpoint))
+            / AppState.happinessRewardLevelStep * AppState.happinessRewardLevelStep
+        let reachedCheckpoint = level / AppState.happinessRewardLevelStep * AppState.happinessRewardLevelStep
+        let checkpoint = max(safeCheckpoint, reachedCheckpoint)
+        let resolvedLevel = max(level, checkpoint)
+        let resolvedPoint = level < checkpoint ? 0 : point
+
+        if happinessDefaults.object(forKey: checkpointKey) == nil || storedCheckpoint != checkpoint {
+            happinessDefaults.set(checkpoint, forKey: checkpointKey)
         }
+        if storedLevel != resolvedLevel {
+            happinessDefaults.set(resolvedLevel, forKey: levelKey)
+        }
+        if storedPoint != resolvedPoint {
+            happinessDefaults.set(resolvedPoint, forKey: pointKey)
+        }
+        return (resolvedLevel, resolvedPoint, checkpoint)
+    }
+
+    var happinessCheckpointLevel: Int {
+        reconcileHappinessCheckpoint().checkpoint
+    }
+
+    private var happinessUnitsAboveCheckpoint: Int {
+        let value = reconcileHappinessCheckpoint()
+        return (value.level - value.checkpoint) * AppState.happinessMaxPointsPerLevel + value.point
+    }
+
+    var happinessPoint: Int {
+        get { reconcileHappinessCheckpoint().point }
         set {
+            _ = reconcileHappinessCheckpoint()
             happinessDefaults.set(
                 min(AppState.happinessMaxPointsPerLevel - 1, max(0, newValue)),
                 forKey: happinessStorageKey(HappinessStorageKeys.point)
@@ -247,17 +283,18 @@ extension AppState {
     }
 
     var happinessLevel: Int {
-        get {
-            min(
-                AppState.happinessMaxLevel,
-                max(0, happinessDefaults.integer(forKey: happinessStorageKey(HappinessStorageKeys.level)))
-            )
-        }
+        get { reconcileHappinessCheckpoint().level }
         set {
+            let checkpoint = happinessCheckpointLevel
+            let requestedLevel = min(AppState.happinessMaxLevel, max(0, newValue))
             happinessDefaults.set(
-                min(AppState.happinessMaxLevel, max(0, newValue)),
+                max(checkpoint, requestedLevel),
                 forKey: happinessStorageKey(HappinessStorageKeys.level)
             )
+            if requestedLevel < checkpoint {
+                happinessDefaults.set(0, forKey: happinessStorageKey(HappinessStorageKeys.point))
+            }
+            _ = reconcileHappinessCheckpoint()
         }
     }
 
@@ -477,9 +514,8 @@ extension AppState {
             return
         }
 
-        guard happinessLevel > 0 else {
+        guard happinessLevel > happinessCheckpointLevel else {
             happinessPoint = 0
-            happinessLevel = 0
             return
         }
 
@@ -595,7 +631,7 @@ extension AppState {
             happinessLastDecayAt = now
         }
 
-        if happinessLevel <= 0 && happinessPoint <= 0 {
+        if happinessUnitsAboveCheckpoint == 0 {
             happinessLastDecayAt = now
         }
     }
@@ -609,24 +645,40 @@ extension AppState {
         }
 
         guard fullnessLevel <= 0 else { return 0 }
-        guard happinessLevel > 0 || happinessPoint > 0 else { return 0 }
+        let availableUnits = happinessUnitsAboveCheckpoint
+        guard availableUnits > 0 else {
+            happinessLastDecayAt = now
+            return 0
+        }
         guard let anchor = happinessLastDecayAt else { return 0 }
-        return max(0, Int(now.timeIntervalSince(anchor) / AppState.happinessDecayIntervalSeconds))
+        let elapsed = now.timeIntervalSince(anchor)
+        guard elapsed >= AppState.happinessDecayIntervalSeconds else { return 0 }
+        // Bound before converting to Int: very old dates (including +infinity)
+        // cannot overflow or queue work below the attained checkpoint.
+        if elapsed >= Double(availableUnits) * AppState.happinessDecayIntervalSeconds {
+            return availableUnits
+        }
+        return Int(elapsed / AppState.happinessDecayIntervalSeconds)
     }
 
     @discardableResult
-    func consumeOneHappinessDecayStep() -> Bool {
-        if isHappinessSleepModeActive(now: Date()) {
+    func consumeOneHappinessDecayStep(now: Date = Date()) -> Bool {
+        if isHappinessSleepModeActive(now: now) {
             return false
         }
 
-        guard happinessLevel > 0 || happinessPoint > 0 else { return false }
+        guard happinessUnitsAboveCheckpoint > 0 else {
+            happinessLastDecayAt = now
+            return false
+        }
         decreaseHappinessOnePoint()
 
-        if let anchor = happinessLastDecayAt {
+        if happinessUnitsAboveCheckpoint == 0 {
+            happinessLastDecayAt = now
+        } else if let anchor = happinessLastDecayAt {
             happinessLastDecayAt = anchor.addingTimeInterval(AppState.happinessDecayIntervalSeconds)
         } else {
-            happinessLastDecayAt = Date()
+            happinessLastDecayAt = now
         }
         return true
     }
