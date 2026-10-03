@@ -995,29 +995,23 @@ struct HomeView: View {
             toiletBubbleLayer
             topStepMeterOverlay
         }
-        .overlay(alignment: .bottom) {
-            // An overlay does not change the existing home canvas or bottom controls.
-            // Reserve the legacy toilet-ticket row, with one button-spacing gap above it.
-            if !showRightMenuPopup,
-               activeTopInfoPopup == nil,
-               !showSleepModePopup,
-               !showNoFoodPopup,
-               !showFoodSelector {
-                HalloweenHomeEntryLayer(onOpen: onHalloweenEventRequested)
-                    .padding(
-                        .bottom,
-                        Layout.toiletTicketBottomOffset
-                            + Layout.bottomButtonBackgroundSize
-                            + Layout.bottomButtonsSpacing
-                    )
-            }
-        }
     }
 
     private var homeBackgroundView: some View {
-        Image(effectiveCurrentHomeWallpaperAssetName)
+        // Preserve the existing Home canvas, independent of the selected wallpaper's aspect ratio.
+        Image(WallpaperCatalog.defaultWallpaper.assetName)
             .resizable()
             .scaledToFill()
+            .hidden()
+            .overlay {
+                GeometryReader { proxy in
+                    Image(effectiveCurrentHomeWallpaperAssetName)
+                        .resizable()
+                        .scaledToFill()
+                        .frame(width: proxy.size.width, height: proxy.size.height)
+                        .clipped()
+                }
+            }
             .ignoresSafeArea()
     }
 
@@ -1086,16 +1080,28 @@ struct HomeView: View {
 
     private var topStatusButtonsLayer: some View {
         TimelineView(.periodic(from: Date(), by: 1)) { timeline in
-            TopStatusButtons(
-                onCamera: { openCameraFromTopButton() },
-                onPresentBox: { openTopInfoPopup(.happinessRewards) },
-                onSleep: { openSleepModePopup() },
-                showsHappinessRewardBadge: currentClaimableHappinessRewardLevel != nil,
-                isSleepModeActive: state.isHappinessSleepModeActive(now: timeline.date),
-                buttonSize: Layout.topStatusButtonSize,
-                iconSize: Layout.topStatusButtonIconSize,
-                spacing: Layout.topStatusButtonsSpacing
-            )
+            VStack(spacing: Layout.topStatusButtonsSpacing) {
+                TopStatusButtons(
+                    onCamera: { openCameraFromTopButton() },
+                    onPresentBox: { openTopInfoPopup(.happinessRewards) },
+                    onSleep: { openSleepModePopup() },
+                    showsHappinessRewardBadge: currentClaimableHappinessRewardLevel != nil,
+                    isSleepModeActive: state.isHappinessSleepModeActive(now: timeline.date),
+                    buttonSize: Layout.topStatusButtonSize,
+                    iconSize: Layout.topStatusButtonIconSize,
+                    spacing: Layout.topStatusButtonsSpacing
+                )
+                if !showRightMenuPopup,
+                   activeTopInfoPopup == nil,
+                   !showSleepModePopup,
+                   !showNoFoodPopup,
+                   !showFoodSelector {
+                    HalloweenHomeEntryLayer(
+                        onOpen: onHalloweenEventRequested,
+                        buttonSize: Layout.topStatusButtonSize
+                    )
+                }
+            }
         }
         .padding(.top, Layout.topStatusButtonsTop)
         .padding(.trailing, Layout.topStatusButtonsTrailing)

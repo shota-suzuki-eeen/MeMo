@@ -92,44 +92,16 @@ struct HalloweenRewardIcon: View {
 struct HalloweenHomeEntryLayer: View {
     @ObservedObject private var store = Halloween2026EventStore.shared
     let onOpen: () -> Void
-
-    private enum HalloweenEntryLayout {
-        static let buttonBackgroundSize: CGFloat = 76
-        static let buttonSpacing: CGFloat = 16
-        static let barHorizontalPadding: CGFloat = 14
-        static let outerHorizontalPadding: CGFloat = 18
-    }
+    var buttonSize: CGFloat = 76
 
     var body: some View {
         TimelineView(.periodic(from: Date(), by: 15)) { timeline in
             if EventManager.areRewardsAvailable(.halloween2026, at: timeline.date) {
-                HStack(spacing: HalloweenEntryLayout.buttonSpacing) {
-                    Color.clear
-                        .frame(
-                            width: HalloweenEntryLayout.buttonBackgroundSize,
-                            height: HalloweenEntryLayout.buttonBackgroundSize
-                        )
-                        .allowsHitTesting(false)
-                    Color.clear
-                        .frame(
-                            width: HalloweenEntryLayout.buttonBackgroundSize,
-                            height: HalloweenEntryLayout.buttonBackgroundSize
-                        )
-                        .allowsHitTesting(false)
-                    Color.clear
-                        .frame(
-                            width: HalloweenEntryLayout.buttonBackgroundSize,
-                            height: HalloweenEntryLayout.buttonBackgroundSize
-                        )
-                        .allowsHitTesting(false)
-
-                    HalloweenHomeEntryButton(
-                        showsNotificationBadge: store.hasClaimableReward,
-                        action: onOpen
-                    )
-                }
-                .padding(.horizontal, HalloweenEntryLayout.barHorizontalPadding)
-                .padding(.horizontal, HalloweenEntryLayout.outerHorizontalPadding)
+                HalloweenHomeEntryButton(
+                    showsNotificationBadge: store.hasClaimableReward,
+                    size: buttonSize,
+                    action: onOpen
+                )
                 .transition(.opacity.combined(with: .scale(scale: 0.92)))
             }
         }
@@ -139,6 +111,7 @@ struct HalloweenHomeEntryLayer: View {
 
 private struct HalloweenHomeEntryButton: View {
     let showsNotificationBadge: Bool
+    let size: CGFloat
     let action: () -> Void
 
     var body: some View {
@@ -148,11 +121,11 @@ private struct HalloweenHomeEntryButton: View {
                     Image("clay_block")
                         .resizable()
                         .scaledToFit()
-                        .frame(width: 76, height: 76)
+                        .frame(width: size, height: size)
 
                     VStack(spacing: 1) {
                         Image(systemName: "figure.run")
-                            .font(.system(size: 31, weight: .black))
+                            .font(.system(size: min(31, size * 0.41), weight: .black))
                             .foregroundStyle(Color.orange)
 
                         Text("EVENT")
@@ -160,15 +133,15 @@ private struct HalloweenHomeEntryButton: View {
                             .foregroundStyle(.primary)
                     }
                 }
-                .frame(width: 76, height: 76)
+                .frame(width: size, height: size)
 
                 if showsNotificationBadge {
                     EventNotificationBadge()
                         .offset(x: 3, y: -3)
                 }
             }
-            .frame(width: 76, height: 76)
-            .contentShape(RoundedRectangle(cornerRadius: 22, style: .continuous))
+            .frame(width: size, height: size)
+            .contentShape(RoundedRectangle(cornerRadius: min(22, size * 0.3), style: .continuous))
         }
         .buttonStyle(.plain)
         .shadow(color: .black.opacity(0.18), radius: 8, x: 0, y: 4)

@@ -1,23 +1,50 @@
-# Halloween Home entry — additional review
+# Halloween Home entry — selected 05 layout verification
 
-Date: 2026-10-02. Base: `974a2e32739133f41639a88e8731a6f9da8c258c` (PR22). Branch: `codex/halloween-home-entry-review`. The user requested preserving the original bottom buttons and toilet row, adjusting EVENT only, and reviewing screenshots before any further merge. **This change is not authorized for merge until that review.**
+Date: 2026-10-03. Base: `974a2e32739133f41639a88e8731a6f9da8c258c` (PR22). Branch: `codex/halloween-home-entry-review`. PR23 contains the user-selected layout and the completed local verification below.
 
-## Comparison and change
+## Final change
 
-- GitHub records PR22 as merged at **2026-10-02 10:18:56 UTC / 19:18:56 JST**.
-- `HomeView.swift` is byte-identical between `28cc38f` and the pre-PR22 merge `cae4edde`. Between that baseline and PR22, Home changes were the event-opening closure and adding the entry layer; existing bottom-button/toilet constants and operations were unchanged.
-- Actual pre-PR22 and PR22 builds on the same QA phone confirmed unchanged bottom-button/toilet positions, but EVENT overlapped the toilet-ticket button. Pre-PR22 EVENT covered part of the toilet button; PR22's entry within Home left the toilet button above part of EVENT. Code constants alone were insufficient to verify stacking and layout.
-- `HomeView.swift`: attach EVENT as an overlay to the home scene so it does not contribute to the home canvas size. Position its bottom at **158 + 76 + 16 = 250 points**, using the existing toilet row offset, button size and spacing. This moves only EVENT upward 80 points from 170, leaving a 16-point gap above the toilet-ticket row. Horizontal alignment with the existing fishing column is retained.
-- `EventUIComponents.swift`: remove the entry's full-canvas frame and hard-coded 170-point bottom padding; Home owns placement. Existing button, badge, event period, sound/opening action and home-only navigation scope remain.
-- During QA, the higher entry overlapped Settings in the existing Home menu. EVENT alone is now hidden while the existing menu, top-info, sleep, no-food or food-selector panel is open; closing the panel restores it. Existing panels and care/permission behavior are unchanged.
+The user selected the actual `05-fixed-home-hidden.png` layout. EVENT is the fourth button in the existing right-side status column, after camera, happiness rewards and sleep. Home uses the existing 56-point status-button size and 10-point spacing. The component retains its existing event date, badge, sound, accessibility label and opening action. It is hidden while the Home menu, top-info, sleep, no-food or food-selector panel is open.
 
-No bottom-button dimensions/padding, toilet visibility condition, toilet cleanup/consumption, poop gestures, care lock, menu routing or RootView run exclusion was edited. No project, asset or entitlement change.
+The selected wallpaper previously participated in Home canvas sizing. The default Home and concrete assets have a different aspect ratio from the Halloween wallpaper; actual baseline builds also moved the bottom controls when selecting Halloween. Home now preserves the default wallpaper's existing canvas and fills/clips the selected wallpaper inside that canvas. Existing bottom/toilet dimensions, padding, care operations and route handling are unchanged.
 
-## Verification and screenshots
+EVENT remains inside the existing Home content, below the root poop gesture layer. The user explicitly accepted visual overlap with the toilet thought bubble because non-cleanup actions must be blocked while poop is active. No new care-lock bypass or separate event overlay is introduced.
 
-Xcode 26.0.1, existing HealthKit entitlement, signed Debug generic iOS Simulator build: **BUILD SUCCEEDED** (`qa-home-entry/fixed-build-final.log`), no new warnings/errors. Existing unchanged catalogs were used; no assets added to Git. `git diff --check` passed. Final rerun: event tests **PASS 178059**, regular-ticket tests **PASS 101**, HUD tests **PASS 220**, total **178380**; no CI configured.
+Changed product files:
 
-Commands actually run from the independent checkout:
+- `MeMo/Views/HomeView.swift`
+- `MeMo/Views/Components/EventUIComponents.swift`
+
+## Actual layout evidence
+
+Only the isolated **MeMo Halloween QA** iPhone17Pro/iOS26 Simulator `72D15C18-E7C8-48F0-B484-47BD7AFD292E` was used (402×874 points, 1206×2622 pixels). This is an iPhone17 layout proxy, not a physical-device test.
+
+The selected implementation was restored exactly from the preserved `proposed-home-layout.patch`, based on `1bc3764`. Source hashes match the selected 05 build. Actual unmodified screenshots and diagnostic logs remain outside Git in `task-2/qa-home-layout/`:
+
+| Evidence | State |
+|---|---|
+| `05-fixed-home-hidden.png` | User-selected default Home layout, toilet hidden |
+| `06-fixed-home-shown.png` | Same selected layout, toilet shown; accepted thought-bubble overlap |
+| `07-fixed-halloween-hidden.png` / `08-fixed-halloween-shown.png` | Same selected implementation, Halloween wallpaper, both toilet states |
+| `15-selected05-home-hidden.png` | Restored selected implementation, actual default Home screen |
+| `selected05-home-hidden.stderr.log` | QA-only geometry measurements of restored implementation |
+
+Final measured coordinates on the QA phone:
+
+| Element | Global frame (points) |
+|---|---|
+| Home canvas | (-7, -1.2189, 416, 904.4378) |
+| Existing bottom-bar container | (-7, 731.2189, 416, 100) |
+| Existing toilet-ticket button | (315, 669.2189, 76, 76) |
+| EVENT | (325, 352.7811, 56, 56) |
+
+No generated image, composite or screenshot edit was used. No additional image export, Library transfer or Python installation is required for the selected local review flow.
+
+## Verification
+
+Xcode **26.0.1** signed Debug generic iOS Simulator product build: **BUILD SUCCEEDED** (`selected05-product-build.log`). Existing HealthKit remains in the simulated entitlement payload. The final product executable contains no `MeMoQA` diagnostic code. Existing, unchanged ignored asset catalogs were used without adding them to Git. No project/capability/package changes.
+
+Commands actually run from the independent product checkout:
 
 ```sh
 bash scripts/test_halloween_event.sh
@@ -33,32 +60,29 @@ DEVELOPER_DIR=/Applications/Xcode.app/Contents/Developer xcodebuild \
   CODE_SIGNING_ALLOWED=YES CODE_SIGN_IDENTITY=- build
 ```
 
-Actual **MeMo Halloween QA** iPhone17Pro/iOS26, `72D15C18-E7C8-48F0-B484-47BD7AFD292E`, matching iPhone17 layout at402×874 points. This is a layout proxy, not a physical iPhone17 test.
+Event **178059**, regular tickets **101**, HUD **220**: **178380 assertions PASS** on the selected source. CI is not configured.
 
-Four unmodified real Simulator PNGs (1206×2622) are retained under `task-2/qa-home-entry/`:
+The native XCTest UI target exists only in an independent QA project. Product project metadata is unchanged. Both `selected05-ui-test.xcresult` and `selected05-revalidation-ui-test.xcresult` report **one test, zero failures, TEST EXECUTE SUCCEEDED**. Physical-coordinate taps verified that active poop blocks EVENT, camera, happiness rewards, sleep, menu, gacha, shop and fishing. Character taps did not increment petting counts. The existing toilet-ticket control cleared poop; afterward EVENT opened CANDY RUN and Back returned Home. Opening the Home menu removed EVENT. This validates the selected 05 arrangement, superseding checks of earlier draft placements that allowed event navigation while poop was active.
 
-| File | Actual build/state |
-|---|---|
-| `01-before-main974a2e3-toilet-hidden.png` | PR22/main974a2e3, no toilet flag |
-| `02-before-main974a2e3-toilet-shown.png` | PR22/main974a2e3, toilet flag/wc4, overlap visible |
-| `03-after-review-build-toilet-hidden.png` | Final additional-review build, no toilet flag |
-| `04-after-review-build-toilet-shown.png` | Final additional-review build, toilet flag/wc4, EVENT above the unchanged toilet row |
+### Corrected happiness comparison
 
-Additional actual pre-PR22 and final-menu screenshots are retained locally as `reference-pre-pr22-cae4edde-toilet-shown.png` and `reference-final-menu-no-event.png`. No generated image, composite or mockup is used.
+The earlier comparison incorrectly expected happiness to stay unchanged across toilet cleanup. The user approved correcting that test, without changing the existing happiness behavior. An observation-only QA copy recorded actual pending decay, each successful decay step and the cleanup gain. Task09 source was never used.
 
-- Both toilet states visibly retain the existing four bottom buttons and their position. The final toilet state separates EVENT from the toilet ticket and its count badge.
-- Final toilet state: EVENT opened the event screen, Back returned with the toilet state intact. Toilet-ticket action then cleared the flag/poop and consumed **wc4→3 exactly once**. Every tracked wallet/other-item/food/pet/pity/event/ad-slot/unlock field matched before/after after accounting for that one ticket. No gacha/reward was performed during these checks.
-- Existing care locks were retained: while the flag was active the bottom menu/gacha/shop/fishing actions did not navigate; after cleanup the first placement build opened/returned from regular gacha, shop and fishing normally. Existing tutorials were dismissed in QA only, without accepting new permissions or consuming purchases/ads.
-- Final menu: all four menu actions visible, EVENT absent. Settings, Zukan character/wallpaper tabs and Memories opened and returned normally with no event entry covering those screens. Closing the Home menu restored EVENT. Existing Back behavior was retained.
-- Final happiness-detail, sleep panel (cancel only) and food selector (open/close only) removed EVENT while open and restored it on close, without granting/consuming items. The no-food-message branch was not separately forced.
-- **Remaining final action check:** EVENT is visible in the final no-toilet Home screenshot, but the final no-toilet opening tap was interrupted by the Mac becoming locked. Computer Use reported that automatic unlock failed. Manual Mac unlock is required before that tap/return can be completed; the final toilet-state opening/return passed. Do not count the interrupted tap as passed.
+- Initial fixture: **Lv0, 8 points, fullness 0**, decay anchor **2026-10-03 00:10:34.101477 UTC**; fixture created **00:51:04.101477 UTC**.
+- Pending check at **00:51:40.969500 UTC**: eight five-minute intervals were due. Eight actual steps produced **8→7→6→5→4→3→2→1→0**, remaining at Lv0.
+- Cleanup at **00:51:49.789553 UTC**: the existing +10-point reward produced **0→10** exactly once. Final points equal **8−8+10=10**, not an unexplained +2.
+- Toilet-ticket inventory changed **wc3→2 exactly once**. Other items, wallet, current/owned pets, foods, event progress, pity/guarantee state, claim state, unlocks and petting counts matched the fixture/backup comparisons. No gacha, purchase, ad or reward claim was performed.
 
-QA state fixtures/backups live outside Git and affect only the named disposable Simulator. Original user checkout and production data were not modified. Original QA plist/SQLite backups were restored after these checks; every tracked wallet, item, food, pet, event, pity, ad-slot and unlock field matched the original task08 snapshot exactly (`qa-stage06-fixtures/home-entry-restored-original.json`). This is a tracked-field comparison, not a claim that foreground care timestamps or every SQLite byte remained identical.
+Evidence: `selected05-happiness-fixture.json`, `selected05-happiness-transitions.jsonl`, `selected05-happiness-revalidation.json` and the revalidation xcresult.
 
-## Persistence compatibility, delivery and review hold
+### QA restoration and final binary
 
-**No persistent-data contract changed.** No SwiftData model/property/key, UserDefaults key, photo path, App Group/Widget/Watch protocol, StoreKit right or capability change. Only EVENT placement/visibility is altered; existing Home/toilet/menu owners remain intact. Physical touch/call/balance and Small/iPad verification remain outside the agreed screen scope.
+The Simulator returned a nonexistent app data path during preparation. With user approval, the local QA helper was corrected to require one physically existing container with MeMo's exact bundle identity inside the named QA device, after shutdown. The original backups were preserved. This was a local validation-tool correction; the cause of the nonexistent returned path is not established.
 
-The four screenshot files are ready for user review. Native Library delivery initially failed before any upload began because the available Python 3.9 could not import the current helper's Python 3.10+ annotations. No compatible existing runtime was verified. The user-approved official Python 3.14.8 installer was downloaded, and its SHA256 matched the official value. Initial sandbox `pkgutil --check-signature` returned **invalid signature / exit 1**, so installation stopped. Read-only verification of the same bytes in the normal macOS environment subsequently returned **exit 0, Apple-issued distribution signature, trusted Apple notarization and trusted timestamp**; all chain certificates were within their validity dates. The sandbox verification environment is the likely cause of the different result, not a proven package defect. No trust setting or signature bypass was applied, and the installer remains unexecuted. Administrative input and the locked Mac require user handoff. No Library save or file ID is claimed until successful upload confirmation.
+After successful revalidation, the diagnostic-free signed product was installed and the original QA SQLite and plist restored. **The entire SQLite logical dump matches the original backup, and plist bytes match exactly** (`selected05-revalidation-final-state.json`). Final executable SHA256: `1f25c33803720390f28dabdff20bbacb09cfe60a8f9ccad5d3b22e27158fb561`. The QA Simulator is shut down. The original user checkout and production Simulator/data were not modified.
 
-Keep the additional PR **draft/unmerged**, preserve these images and test evidence, and resume the outstanding action/delivery checks after user handoff. PR22 remains merged; no destructive rollback is proposed.
+## Persistence compatibility and remaining scope
+
+**No persistent-data contract changed.** SwiftData models/fields, existing UserDefaults keys, photo paths, App Group, Widget/Watch protocols, StoreKit and entitlements are unchanged. Task09's additive checkpoint work is isolated in a separate checkout and was excluded from all PR23 builds and comparisons.
+
+Physical touch/call behavior, game balance, updating an existing installed app, live ads, actual Widget/Watch/HealthKit service behavior, Small-phone and iPad checks remain unverified as recorded for task08. No distribution or App Store submission was performed; task08 is not marked complete by this layout verification.
