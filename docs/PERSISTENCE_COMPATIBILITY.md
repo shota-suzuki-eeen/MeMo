@@ -164,6 +164,9 @@ Newer:
 - `memo.gacha.freeAd.usedSlots`
 - `memo.gacha.specialItemCounts`
 - `memo.gacha.initialIPadFreeTenDrawConsumed`
+- `memo.gacha.lastCompletedMachineID.v1` — additive String selection history for the normal GachaView. Written only after all1/10 rewards are generated and consumption/grants save successfully. No history is inferred from existing ownership, pity or unlocks.
+
+The selection key is separate from `memo.gacha.unlockedMachineIDs.v2`. Missing, malformed, unknown, removed, locked or unavailable IDs fall back to an available default without rewriting history or unlocking a machine. Tutorial and pending initial-iPad draws still force `always`. Event gacha uses its separate route and never updates this normal-screen key. Existing prices, probabilities, tickets, claims and encoded ledgers retain their contracts.
 
 既存 fallback / dual-write を維持すること。
 

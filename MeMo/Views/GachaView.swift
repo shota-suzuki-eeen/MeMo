@@ -840,7 +840,7 @@ struct GachaView: View {
             tapPromptAnimating = true
             state?.ensureInitialPetsIfNeeded()
             state?.gachaResetIfNeeded(now: Date())
-            if isAlwaysGachaOnlyMode { selectedGachaIndex = 0 }
+            restoreInitialGachaSelection()
             if isTutorialMode == false {
                 AdMobManager.shared.prepareRewardGacha()
             } else {
@@ -849,6 +849,9 @@ struct GachaView: View {
         }
         .onChange(of: isAlwaysGachaOnlyMode) { _, newValue in
             if newValue { selectedGachaIndex = 0 }
+        }
+        .onChange(of: states.count) { _, _ in
+            if phase == .idle { restoreInitialGachaSelection() }
         }
         .onDisappear {
             rollTask?.cancel(); rollTask = nil
@@ -976,6 +979,15 @@ struct GachaView: View {
         .buttonStyle(.plain)
         .disabled(!isEnabled || !controlsAvailable)
         .opacity(isEnabled && controlsAvailable ? 1 : 0.28)
+    }
+
+    private func restoreInitialGachaSelection() {
+        let gachas = availableGachas
+        let restoredID = state?.gachaInitialMachineID(
+            availableMachineIDs: gachas.map(\.id),
+            alwaysOnly: isAlwaysGachaOnlyMode
+        )
+        selectedGachaIndex = gachas.firstIndex { $0.id == restoredID } ?? 0
     }
 
     private func selectGacha(offset: Int) {
@@ -1198,7 +1210,8 @@ struct GachaView: View {
     }
 
     private func beginDraw(mode: DrawMode, isFreeAd: Bool, freeSlot: GachaFreeAdSlot?, usesInitialIPadGuaranteedSR: Bool = false, paymentText: String? = nil, guaranteedReward: GachaReward? = nil) {
-        guard let state else { return }
+        guard let state, phase == .idle else { return }
+        let drawnMachineID = selectedGacha.id
         rollTask?.cancel(); rollTask = nil
         openingTask?.cancel(); openingTask = nil
         drawMode = mode
@@ -1217,7 +1230,14 @@ struct GachaView: View {
             rewards = makeRewards(count: mode.count, state: state)
         }
         // Commit grants before the reveal animation so a close/restart cannot lose ticket rewards.
-        persistState()
+        let saved = persistState()
+        state.gachaRecordCompletedDraw(
+            machineID: drawnMachineID,
+            rewardCount: rewards.count,
+            expectedRewardCount: mode.count,
+            availableMachineIDs: availableGachas.map(\.id),
+            persistenceSucceeded: saved
+        )
         revealOverlayReward = nil
         machineAnimationStart = Date()
         tapPromptAnimating = true
@@ -1554,8 +1574,15 @@ struct GachaView: View {
         }
     }
 
-    private func persistState() {
-        do { try modelContext.save() } catch { showToast("保存に失敗しました") }
+    @discardableResult
+    private func persistState() -> Bool {
+        do {
+            try modelContext.save()
+            return true
+        } catch {
+            showToast("保存に失敗しました")
+            return false
+        }
     }
 
     private func formattedProbability(_ value: Double) -> String {
