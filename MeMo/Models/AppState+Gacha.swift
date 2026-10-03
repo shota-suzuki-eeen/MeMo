@@ -25,6 +25,7 @@ extension AppState {
         static let specialItemCounts = "memo.gacha.specialItemCounts"
         static let unlockedMachineIDsV2 = "memo.gacha.unlockedMachineIDs.v2"
         static let initialIPadFreeTenDrawConsumed = "memo.gacha.initialIPadFreeTenDrawConsumed"
+        static let lastCompletedMachineID = "memo.gacha.lastCompletedMachineID.v1"
     }
 
     private var gachaDefaults: UserDefaults {
@@ -156,6 +157,42 @@ extension AppState {
         unlocked.insert(machineID)
         gachaUnlockedMachineIDsStorage = unlocked
         return gachaIsMachineUnlocked(id: machineID)
+    }
+
+    /// Resolve selection against the current screen catalog. Fallback is read-only:
+    /// viewing another machine or losing availability never rewrites draw history.
+    func gachaInitialMachineID(availableMachineIDs: [String], alwaysOnly: Bool = false) -> String? {
+        let available = availableMachineIDs.filter { !$0.isEmpty && gachaIsMachineUnlocked(id: $0) }
+        if alwaysOnly {
+            return available.first { $0 == GachaStorageKeys.defaultGachaID }
+        }
+        if let savedID = gachaDefaults.string(forKey: GachaStorageKeys.lastCompletedMachineID),
+           available.contains(savedID) {
+            return savedID
+        }
+        return available.first { $0 == GachaStorageKeys.defaultGachaID } ?? available.first
+    }
+
+    /// Called only after the normal screen has generated all rewards and saved
+    /// consumption/grants. Event draws use a separate screen and never call this.
+    @discardableResult
+    func gachaRecordCompletedDraw(
+        machineID: String,
+        rewardCount: Int,
+        expectedRewardCount: Int,
+        availableMachineIDs: [String],
+        persistenceSucceeded: Bool
+    ) -> Bool {
+        guard persistenceSucceeded,
+              expectedRewardCount == 1 || expectedRewardCount == 10,
+              rewardCount == expectedRewardCount,
+              !machineID.isEmpty,
+              availableMachineIDs.contains(machineID),
+              gachaIsMachineUnlocked(id: machineID) else { return false }
+        if gachaDefaults.string(forKey: GachaStorageKeys.lastCompletedMachineID) != machineID {
+            gachaDefaults.set(machineID, forKey: GachaStorageKeys.lastCompletedMachineID)
+        }
+        return true
     }
 
     func gachaResetIfNeeded(now: Date = Date()) {
