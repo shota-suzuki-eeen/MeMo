@@ -175,6 +175,7 @@ Source:
 
 - `memo.happiness.point`
 - `memo.happiness.level`
+- `memo.happiness.reachedCheckpointLevel.v1`
 - `memo.happiness.lastDecayAt`
 - `memo.happiness.petting.touchCountToday`
 - `memo.happiness.petting.pointsToday`
@@ -183,6 +184,14 @@ Source:
 - `memo.happiness.sleepMode.endsAt`
 
 Runtime では context / pet ID suffix が付く key もあります。
+
+### Reached five-level checkpoints
+
+`memo.happiness.reachedCheckpointLevel.v1` は追加の下限保存キー。standard は suffix なし、報酬キャラクターは既存の `.reward_000`〜`.reward_007` context を使う。casual 派生は親の報酬キャラクター context を共有し、独立キーを作らない。
+
+キー未存在時は、読み込んだ現在レベルを5刻みで切り下げた値を保存する（Lv12→10、Lv5未到達→0）。過去の報酬受取・解放状態から最高レベルを推測しない。以後は到達済み下限を増加時に更新し、減衰で下げない。旧レベル／ポイントが保存済み下限より低い場合は下限の整数レベル・0ポイントへ修復し、報酬や補填を自動付与しない。既存レベル・ポイント・受取済みキーは読み書きを維持する。
+
+減衰は既存の100ポイント／レベル・5分／ポイント・最大Lv75を維持し、下限より上の単位数で経過時間補正を制限する。下限到達時は時刻基準を更新して古い減衰待ちを残さない。SwiftData schema、写真、App Group、Widget／Watch protocol は変更しない。
 
 ## Onboarding
 
